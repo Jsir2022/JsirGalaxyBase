@@ -8,6 +8,7 @@ import com.jsirgalaxybase.module.ModuleManager;
 import com.jsirgalaxybase.modules.capability.ChainMiningCapabilityModule;
 import com.jsirgalaxybase.modules.core.InstitutionCoreModule;
 import com.jsirgalaxybase.modules.diagnostics.ClientItemDumpModule;
+import com.jsirgalaxybase.modules.terminal.TerminalModule;
 
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
@@ -31,6 +32,7 @@ public class ModBootstrap {
 
         moduleManager.addModule(new InstitutionCoreModule());
         moduleManager.addModule(new ChainMiningCapabilityModule());
+        moduleManager.addModule(new TerminalModule());
         if (client) {
             moduleManager.addModule(new ClientItemDumpModule());
         }

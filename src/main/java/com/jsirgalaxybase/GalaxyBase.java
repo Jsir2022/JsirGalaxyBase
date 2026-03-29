@@ -6,6 +6,7 @@ import org.apache.logging.log4j.Logger;
 import com.jsirgalaxybase.bootstrap.CommonProxy;
 
 import cpw.mods.fml.common.Mod;
+import cpw.mods.fml.common.Mod.Instance;
 import cpw.mods.fml.common.SidedProxy;
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
@@ -17,6 +18,9 @@ public class GalaxyBase {
 
     public static final String MODID = "jsirgalaxybase";
     public static final Logger LOG = LogManager.getLogger(MODID);
+
+    @Instance(MODID)
+    public static GalaxyBase instance;
 
     @SidedProxy(
         clientSide = "com.jsirgalaxybase.bootstrap.ClientProxy",
