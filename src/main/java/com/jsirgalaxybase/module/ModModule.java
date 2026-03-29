@@ -1,4 +1,4 @@
-package com.galaxyfoundation.module;
+package com.jsirgalaxybase.module;
 
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;

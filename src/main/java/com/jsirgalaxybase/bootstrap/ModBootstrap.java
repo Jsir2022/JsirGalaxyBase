@@ -1,13 +1,13 @@
-package com.galaxyfoundation.bootstrap;
+package com.jsirgalaxybase.bootstrap;
 
-import com.galaxyfoundation.GalaxyFoundation;
-import com.galaxyfoundation.command.GalaxyFoundationCommand;
-import com.galaxyfoundation.config.ModConfiguration;
-import com.galaxyfoundation.module.ModuleContext;
-import com.galaxyfoundation.module.ModuleManager;
-import com.galaxyfoundation.modules.capability.ChainMiningCapabilityModule;
-import com.galaxyfoundation.modules.core.InstitutionCoreModule;
-import com.galaxyfoundation.modules.diagnostics.ClientItemDumpModule;
+import com.jsirgalaxybase.GalaxyBase;
+import com.jsirgalaxybase.command.GalaxyBaseCommand;
+import com.jsirgalaxybase.config.ModConfiguration;
+import com.jsirgalaxybase.module.ModuleContext;
+import com.jsirgalaxybase.module.ModuleManager;
+import com.jsirgalaxybase.modules.capability.ChainMiningCapabilityModule;
+import com.jsirgalaxybase.modules.core.InstitutionCoreModule;
+import com.jsirgalaxybase.modules.diagnostics.ClientItemDumpModule;
 
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
@@ -35,7 +35,7 @@ public class ModBootstrap {
             moduleManager.addModule(new ClientItemDumpModule());
         }
 
-        GalaxyFoundation.LOG.info("Bootstrapping modular runtime (clientSide={}, modules={})", client, moduleManager.size());
+        GalaxyBase.LOG.info("Bootstrapping modular runtime (clientSide={}, modules={})", client, moduleManager.size());
         moduleManager.preInit(moduleContext, event);
     }
 
@@ -49,7 +49,7 @@ public class ModBootstrap {
 
     public void serverStarting(FMLServerStartingEvent event) {
         moduleManager.serverStarting(moduleContext, event);
-        event.registerServerCommand(new GalaxyFoundationCommand(moduleManager));
-        GalaxyFoundation.LOG.info("Registered /galaxyfoundation architecture command");
+        event.registerServerCommand(new GalaxyBaseCommand(moduleManager));
+        GalaxyBase.LOG.info("Registered /jsirgalaxybase architecture command");
     }
 }

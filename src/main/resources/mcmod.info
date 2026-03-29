@@ -3,7 +3,7 @@
 	"modList": [{
 		"modid": "${modId}",
 		"name": "${modName}",
-		"description": "Galaxy Foundation is a GTNH 1.7.10 server institution mod workspace with room for future gameplay capability modules.",
+		"description": "JsirGalaxyBase is a GTNH 1.7.10 server institution mod workspace with room for future gameplay capability modules.",
 		"version": "${modVersion}",
 		"mcversion": "${minecraftVersion}",
 		"url": "",

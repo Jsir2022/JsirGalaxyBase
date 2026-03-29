@@ -1,10 +1,10 @@
-package com.galaxyfoundation.module;
+package com.jsirgalaxybase.module;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import com.galaxyfoundation.GalaxyFoundation;
+import com.jsirgalaxybase.GalaxyBase;
 
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
@@ -29,28 +29,28 @@ public class ModuleManager {
 
     public void preInit(ModuleContext context, FMLPreInitializationEvent event) {
         for (ModModule module : modules) {
-            GalaxyFoundation.LOG.info("[Module:{}] preInit", module.getId());
+            GalaxyBase.LOG.info("[Module:{}] preInit", module.getId());
             module.preInit(context, event);
         }
     }
 
     public void init(ModuleContext context, FMLInitializationEvent event) {
         for (ModModule module : modules) {
-            GalaxyFoundation.LOG.info("[Module:{}] init", module.getId());
+            GalaxyBase.LOG.info("[Module:{}] init", module.getId());
             module.init(context, event);
         }
     }
 
     public void postInit(ModuleContext context, FMLPostInitializationEvent event) {
         for (ModModule module : modules) {
-            GalaxyFoundation.LOG.info("[Module:{}] postInit", module.getId());
+            GalaxyBase.LOG.info("[Module:{}] postInit", module.getId());
             module.postInit(context, event);
         }
     }
 
     public void serverStarting(ModuleContext context, FMLServerStartingEvent event) {
         for (ModModule module : modules) {
-            GalaxyFoundation.LOG.info("[Module:{}] serverStarting", module.getId());
+            GalaxyBase.LOG.info("[Module:{}] serverStarting", module.getId());
             module.serverStarting(context, event);
         }
     }

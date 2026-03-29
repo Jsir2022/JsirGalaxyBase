@@ -1,11 +1,11 @@
-package com.galaxyfoundation.modules.diagnostics;
+package com.jsirgalaxybase.modules.diagnostics;
 
 import net.minecraftforge.common.MinecraftForge;
 
-import com.galaxyfoundation.GalaxyFoundation;
-import com.galaxyfoundation.module.ModModule;
-import com.galaxyfoundation.module.ModuleContext;
-import com.galaxyfoundation.modules.diagnostics.client.ClientItemDumpController;
+import com.jsirgalaxybase.GalaxyBase;
+import com.jsirgalaxybase.module.ModModule;
+import com.jsirgalaxybase.module.ModuleContext;
+import com.jsirgalaxybase.modules.diagnostics.client.ClientItemDumpController;
 
 import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
@@ -25,6 +25,6 @@ public class ClientItemDumpModule extends ModModule {
         final ClientItemDumpController controller = new ClientItemDumpController(context.getConfiguration());
         FMLCommonHandler.instance().bus().register(controller);
         MinecraftForge.EVENT_BUS.register(controller);
-        GalaxyFoundation.LOG.info("Registered client item dump diagnostics module");
+        GalaxyBase.LOG.info("Registered client item dump diagnostics module");
     }
 }

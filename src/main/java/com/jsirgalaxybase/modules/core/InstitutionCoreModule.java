@@ -1,8 +1,8 @@
-package com.galaxyfoundation.modules.core;
+package com.jsirgalaxybase.modules.core;
 
-import com.galaxyfoundation.GalaxyFoundation;
-import com.galaxyfoundation.module.ModModule;
-import com.galaxyfoundation.module.ModuleContext;
+import com.jsirgalaxybase.GalaxyBase;
+import com.jsirgalaxybase.module.ModModule;
+import com.jsirgalaxybase.module.ModuleContext;
 
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 
@@ -14,7 +14,7 @@ public class InstitutionCoreModule extends ModModule {
 
     @Override
     public void preInit(ModuleContext context, FMLPreInitializationEvent event) {
-        GalaxyFoundation.LOG.info(
+        GalaxyBase.LOG.info(
             "Institution core reserved for profession, economy, reputation, public orders, and transfer state.");
     }
 }

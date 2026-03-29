@@ -1,6 +1,6 @@
-package com.galaxyfoundation.module;
+package com.jsirgalaxybase.module;
 
-import com.galaxyfoundation.config.ModConfiguration;
+import com.jsirgalaxybase.config.ModConfiguration;
 
 public class ModuleContext {
 

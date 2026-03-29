@@ -1,4 +1,4 @@
-package com.galaxyfoundation.config;
+package com.jsirgalaxybase.config;
 
 import java.io.File;
 
@@ -28,7 +28,7 @@ public class ModConfiguration {
         final String itemDumpDirectory = configuration.getString(
             "itemDumpDirectory",
             Configuration.CATEGORY_GENERAL,
-            "galaxyfoundation/item_dumps",
+            "jsirgalaxybase/item_dumps",
             "Relative path under the Minecraft directory where item dump files are written.");
 
         if (configuration.hasChanged()) {

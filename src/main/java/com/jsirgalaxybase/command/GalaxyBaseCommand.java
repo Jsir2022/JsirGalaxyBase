@@ -1,4 +1,4 @@
-package com.galaxyfoundation.command;
+package com.jsirgalaxybase.command;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -8,36 +8,36 @@ import net.minecraft.command.CommandBase;
 import net.minecraft.command.ICommandSender;
 import net.minecraft.util.ChatComponentText;
 
-import com.galaxyfoundation.module.ModModule;
-import com.galaxyfoundation.module.ModuleManager;
+import com.jsirgalaxybase.module.ModModule;
+import com.jsirgalaxybase.module.ModuleManager;
 
-public class GalaxyFoundationCommand extends CommandBase {
+public class GalaxyBaseCommand extends CommandBase {
 
     private final ModuleManager moduleManager;
 
-    public GalaxyFoundationCommand(ModuleManager moduleManager) {
+    public GalaxyBaseCommand(ModuleManager moduleManager) {
         this.moduleManager = moduleManager;
     }
 
     @Override
     public String getCommandName() {
-        return "galaxyfoundation";
+        return "jsirgalaxybase";
     }
 
     @Override
     public String getCommandUsage(ICommandSender sender) {
-        return "/galaxyfoundation [modules|architecture]";
+        return "/jsirgalaxybase [modules|architecture]";
     }
 
     @Override
     public List<String> getCommandAliases() {
-        return Arrays.asList("gf", "gfoundation");
+        return Arrays.asList("gb", "jgbase");
     }
 
     @Override
     public void processCommand(ICommandSender sender, String[] args) {
         if (args.length == 0 || "modules".equalsIgnoreCase(args[0]) || "architecture".equalsIgnoreCase(args[0])) {
-            sender.addChatMessage(new ChatComponentText("Galaxy Foundation architecture: modular monolith, institution core + capability modules"));
+            sender.addChatMessage(new ChatComponentText("JsirGalaxyBase architecture: modular monolith, institution core + capability modules"));
             for (ModModule module : moduleManager.getModules()) {
                 sender.addChatMessage(new ChatComponentText("- [" + module.getCategory() + "] " + module.getDisplayName() + " (" + module.getId() + ")"));
             }

@@ -1,9 +1,9 @@
-package com.galaxyfoundation;
+package com.jsirgalaxybase;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import com.galaxyfoundation.bootstrap.CommonProxy;
+import com.jsirgalaxybase.bootstrap.CommonProxy;
 
 import cpw.mods.fml.common.Mod;
 import cpw.mods.fml.common.SidedProxy;
@@ -12,15 +12,15 @@ import cpw.mods.fml.common.event.FMLPostInitializationEvent;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 import cpw.mods.fml.common.event.FMLServerStartingEvent;
 
-@Mod(modid = GalaxyFoundation.MODID, version = Tags.VERSION, name = "Galaxy Foundation", acceptedMinecraftVersions = "[1.7.10]")
-public class GalaxyFoundation {
+@Mod(modid = GalaxyBase.MODID, version = Tags.VERSION, name = "JsirGalaxyBase", acceptedMinecraftVersions = "[1.7.10]")
+public class GalaxyBase {
 
-    public static final String MODID = "galaxyfoundation";
+    public static final String MODID = "jsirgalaxybase";
     public static final Logger LOG = LogManager.getLogger(MODID);
 
     @SidedProxy(
-        clientSide = "com.galaxyfoundation.bootstrap.ClientProxy",
-        serverSide = "com.galaxyfoundation.bootstrap.CommonProxy")
+        clientSide = "com.jsirgalaxybase.bootstrap.ClientProxy",
+        serverSide = "com.jsirgalaxybase.bootstrap.CommonProxy")
     public static CommonProxy proxy;
 
     @Mod.EventHandler

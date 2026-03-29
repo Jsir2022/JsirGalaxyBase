@@ -1,4 +1,4 @@
-package com.galaxyfoundation.bootstrap;
+package com.jsirgalaxybase.bootstrap;
 
 public class ClientProxy extends CommonProxy {
 

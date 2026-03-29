@@ -1,4 +1,4 @@
-package com.galaxyfoundation.modules.diagnostics.client;
+package com.jsirgalaxybase.modules.diagnostics.client;
 
 import java.io.File;
 import java.lang.reflect.InvocationHandler;
@@ -10,8 +10,8 @@ import net.minecraft.client.Minecraft;
 import net.minecraftforge.client.event.GuiOpenEvent;
 import net.minecraftforge.common.MinecraftForge;
 
-import com.galaxyfoundation.GalaxyFoundation;
-import com.galaxyfoundation.config.ModConfiguration;
+import com.jsirgalaxybase.GalaxyBase;
+import com.jsirgalaxybase.config.ModConfiguration;
 
 import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.Loader;
@@ -49,7 +49,7 @@ public class ClientItemDumpController {
         }
 
         if (tickCounter == MIN_TICKS_BEFORE_DUMP) {
-            GalaxyFoundation.LOG.info(
+            GalaxyBase.LOG.info(
                 "Item dump controller armed (neiLoaded={}, neiCallbackRegistered={})",
                 Loader.isModLoaded("NotEnoughItems"),
                 neiCallbackRegistered);
@@ -77,7 +77,7 @@ public class ClientItemDumpController {
 
         if (!neiReady && !timedOutWaitingForNei) {
             if (tickCounter % WAIT_LOG_INTERVAL == 0) {
-                GalaxyFoundation.LOG.info("Waiting for NEI item list before export (trigger={}, tick={})", trigger, tickCounter);
+                GalaxyBase.LOG.info("Waiting for NEI item list before export (trigger={}, tick={})", trigger, tickCounter);
             }
             return;
         }
@@ -106,7 +106,7 @@ public class ClientItemDumpController {
                     if ("itemsLoaded".equals(method.getName())) {
                         export("nei-callback", true);
                     } else if ("toString".equals(method.getName())) {
-                        return "GalaxyFoundationItemDumpControllerCallback";
+                        return "GalaxyBaseItemDumpControllerCallback";
                     }
 
                     return null;
@@ -118,10 +118,10 @@ public class ClientItemDumpController {
                 new Class<?>[] { callbackClass },
                 handler);
             ((List<Object>) callbacks).add(callback);
-            GalaxyFoundation.LOG.info("Registered NEI itemsLoaded callback");
+            GalaxyBase.LOG.info("Registered NEI itemsLoaded callback");
             return true;
         } catch (Exception e) {
-            GalaxyFoundation.LOG.warn("Failed to register NEI itemsLoaded callback", e);
+            GalaxyBase.LOG.warn("Failed to register NEI itemsLoaded callback", e);
             return false;
         }
     }
@@ -140,9 +140,9 @@ public class ClientItemDumpController {
                 configuration.getMinecraftDirectory(),
                 configuration.getItemDumpDirectory(),
                 includeNei);
-            GalaxyFoundation.LOG.info("Item dump finished via {}: {}", trigger, outputDirectory.getAbsolutePath());
+            GalaxyBase.LOG.info("Item dump finished via {}: {}", trigger, outputDirectory.getAbsolutePath());
         } catch (Exception e) {
-            GalaxyFoundation.LOG.error("Failed to export item dumps via " + trigger, e);
+            GalaxyBase.LOG.error("Failed to export item dumps via " + trigger, e);
         }
     }
 }

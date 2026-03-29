@@ -1,8 +1,8 @@
-package com.galaxyfoundation.modules.capability;
+package com.jsirgalaxybase.modules.capability;
 
-import com.galaxyfoundation.GalaxyFoundation;
-import com.galaxyfoundation.module.ModModule;
-import com.galaxyfoundation.module.ModuleContext;
+import com.jsirgalaxybase.GalaxyBase;
+import com.jsirgalaxybase.module.ModModule;
+import com.jsirgalaxybase.module.ModuleContext;
 
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 
@@ -14,7 +14,7 @@ public class ChainMiningCapabilityModule extends ModModule {
 
     @Override
     public void preInit(ModuleContext context, FMLPreInitializationEvent event) {
-        GalaxyFoundation.LOG.info(
+        GalaxyBase.LOG.info(
             "Chain mining is reserved as an isolated capability module and must stay server authoritative.");
     }
 }
