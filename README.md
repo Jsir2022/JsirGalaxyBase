@@ -1,4 +1,4 @@
-# CustomMod
+# GalaxyFoundation
 
 GTNH 1.7.10 自定义制度模组工作区。
 
@@ -7,7 +7,7 @@ GTNH 1.7.10 自定义制度模组工作区。
 
 ## 项目定位
 
-`CustomMod` 当前要解决的是下面几类问题：
+`GalaxyFoundation` 当前要解决的是下面几类问题：
 
 - 职业
 - 经济
@@ -24,7 +24,7 @@ GTNH 1.7.10 自定义制度模组工作区。
 当前判断很明确：
 
 - `CustomClient` 不是主要 Java 源码仓
-- 真正的开发主体是 `CustomMod`
+- 真正的开发主体是 `GalaxyFoundation`
 - 这个项目应优先保持为：
   - `一个 mod jar`
   - `一个制度核心`
@@ -66,18 +66,38 @@ GTNH 1.7.10 自定义制度模组工作区。
 
 当前代码统一采用下面这套结构：
 
-- `com.u24game.custommod.CustomMod`
+- `com.galaxyfoundation.GalaxyFoundation`
   - Forge Mod 唯一入口
-- `com.u24game.custommod.bootstrap`
+- `com.galaxyfoundation.bootstrap`
   - 生命周期接入、配置加载、模块装配、命令注册
-- `com.u24game.custommod.module`
+- `com.galaxyfoundation.module`
   - 模块抽象、模块上下文、模块管理器
-- `com.u24game.custommod.modules.core`
+- `com.galaxyfoundation.modules.core`
   - 制度核心模块
-- `com.u24game.custommod.modules.capability`
+- `com.galaxyfoundation.modules.capability`
   - 玩法能力模块
-- `com.u24game.custommod.modules.diagnostics`
+- `com.galaxyfoundation.modules.diagnostics`
   - 调试与开发观测模块
+
+## 命名约定
+
+当前项目的命名约定统一如下：
+
+- GitHub 仓库名：`GalaxyServerMod`
+- 本地工作目录名：`GalaxyServerMod`
+- 模组展示名：`Galaxy Foundation`
+- 模组 `modid`：`galaxyfoundation`
+- Java 根包：`com.galaxyfoundation`
+- Forge 主类：`com.galaxyfoundation.GalaxyFoundation`
+- 作者显示名：`Jsir2022`
+
+这几个名字不再混用：
+
+- 不再把本机用户目录名混进 Java 包名
+- 不再使用 `CustomMod` 作为项目正式名
+- 仓库名与模组名允许不同，但职责要清晰：
+  - 仓库名偏工程与版本管理
+  - 模组名偏玩家可见与运行时标识
 
 当前内置模块包括：
 

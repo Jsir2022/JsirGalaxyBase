@@ -1,6 +1,6 @@
-package com.u24game.custommod.module;
+package com.galaxyfoundation.module;
 
-import com.u24game.custommod.config.ModConfiguration;
+import com.galaxyfoundation.config.ModConfiguration;
 
 public class ModuleContext {
 

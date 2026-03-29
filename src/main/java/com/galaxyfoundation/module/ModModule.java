@@ -1,4 +1,4 @@
-package com.u24game.custommod.module;
+package com.galaxyfoundation.module;
 
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;

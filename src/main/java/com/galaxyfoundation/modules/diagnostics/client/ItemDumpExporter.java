@@ -1,4 +1,4 @@
-package com.u24game.custommod.modules.diagnostics.client;
+package com.galaxyfoundation.modules.diagnostics.client;
 
 import java.io.BufferedWriter;
 import java.io.File;
@@ -24,7 +24,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraftforge.oredict.OreDictionary;
 
 import com.google.gson.stream.JsonWriter;
-import com.u24game.custommod.CustomMod;
+import com.galaxyfoundation.GalaxyFoundation;
 
 import cpw.mods.fml.common.Loader;
 import cpw.mods.fml.common.ModContainer;
@@ -78,7 +78,7 @@ public final class ItemDumpExporter {
         }
 
         writeSummary(new File(sessionDirectory, "summary.json"), registryEntries.size(), neiCount, includeNei);
-        CustomMod.LOG.info(
+        GalaxyFoundation.LOG.info(
             "Item dump exported to {} (registry={}, nei={})",
             sessionDirectory.getAbsolutePath(),
             registryEntries.size(),
@@ -154,7 +154,7 @@ public final class ItemDumpExporter {
                 }
             }
         } catch (Exception e) {
-            CustomMod.LOG.warn("Failed to read NEI item list, falling back to empty export", e);
+            GalaxyFoundation.LOG.warn("Failed to read NEI item list, falling back to empty export", e);
         }
 
         final List<DumpEntry> entries = new ArrayList<DumpEntry>(uniqueEntries.values());

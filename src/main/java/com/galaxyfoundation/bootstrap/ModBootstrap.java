@@ -1,13 +1,13 @@
-package com.u24game.custommod.bootstrap;
+package com.galaxyfoundation.bootstrap;
 
-import com.u24game.custommod.CustomMod;
-import com.u24game.custommod.command.CustomModCommand;
-import com.u24game.custommod.config.ModConfiguration;
-import com.u24game.custommod.module.ModuleContext;
-import com.u24game.custommod.module.ModuleManager;
-import com.u24game.custommod.modules.capability.ChainMiningCapabilityModule;
-import com.u24game.custommod.modules.core.InstitutionCoreModule;
-import com.u24game.custommod.modules.diagnostics.ClientItemDumpModule;
+import com.galaxyfoundation.GalaxyFoundation;
+import com.galaxyfoundation.command.GalaxyFoundationCommand;
+import com.galaxyfoundation.config.ModConfiguration;
+import com.galaxyfoundation.module.ModuleContext;
+import com.galaxyfoundation.module.ModuleManager;
+import com.galaxyfoundation.modules.capability.ChainMiningCapabilityModule;
+import com.galaxyfoundation.modules.core.InstitutionCoreModule;
+import com.galaxyfoundation.modules.diagnostics.ClientItemDumpModule;
 
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
@@ -35,7 +35,7 @@ public class ModBootstrap {
             moduleManager.addModule(new ClientItemDumpModule());
         }
 
-        CustomMod.LOG.info("Bootstrapping modular runtime (clientSide={}, modules={})", client, moduleManager.size());
+        GalaxyFoundation.LOG.info("Bootstrapping modular runtime (clientSide={}, modules={})", client, moduleManager.size());
         moduleManager.preInit(moduleContext, event);
     }
 
@@ -49,7 +49,7 @@ public class ModBootstrap {
 
     public void serverStarting(FMLServerStartingEvent event) {
         moduleManager.serverStarting(moduleContext, event);
-        event.registerServerCommand(new CustomModCommand(moduleManager));
-        CustomMod.LOG.info("Registered /custommod architecture command");
+        event.registerServerCommand(new GalaxyFoundationCommand(moduleManager));
+        GalaxyFoundation.LOG.info("Registered /galaxyfoundation architecture command");
     }
 }

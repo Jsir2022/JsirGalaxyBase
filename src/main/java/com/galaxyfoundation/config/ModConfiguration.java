@@ -1,4 +1,4 @@
-package com.u24game.custommod.config;
+package com.galaxyfoundation.config;
 
 import java.io.File;
 
@@ -28,7 +28,7 @@ public class ModConfiguration {
         final String itemDumpDirectory = configuration.getString(
             "itemDumpDirectory",
             Configuration.CATEGORY_GENERAL,
-            "custommod/item_dumps",
+            "galaxyfoundation/item_dumps",
             "Relative path under the Minecraft directory where item dump files are written.");
 
         if (configuration.hasChanged()) {

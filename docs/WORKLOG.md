@@ -1,8 +1,8 @@
-# CustomMod Work Log
+# GalaxyFoundation Work Log
 
 日期：2026-03-29
 
-这份文件用于记录 `CustomMod` 的持续开发摘要。
+这份文件用于记录 `GalaxyFoundation` 的持续开发摘要。
 从本次开始，后续每次实际代码变更都应补一条简要 work log。
 
 ## 记录规则
@@ -24,7 +24,7 @@
 - `../../Docs/设定.md`
   - 制度目标、职业、市场、贡献度、跨服阶段路线
 - `../../Docs/技术边界文档.md`
-  - `CustomMod` 的责任边界与跨服同步边界
+  - `GalaxyFoundation` 的责任边界与跨服同步边界
 - `../../Docs/做法.md`
   - 群组服、中心数据库、同步方案与后端边界
 - `../../Docs/市场经济推进.md`
@@ -37,8 +37,8 @@
 ### 1. 项目定位
 
 - `CustomClient` 不是当前主要 Java 源码仓
-- 真正的开发主体是 `CustomMod`
-- `CustomMod` 目标不是普通业务后台，而是：
+- 真正的开发主体是 `GalaxyFoundation`
+- `GalaxyFoundation` 目标不是普通业务后台，而是：
   - `GTNH 服务器制度核心模组`
   - 并预留后续玩法能力扩展
 
@@ -101,7 +101,7 @@
 - 影响范围：仓库根目录
 - 原因：为后续 GitHub 上传、版本管理和持续开发记录做准备
 - 结果：
-  - 在 `CustomMod` 下初始化了本地 git 仓库
+  - 在 `GalaxyServerMod` 仓库下初始化了本地 git 仓库
   - 建立本 work log 作为统一开发记录入口
   - 补录初次对话形成的架构和制度上下文
   - 后续每次代码更改都应在此追加简要记录
@@ -125,3 +125,36 @@
   - `WORKLOG.md` 迁移到 `docs/WORKLOG.md`
   - 新增 `docs/README.md` 作为文档入口
   - 删除现有自动化编译与 release workflow 文件
+
+### 2026-03-29 - 将项目正式更名为 GalaxyFoundation
+
+- 主题：将项目名称从 `CustomMod` 统一更名为 `GalaxyFoundation`
+- 影响范围：Java 包名、主类名、命令类名、Gradle 模组元数据、配置路径、README 与 docs 文档
+- 原因：`CustomMod` 过于临时和泛化，无法准确承载当前制度核心加能力模块的长期定位；`GalaxyFoundation` 更适合作为正式项目名
+- 结果：
+  - 根包切换为项目正式包名
+  - 主类切换为 `GalaxyFoundation`
+  - 命令切换为 `/galaxyfoundation`
+  - 模组 `modid` 切换为 `galaxyfoundation`
+  - 文档标题与项目引用同步更新
+
+### 2026-03-29 - 排除本机环境名并建立正式命名约定
+
+- 主题：从代码与元数据中移除本机环境名痕迹，并建立正式命名约定
+- 影响范围：Java 根包、Gradle 元数据、mcmod 作者字段、README、工作目录命名说明
+- 原因：本机环境名不应进入模组正式命名空间；需要把工程名、模组名、包名和仓库名分开定义清楚
+- 结果：
+  - Java 根包统一为 `com.galaxyfoundation`
+  - Gradle `modGroup` 与生成的 `Tags` 类路径同步改为 `com.galaxyfoundation`
+  - `mcmod.info` 作者显示改为 `Jsir2022`
+  - README 新增命名约定章节，明确仓库名、目录名、模组名、`modid` 和包名的分工
+
+### 2026-03-29 - 工作目录与 GitHub 仓库名对齐
+
+- 主题：将本地工作目录从 `CustomMod` 改为 `GalaxyServerMod`
+- 影响范围：本地仓库目录路径
+- 原因：保持本地工作目录与 GitHub 仓库名一致，减少工程名、目录名和远端仓库名之间的混淆
+- 结果：
+  - 本地仓库目录已改为 `GalaxyServerMod`
+  - 当前仓库名、工作目录名和 GitHub 仓库名保持一致
+  - 模组运行时名称继续保持为 `Galaxy Foundation`

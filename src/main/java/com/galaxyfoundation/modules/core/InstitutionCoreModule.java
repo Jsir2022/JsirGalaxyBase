@@ -1,8 +1,8 @@
-package com.u24game.custommod.modules.core;
+package com.galaxyfoundation.modules.core;
 
-import com.u24game.custommod.CustomMod;
-import com.u24game.custommod.module.ModModule;
-import com.u24game.custommod.module.ModuleContext;
+import com.galaxyfoundation.GalaxyFoundation;
+import com.galaxyfoundation.module.ModModule;
+import com.galaxyfoundation.module.ModuleContext;
 
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 
@@ -14,7 +14,7 @@ public class InstitutionCoreModule extends ModModule {
 
     @Override
     public void preInit(ModuleContext context, FMLPreInitializationEvent event) {
-        CustomMod.LOG.info(
+        GalaxyFoundation.LOG.info(
             "Institution core reserved for profession, economy, reputation, public orders, and transfer state.");
     }
 }

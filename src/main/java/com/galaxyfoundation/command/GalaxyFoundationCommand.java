@@ -1,4 +1,4 @@
-package com.u24game.custommod.command;
+package com.galaxyfoundation.command;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -8,36 +8,36 @@ import net.minecraft.command.CommandBase;
 import net.minecraft.command.ICommandSender;
 import net.minecraft.util.ChatComponentText;
 
-import com.u24game.custommod.module.ModModule;
-import com.u24game.custommod.module.ModuleManager;
+import com.galaxyfoundation.module.ModModule;
+import com.galaxyfoundation.module.ModuleManager;
 
-public class CustomModCommand extends CommandBase {
+public class GalaxyFoundationCommand extends CommandBase {
 
     private final ModuleManager moduleManager;
 
-    public CustomModCommand(ModuleManager moduleManager) {
+    public GalaxyFoundationCommand(ModuleManager moduleManager) {
         this.moduleManager = moduleManager;
     }
 
     @Override
     public String getCommandName() {
-        return "custommod";
+        return "galaxyfoundation";
     }
 
     @Override
     public String getCommandUsage(ICommandSender sender) {
-        return "/custommod [modules|architecture]";
+        return "/galaxyfoundation [modules|architecture]";
     }
 
     @Override
     public List<String> getCommandAliases() {
-        return Arrays.asList("cmod");
+        return Arrays.asList("gf", "gfoundation");
     }
 
     @Override
     public void processCommand(ICommandSender sender, String[] args) {
         if (args.length == 0 || "modules".equalsIgnoreCase(args[0]) || "architecture".equalsIgnoreCase(args[0])) {
-            sender.addChatMessage(new ChatComponentText("CustomMod architecture: modular monolith, institution core + capability modules"));
+            sender.addChatMessage(new ChatComponentText("Galaxy Foundation architecture: modular monolith, institution core + capability modules"));
             for (ModModule module : moduleManager.getModules()) {
                 sender.addChatMessage(new ChatComponentText("- [" + module.getCategory() + "] " + module.getDisplayName() + " (" + module.getId() + ")"));
             }

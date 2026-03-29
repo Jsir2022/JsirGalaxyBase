@@ -1,6 +1,6 @@
-# CustomMod Docs
+# GalaxyFoundation Docs
 
-这里放的是 `CustomMod` 的基础说明和持续记录，方便玩家、协作者和后续维护者快速理解这个项目。
+这里放的是 `GalaxyFoundation` 的基础说明和持续记录，方便玩家、协作者和后续维护者快速理解这个项目。
 
 ## 当前最建议先看的内容
 
@@ -11,7 +11,7 @@
 
 ## 这个项目现在是什么
 
-`CustomMod` 当前是一个面向 GTNH 服务器的自定义制度模组。
+`GalaxyFoundation` 当前是一个面向 GTNH 服务器的自定义制度模组。
 
 它的核心目标包括：
 

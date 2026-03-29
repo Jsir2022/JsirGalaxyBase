@@ -1,11 +1,11 @@
-package com.u24game.custommod.modules.diagnostics;
+package com.galaxyfoundation.modules.diagnostics;
 
 import net.minecraftforge.common.MinecraftForge;
 
-import com.u24game.custommod.CustomMod;
-import com.u24game.custommod.module.ModModule;
-import com.u24game.custommod.module.ModuleContext;
-import com.u24game.custommod.modules.diagnostics.client.ClientItemDumpController;
+import com.galaxyfoundation.GalaxyFoundation;
+import com.galaxyfoundation.module.ModModule;
+import com.galaxyfoundation.module.ModuleContext;
+import com.galaxyfoundation.modules.diagnostics.client.ClientItemDumpController;
 
 import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
@@ -25,6 +25,6 @@ public class ClientItemDumpModule extends ModModule {
         final ClientItemDumpController controller = new ClientItemDumpController(context.getConfiguration());
         FMLCommonHandler.instance().bus().register(controller);
         MinecraftForge.EVENT_BUS.register(controller);
-        CustomMod.LOG.info("Registered client item dump diagnostics module");
+        GalaxyFoundation.LOG.info("Registered client item dump diagnostics module");
     }
 }

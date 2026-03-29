@@ -1,4 +1,4 @@
-package com.u24game.custommod.bootstrap;
+package com.galaxyfoundation.bootstrap;
 
 public class ClientProxy extends CommonProxy {
 
