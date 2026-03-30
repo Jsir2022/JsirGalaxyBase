@@ -27,6 +27,15 @@ public class ModuleManager {
         return Collections.unmodifiableList(modules);
     }
 
+    public <T extends ModModule> T findModule(Class<T> moduleClass) {
+        for (ModModule module : modules) {
+            if (moduleClass.isInstance(module)) {
+                return moduleClass.cast(module);
+            }
+        }
+        return null;
+    }
+
     public void preInit(ModuleContext context, FMLPreInitializationEvent event) {
         for (ModModule module : modules) {
             GalaxyBase.LOG.info("[Module:{}] preInit", module.getId());

@@ -198,6 +198,17 @@
 ### 2026-03-29 - 终端改为宽屏控制台风格
 
 - 主题：参考 AE2 终端比例，重做终端观感与窗口尺寸
+
+### 2026-03-30 - 整理 Ubuntu 24 向日葵安装复用资料
+
+- 主题：补充 Ubuntu 24 下向日葵 15.2.0.63064 的安装记录、复用脚本与依赖包整理目录
+- 影响范围：`../../Docs/sunlogin-ubuntu24/`、`docs/WORKLOG.md`
+- 原因：本次实际排查出 Ubuntu 24 官方仓库缺失旧版 `libgconf-2-4` 依赖，且 Wayland 会导致向日葵被控黑屏，需要把安装包、步骤和 Xorg 配置整理成可复用资料，便于后续其他机器快速落地
+- 结果：
+  - 新增 `Docs/sunlogin-ubuntu24/README.md` 记录完整安装与黑屏修复流程
+  - 新增 `Docs/sunlogin-ubuntu24/install_sunlogin_ubuntu24.sh` 作为复用脚本
+  - 将新版安装包与所需旧依赖 `.deb` 统一整理到 `Docs/sunlogin-ubuntu24/packages/`
+  - 记录 GDM 关闭 Wayland、改走 Xorg 的关键配置点
 - 影响范围：`src/main/java/com/jsirgalaxybase/terminal/ui/TerminalHomeGuiFactory.java`、`docs/WORKLOG.md`
 - 原因：上一版窗口过小、信息层级过弱、默认按钮味太重，不适合作为长期制度终端壳
 - 结果：
@@ -252,36 +263,6 @@
   - 进一步收窄左侧导航为固定窄比例，并移除矩阵左侧辅助说明列，把联机概览缩成纯图例卡，解决中部两块的剩余挤压
   - 把首页高度分配改为固定头部、弹性中段、固定底部，并缩减矩阵行数和右侧概览内容，保证内容不再越出终端下边
 
-### 2026-03-29 - 终端左右栏切换为纵向滚动视口
-
-- 主题：把终端左右两侧从硬性挤压改为可滚动浏览的固定视口
-- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/ui/TerminalHomeGuiFactory.java`、`docs/WORKLOG.md`
-- 原因：当前布局顺序已经可用，但内容增多后仍会触发下边越界与 `ModularUI` 子树重算失败，继续压缩高度只会让可读性变差
-- 结果：
-  - 左侧导航保持窄栏比例不变，但内部内容超出时改为上下滚动
-  - 右侧标题带与页脚保持固定，中间页面主体改为纵向滚动区域
-  - 首页和详情页内容容器改回按自然高度排布，为后续继续扩充模块、图标和图片预留空间
-
-### 2026-03-29 - 终端滚动实现改为列表控件方案
-
-- 主题：参考 VendingMachine 的页面结构，把终端滚动区从通用滚动壳改为 `ListWidget`
-- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/ui/TerminalHomeGuiFactory.java`、`docs/WORKLOG.md`
-- 原因：裸 `ScrollWidget` 版本虽然消除了灰块，但未形成可用的鼠标滚轮滚动行为；同仓库参考实现更常用 `ListWidget` 承接固定视口内的纵向内容
-- 结果：
-  - 左侧导航与右侧页面主体的滚动容器统一改为 `ListWidget`
-  - 保留现有窄侧栏和固定标题/页脚布局，不回退主题和页面结构
-  - 编译通过，开发客户端启动正常，后续只需要继续验证实际滚轮滚动手感
-
-### 2026-03-29 - 右侧内容栏改为整列滚动
-
-- 主题：把右侧标题带并入滚动内容，同时收紧滚动视口到实际 90% 终端窗口内
-- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/ui/TerminalHomeGuiFactory.java`、`docs/WORKLOG.md`
-- 原因：当前右侧虽然已经能滚动，但标题固定在外层，且滚动区域底部仍与固定页脚竞争高度，导致可滚动内容下沿超出终端框体
-- 结果：
-  - 右侧标题、正文与页脚统一纳入单一滚动列
-  - 右侧滚动视口只占内容栏实际可见高度，不再从底部顶出 90% 窗口框
-  - 编译通过，开发客户端启动正常，可继续在游戏内验证实际滚动边界
-
 ### 2026-03-29 - 修正 WorldEdit 服务端分发形态
 
 - 主题：修正 GTNH 服务端侧的 WorldEdit 分发，补齐 CUIFe，并保留 dist 包替代旧 core 的方案
@@ -311,3 +292,174 @@
   - 计划用私货 `worldedit-forge-mc1.7.10-6.1.1-dist.jar` 替换旧 `worldedit-core + worldedit-forge` 组合
   - GTNHServerConfig 补齐 `config/worldedit/worldedit.properties` 镜像
   - GTNHServerConfig 与 S1/S2/Lobby 的 `serverutilities/server/ranks.txt` 全部开启跨维 `home/warp`
+
+### 2026-03-30 - 明确群组服一期后端与同步边界
+
+- 主题：把一期后端架构、同步范围和免费传送规则正式写入文档
+- 影响范围：`README.md`、`../Docs/群组服.md`、`../Docs/技术边界文档.md`、`docs/WORKLOG.md`
+- 原因：当前已明确一期不接 `Redis`，并且需要先把银行系统、主背包同步和免费跨服传送的边界定死，避免后续设计反复摇摆
+- 结果：
+  - 明确一期唯一中心化存储为 `PostgreSQL`
+  - 明确一期采用模组服务端直连 `PostgreSQL`，不单独建设中心后端服务
+  - 明确一期共享范围包括制度数据、主物品栏、护甲、经验、血量、饥饿
+  - 明确“共享背包”当前等同于玩家按 `E` 打开的主背包数据
+  - 明确跨服传送与 `home` 当前为免费规则
+  - 明确一期实施顺序为：先银行系统，再落库与同步，再传送
+
+### 2026-03-30 - 新增银行系统一期需求文档
+
+- 主题：把银行系统一期能力、边界和非目标整理成正式需求文档
+- 影响范围：`docs/banking-system-requirements.md`、`docs/README.md`、`README.md`、`docs/WORKLOG.md`
+- 原因：当前已经明确银行系统是一切制度与跨服能力的前置底座，需要先把需求边界固定，再进入具体表结构设计
+- 结果：
+  - 新增银行系统一期需求文档，明确初始玩家余额为 `0`
+  - 明确玩家账户、税池、兑换所储备、后续公会资金都必须作为独立账户存在，不能退化为简单变量
+  - 明确一期只做固定规则兑换结算，不做单独硬币交易市场与汇率系统
+  - 明确一期不做任何扩展金融能力，如利息、贷款、定存等
+  - 将银行系统需求文档加入仓库文档入口
+
+### 2026-03-30 - 新增银行系统数据表与事务边界设计
+
+- 主题：基于银行需求文档，落一期数据库表设计与事务边界草案
+- 影响范围：`docs/banking-schema-design.md`、`docs/README.md`、`README.md`、`docs/WORKLOG.md`
+- 原因：银行系统需求边界已经固定，需要尽快把账户表、交易表、账本分录表和关键事务流程正式定稿，避免后续编码时重新发明模型
+- 结果：
+  - 新增银行系统数据表与事务边界设计文档
+  - 明确一期核心表为 `bank_account`、`bank_transaction`、`ledger_entry` 与 `coin_exchange_record`
+  - 明确所有资金变动必须在同一事务中完成锁定、校验、分录和余额更新
+  - 明确幂等键、行级锁、固定加锁顺序和禁止修改历史账本的约束
+  - 将数据表设计文档加入仓库文档入口
+
+### 2026-03-30 - 新增银行 Java 领域模型与仓储接口草案
+
+- 主题：把银行需求与表设计翻译成 Java 侧代码骨架
+- 影响范围：`src/main/java/com/jsirgalaxybase/modules/core/banking/`、`docs/banking-java-domain-draft.md`、`docs/README.md`、`README.md`、`docs/WORKLOG.md`
+- 原因：仅有表设计还不够，必须尽快把领域模型、仓储接口和事务边界接口固定下来，避免后续业务实现直接散落 SQL 和字符串常量
+- 结果：
+  - 新增银行领域对象、关键枚举和仓储接口草案
+  - 新增 `BankingTransactionRunner` 事务边界接口，用于表达银行写操作必须运行在同一事务中
+  - 新增 Java 侧设计说明文档，建立文档设计与代码骨架之间的映射关系
+  - 将 Java 侧设计文档加入仓库文档入口
+
+### 2026-03-30 - 新增银行 PostgreSQL DDL 草案
+
+- 主题：把一期银行表设计正式落成 PostgreSQL SQL 文件
+- 影响范围：`docs/banking-postgresql-ddl.sql`、`docs/banking-schema-design.md`、`docs/README.md`、`README.md`、`docs/WORKLOG.md`
+- 原因：仅有 Markdown 表设计还不够，后续开始写 JDBC 仓储或迁移脚本前，需要一份可以直接对照执行和继续演进的 DDL 草案
+- 结果：
+  - 新增一期银行核心表的 PostgreSQL DDL 草案文件
+  - 固定 `bank_account`、`bank_transaction`、`ledger_entry`、`coin_exchange_record` 与可选 `bank_daily_snapshot` 的字段、约束和索引
+  - 明确账户 `updated_at` 触发器策略以及金额非负、幂等键唯一、账本顺序唯一等数据库侧约束
+  - 将 SQL 草案加入设计文档与仓库文档入口
+
+### 2026-03-30 - 开始落银行应用服务实现
+
+- 主题：把银行一期业务动作从纯文档和接口草图推进到 application 层代码
+- 影响范围：`src/main/java/com/jsirgalaxybase/modules/core/banking/application/`、`src/main/java/com/jsirgalaxybase/modules/core/banking/domain/CoinExchangeRecord.java`、`src/main/java/com/jsirgalaxybase/modules/core/banking/repository/LedgerEntryRepository.java`、`docs/banking-java-domain-draft.md`、`docs/WORKLOG.md`
+- 原因：DDL 和领域模型已经齐备，下一步必须先把一期真正的业务动作编排固定下来，后续 JDBC 仓储才能按稳定签名实现
+- 结果：
+  - 新增 `BankingApplicationService`，统一承接开户、查询、玩家转账、内部划转和硬币兑换结算
+  - 新增对应命令对象与 `BankPostingResult`，收束一期业务入参与出参
+  - 补上基于 `request_id` 的幂等回放能力所需仓储查询签名
+  - 将 `CoinExchangeRecord` 字段补齐到与 PostgreSQL DDL 更一致的状态
+
+### 2026-03-30 - 补齐银行 JDBC 基础设施层
+
+- 主题：把银行 application 层继续落到可对接 PostgreSQL 的 JDBC 边界
+- 影响范围：`src/main/java/com/jsirgalaxybase/modules/core/banking/infrastructure/jdbc/`、`docs/banking-java-domain-draft.md`、`docs/WORKLOG.md`
+- 原因：只有 application service 还不够，必须同步提供事务执行器与仓储实现骨架，后续才能真正接数据库和跑集成验证
+- 结果：
+  - 新增 JDBC 连接管理器与事务执行器，支持线程内事务连接复用
+  - 新增账户、交易、账本分录、兑换记录的 JDBC 仓储实现
+  - 将 `SELECT ... FOR UPDATE`、幂等查询、批量追加分录和账户余额更新明确落到代码层
+  - 编译验证通过，当前只差 PostgreSQL 连接配置与模块装配
+
+### 2026-03-30 - 接入银行配置项与模块初始化挂载点
+
+- 主题：把银行 JDBC 基础设施从“仅可编译类库”推进到模块生命周期中的可装配状态
+- 影响范围：`src/main/java/com/jsirgalaxybase/config/ModConfiguration.java`、`src/main/java/com/jsirgalaxybase/modules/core/InstitutionCoreModule.java`、`src/main/java/com/jsirgalaxybase/modules/core/banking/infrastructure/`、`docs/banking-java-domain-draft.md`、`docs/WORKLOG.md`
+- 原因：如果不把配置项和初始化入口接上，后续命令或 GUI 层仍然拿不到银行服务实例
+- 结果：
+  - 新增 PostgreSQL 银行连接配置项与 `source_server_id` 配置项
+  - 新增 `BankingInfrastructure` 聚合对象与基于 `DriverManager` 的 `DataSource` 工厂
+  - `InstitutionCoreModule` 已可在服务端按配置准备银行基础设施实例
+  - 编译验证通过，当前剩余工作聚焦于 PostgreSQL 驱动依赖、真实连通验证和上层入口接线
+
+### 2026-03-30 - 补充 PostgreSQL 本地安装与迁移说明
+
+- 主题：补上 Ubuntu 宿主机 PostgreSQL 安装、初始化与换机迁移指导
+- 影响范围：`docs/postgresql-local-setup-and-migration.md`、`docs/README.md`、`README.md`、`docs/WORKLOG.md`
+- 原因：当前机器没有安装 PostgreSQL，且当前会话没有无密码 sudo，无法直接代装到宿主机；需要把安装与迁移流程沉淀为可执行说明
+- 结果：
+  - 新增 Ubuntu 24.04 下 PostgreSQL 安装与建库说明
+  - 补充基于当前 DDL 的初始化命令
+  - 明确换机迁移推荐走逻辑备份而不是直接拷贝数据目录
+  - 补充最小备份命令，降低后续换主机时的数据丢失风险
+
+### 2026-03-30 - 完成本机 PostgreSQL 安装与模组真实连通验证
+
+- 主题：把 PostgreSQL 从文档方案推进到宿主机实际运行与模组服务端启动验证
+- 影响范围：`dependencies.gradle`、`repositories.gradle`、`src/main/java/com/jsirgalaxybase/modules/core/banking/infrastructure/jdbc/JdbcBankingInfrastructureFactory.java`、`src/main/java/com/jsirgalaxybase/modules/core/InstitutionCoreModule.java`、`docs/banking-java-domain-draft.md`、`docs/postgresql-local-setup-and-migration.md`、`docs/WORKLOG.md`
+- 原因：银行 JDBC 实现已经存在，但如果没有真实数据库、真实驱动和真实服务端启动验证，就还不能说明这条链路可用
+- 结果：
+  - 在 Ubuntu 24.04 宿主机安装并启动 PostgreSQL 16
+  - 创建本地开发账号 `jsirgalaxybase_app` 与数据库 `jsirgalaxybase`
+  - 将一期银行 DDL 实际执行到本地数据库，确认核心表全部存在
+  - 新增 PostgreSQL JDBC 驱动依赖与 Maven Central 仓库声明
+  - 启动 `runServer` 完成模组服务端真实联调，日志明确显示银行 PostgreSQL 基础设施已准备并验证成功
+
+### 2026-03-30 - 收紧本地数据库监听并接入银行管理员测试命令
+
+- 主题：把本地 PostgreSQL 显式限制在回环地址，并提供游戏内银行管理测试入口
+- 影响范围：`src/main/java/com/jsirgalaxybase/command/GalaxyBaseCommand.java`、`src/main/java/com/jsirgalaxybase/module/ModuleManager.java`、`src/main/java/com/jsirgalaxybase/modules/core/InstitutionCoreModule.java`、`docs/postgresql-local-setup-and-migration.md`、`docs/WORKLOG.md`
+- 原因：当前数据库不应暴露外网监听，同时银行系统已经具备基础设施，需要第一个实际管理员入口来驱动开户、查余额、发钱和转账测试
+- 结果：
+  - PostgreSQL 已显式配置为只监听 `127.0.0.1:5432`
+  - 本地开发业务账号密码已切换为用户指定的新密码
+  - 在 `/jsirgalaxybase bank` 下新增 `open`、`balance`、`grant`、`transfer` 四个管理员测试子命令
+  - 通过实际 `runServer` 自动控制台执行验证了 bank 命令帮助输出与命令注册链路
+
+### 2026-03-30 - 扩展银行管理员命令到系统账户与最近流水查询
+
+- 主题：把第一版银行测试命令从单纯改余额扩展到状态查询与账本查看
+- 影响范围：`src/main/java/com/jsirgalaxybase/command/GalaxyBaseCommand.java`、`docs/banking-java-domain-draft.md`、`docs/WORKLOG.md`
+- 原因：仅有开户、查余额、发钱、转账还不够，管理员需要直接查看最近流水和系统测试账户状态，才能形成最小可用的联调闭环
+- 结果：
+  - 在 `/jsirgalaxybase bank` 下新增 `ledger`、`system` 和 `system ledger` 命令
+  - recent ledger 输出已包含交易号、方向、金额、变动前后余额和时间戳
+  - system summary 会显示测试系统账户的编号、类型、状态和当前余额
+  - 通过实际 `runServer` 自动执行验证了 system summary 与 system ledger 命令回显
+
+### 2026-03-30 - 扩展银行管理员命令到公共账户、交易详情与系统账户初始化
+
+- 主题：把银行管理命令从单账户测试扩展到公共账户与交易审计层面
+- 影响范围：`src/main/java/com/jsirgalaxybase/command/GalaxyBaseCommand.java`、`src/main/java/com/jsirgalaxybase/modules/core/banking/repository/BankTransactionRepository.java`、`src/main/java/com/jsirgalaxybase/modules/core/banking/infrastructure/jdbc/JdbcBankTransactionRepository.java`、`docs/banking-java-domain-draft.md`、`docs/WORKLOG.md`
+- 原因：当前需要直接初始化系统账户集、查看公共账户状态，并能按交易号定位单笔交易详情，方便后续联调和审计
+- 结果：
+  - 新增 `/jsirgalaxybase bank public` 与 `/jsirgalaxybase bank public ledger` 命令用于查看受管公共/系统账户
+  - 新增 `/jsirgalaxybase bank tx <transactionId>` 命令用于查询单笔交易与关联账本分录
+  - 新增 `/jsirgalaxybase bank init system` 命令，用于初始化测试系统资金、系统运营账户、税池和兑换储备账户
+  - 通过实际 `runServer` 自动执行验证了系统账户初始化、公共账户汇总与交易不存在时的详情查询回显
+
+### 2026-03-30 - 收敛受管系统账户并补齐备份恢复脚本
+
+- 主题：把系统账户模型收敛为 `ops + exchange`，并把 PostgreSQL 逻辑备份/恢复脚本正式落地
+- 影响范围：`src/main/java/com/jsirgalaxybase/modules/core/banking/infrastructure/ManagedBankAccounts.java`、`src/main/java/com/jsirgalaxybase/modules/core/InstitutionCoreModule.java`、`src/main/java/com/jsirgalaxybase/command/GalaxyBaseCommand.java`、`scripts/db-backup.sh`、`scripts/db-restore.sh`、`docs/postgresql-backup-and-restore.md`、银行相关文档
+- 原因：当前不再需要测试资金池与独立税池，系统运营收支应统一落在 `ops`；同时换机和演练必须从“会手敲命令”升级到“有固定脚本可执行”
+- 结果：
+  - 受管系统账户收敛为 `ops` 系统运营账户与 `exchange` 兑换储备账户
+  - 玩家账户仍保持按需懒初始化，不做自动开户
+  - `InstitutionCoreModule` 在服务端启动时自动确保系统账户存在
+  - `/jsirgalaxybase bank system` 与 `grant` 改为围绕 `ops` 账户工作，公共账户查询只展示 `ops` 与 `exchange`
+  - 新增 PostgreSQL 逻辑备份与恢复脚本，并补充使用方式、演练步骤与风险控制说明
+
+### 2026-03-30 - 增补 systemd 定时备份方案并明确快照技术取舍
+
+- 主题：把 PostgreSQL 备份方案从“手动脚本可用”推进到“systemd 每日自动备份可落地”
+- 影响范围：`ops/systemd/`、`scripts/install-systemd-backup.sh`、`docs/postgresql-backup-and-restore.md`、`docs/README.md`
+- 原因：当前实际需求已经明确为“单数据库每日一份、保留七份”，需要正式选主方案，并说明为什么不把文件系统快照当当前主链路
+- 结果：
+  - 新增 system 级 `systemd service + timer` 模板与环境文件样例
+  - 新增安装脚本，用于把 unit 安装到 `/etc/systemd/system/` 并启用 timer
+  - 明确当前主方案是 `pg_dump -Fc + systemd timer + RETAIN_COUNT=7`
+  - 明确文件系统快照不是当前主方案，后续如需更细恢复点应升级到 `pg_basebackup + WAL archive`

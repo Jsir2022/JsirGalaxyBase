@@ -1,0 +1,16 @@
+[Unit]
+Description=JsirGalaxyBase PostgreSQL logical backup
+Wants=network-online.target postgresql.service
+After=network-online.target postgresql.service
+ConditionPathExists=@REPO_ROOT@/scripts/db-backup.sh
+
+[Service]
+Type=oneshot
+User=@BACKUP_RUN_AS_USER@
+Group=@BACKUP_RUN_AS_USER@
+EnvironmentFile=@ENV_FILE@
+WorkingDirectory=@REPO_ROOT@
+ExecStart=@REPO_ROOT@/scripts/db-backup.sh
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort

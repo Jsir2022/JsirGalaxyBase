@@ -61,6 +61,21 @@ GTNH 1.7.10 自定义制度模组工作区。
 - 跨服阶段逐步接入中心化存储
 - 领域规则不直接依赖某个具体存储实现
 
+### 群组服存储当前决策
+
+- 群组服一期统一使用 `PostgreSQL`
+- 当前不引入 `Redis`
+- `PostgreSQL` 既负责制度数据持久化，也负责跨服角色主状态同步
+- 一期由模组服务端直接连接 `PostgreSQL`
+- 但代码内部必须保留存储抽象层，避免未来切中心后端服务时重写领域规则
+
+当前一期优先级明确为：
+
+1. 完整银行系统
+2. 制度数据持久化
+3. 玩家主状态跨服同步
+4. 免费跨服传送与 `home`
+
 ## 当前代码结构
 
 当前代码统一采用下面这套结构：
@@ -145,6 +160,30 @@ GTNH 1.7.10 自定义制度模组工作区。
 4. 通过模块生命周期接入事件、命令和网络
 5. 最后补 GUI、配置和持久化
 
+## 群组服一期范围
+
+当前群组服一期默认包含：
+
+- 完整银行系统
+- 制度数据中心化存储
+- 玩家主物品栏同步
+- 护甲栏同步
+- 经验同步
+- 血量同步
+- 饥饿同步
+- 免费跨服传送
+- 免费 `home`
+
+这里的“共享背包”当前定义为：
+
+- 玩家自己按 `E` 打开的主背包数据
+
+当前不额外承诺：
+
+- 末影箱同步
+- 特殊额外槽位同步
+- 任意第三方模组私有玩家存档同步
+
 ## 文档目录
 
 玩家和协作者可以优先看下面这些文档：
@@ -155,6 +194,16 @@ GTNH 1.7.10 自定义制度模组工作区。
   - 开发工作记录
 - [docs/terminal-plan.md](docs/terminal-plan.md)
   - 终端入口、服务端打开链与后续终端壳的实施方案
+- [docs/banking-system-requirements.md](docs/banking-system-requirements.md)
+  - 银行系统一期需求、边界与非目标
+- [docs/banking-schema-design.md](docs/banking-schema-design.md)
+  - 银行系统一期数据表、约束与事务边界设计
+- [docs/banking-postgresql-ddl.sql](docs/banking-postgresql-ddl.sql)
+  - 银行系统一期 PostgreSQL DDL 草案
+- [docs/banking-java-domain-draft.md](docs/banking-java-domain-draft.md)
+  - 银行系统 Java 领域模型与仓储接口草案
+- [docs/postgresql-local-setup-and-migration.md](docs/postgresql-local-setup-and-migration.md)
+  - Ubuntu 本地 PostgreSQL 安装、初始化与迁移说明
 
 当前开发默认还会参考工作区中的制度文档：
 

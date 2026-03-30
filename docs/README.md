@@ -10,6 +10,18 @@
   - 开发工作记录
 - `terminal-plan.md`
   - 终端入口与终端壳的实施方案
+- `banking-system-requirements.md`
+  - 银行系统一期需求与边界
+- `banking-schema-design.md`
+  - 银行系统一期数据表与事务边界设计
+- `banking-postgresql-ddl.sql`
+  - 银行系统一期 PostgreSQL DDL 草案
+- `banking-java-domain-draft.md`
+  - 银行系统 Java 领域模型与仓储接口草案
+- `postgresql-local-setup-and-migration.md`
+  - Ubuntu 本地 PostgreSQL 安装、初始化与迁移说明
+- `postgresql-backup-and-restore.md`
+  - PostgreSQL 逻辑备份、systemd 定时备份与恢复演练说明
 
 ## 这个项目现在是什么
 

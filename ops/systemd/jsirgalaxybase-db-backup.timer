@@ -1,0 +1,11 @@
+[Unit]
+Description=Run JsirGalaxyBase PostgreSQL logical backup daily
+
+[Timer]
+OnCalendar=*-*-* 04:15:00
+RandomizedDelaySec=30m
+Persistent=true
+Unit=jsirgalaxybase-db-backup.service
+
+[Install]
+WantedBy=timers.target
