@@ -27,7 +27,7 @@ public class JdbcLedgerEntryRepository extends AbstractJdbcRepository implements
             @Override
             public Void doInConnection(java.sql.Connection connection) throws SQLException {
                 PreparedStatement statement = connection.prepareStatement(
-                    "INSERT INTO ledger_entry (transaction_id, account_id, entry_side, amount, balance_before, balance_after, currency_code, sequence_in_tx, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                    "INSERT INTO ledger_entry (transaction_id, account_id, entry_side, amount, balance_before, balance_after, frozen_balance_before, frozen_balance_after, currency_code, sequence_in_tx, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
                 try {
                     for (LedgerEntry entry : entries) {
                         statement.setLong(1, entry.getTransactionId());
@@ -36,9 +36,11 @@ public class JdbcLedgerEntryRepository extends AbstractJdbcRepository implements
                         statement.setLong(4, entry.getAmount());
                         statement.setLong(5, entry.getBalanceBefore());
                         statement.setLong(6, entry.getBalanceAfter());
-                        statement.setString(7, entry.getCurrencyCode());
-                        statement.setShort(8, entry.getSequenceInTransaction());
-                        statement.setTimestamp(9, java.sql.Timestamp.from(entry.getCreatedAt()));
+                        statement.setLong(7, entry.getFrozenBalanceBefore());
+                        statement.setLong(8, entry.getFrozenBalanceAfter());
+                        statement.setString(9, entry.getCurrencyCode());
+                        statement.setShort(10, entry.getSequenceInTransaction());
+                        statement.setTimestamp(11, java.sql.Timestamp.from(entry.getCreatedAt()));
                         statement.addBatch();
                     }
                     statement.executeBatch();
@@ -103,6 +105,7 @@ public class JdbcLedgerEntryRepository extends AbstractJdbcRepository implements
             entries.add(new LedgerEntry(resultSet.getLong("entry_id"), resultSet.getLong("transaction_id"),
                 resultSet.getLong("account_id"), LedgerEntrySide.valueOf(resultSet.getString("entry_side")),
                 resultSet.getLong("amount"), resultSet.getLong("balance_before"), resultSet.getLong("balance_after"),
+                resultSet.getLong("frozen_balance_before"), resultSet.getLong("frozen_balance_after"),
                 resultSet.getString("currency_code"), resultSet.getShort("sequence_in_tx"),
                 readInstant(resultSet, "created_at")));
         }

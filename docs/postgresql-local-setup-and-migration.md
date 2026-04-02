@@ -207,3 +207,42 @@ pg_dump -Fc -d "postgresql://jsirgalaxybase_app:你的密码@127.0.0.1:5432/jsir
 以及更完整的说明文档：
 
 - [postgresql-backup-and-restore.md](postgresql-backup-and-restore.md)
+
+## 常见联调故障
+
+### 终端银行页提示“当前世界未启用 PostgreSQL 银行基础设施”
+
+这通常不是 GUI 自己坏了，而是独立服务端没有把银行基础设施真正初始化起来。
+
+本地 `runServer` 联调至少要满足：
+
+- `run/server/config/jsirgalaxybase-server.cfg` 中 `bankingPostgresEnabled=true`
+- `bankingJdbcUrl` 指向真实本机库，例如 `jdbc:postgresql://127.0.0.1:5432/jsirgalaxybase`
+- `bankingJdbcUsername` 与 `bankingJdbcPassword` 填入真实业务账号
+- 表结构已经用 [banking-postgresql-ddl.sql](banking-postgresql-ddl.sql) 初始化完成
+
+如果这些条件不满足，终端开户/转账会失败，银行页也会显示基础设施不可用。
+
+### 打开终端后立刻 Disconnected from server
+
+这是一次 Forge 1.7.10 自定义网络包约束踩坑：自定义通道名最大只能是 20 个字符。
+
+本项目曾经把终端 `SimpleNetworkWrapper` 通道命名为 `jsirgalaxybase.terminal`，长度 23，结果客户端一发送开终端消息，服务端就在 `C17PacketCustomPayload` 解码时断开连接。
+
+修复方式：
+
+- 把终端网络通道名缩短到 20 字符以内
+- 当前已改为 `jgb_terminal`
+- 修复后必须同时重启服务端和客户端，否则旧客户端仍会继续发送旧通道名
+
+### 进服时报 Fatally Missing blocks and items
+
+这次本地联调里，根因不是 `JsirGalaxyBase` 新增了错误物品，而是 `ModularUI2` 的 dev 运行产物带入了测试映射：
+
+- `modularui2:test_block`
+- `modularui2:test_item`
+
+修复方式分两层：
+
+- 在 [src/main/java/com/jsirgalaxybase/GalaxyBase.java](../src/main/java/com/jsirgalaxybase/GalaxyBase.java) 里通过 `FMLMissingMappingsEvent#getAll()` 忽略这些瞬时 dev 映射
+- 避免把 `ModularUI2 :dev` 当成运行时工件使用，降低再次把测试物品带进运行时的概率

@@ -1,5 +1,6 @@
 package com.jsirgalaxybase.modules.core.banking.infrastructure;
 
+import com.jsirgalaxybase.modules.core.banking.infrastructure.jdbc.JdbcConnectionManager;
 import com.jsirgalaxybase.modules.core.banking.application.BankingApplicationService;
 import com.jsirgalaxybase.modules.core.banking.repository.BankAccountRepository;
 import com.jsirgalaxybase.modules.core.banking.repository.BankTransactionRepository;
@@ -15,17 +16,27 @@ public class BankingInfrastructure {
     private final LedgerEntryRepository ledgerEntryRepository;
     private final CoinExchangeRecordRepository coinExchangeRecordRepository;
     private final BankingTransactionRunner bankingTransactionRunner;
+    private final JdbcConnectionManager sharedConnectionManager;
 
     public BankingInfrastructure(BankingApplicationService bankingApplicationService,
         BankAccountRepository bankAccountRepository, BankTransactionRepository bankTransactionRepository,
         LedgerEntryRepository ledgerEntryRepository, CoinExchangeRecordRepository coinExchangeRecordRepository,
         BankingTransactionRunner bankingTransactionRunner) {
+        this(bankingApplicationService, bankAccountRepository, bankTransactionRepository, ledgerEntryRepository,
+            coinExchangeRecordRepository, bankingTransactionRunner, null);
+    }
+
+    public BankingInfrastructure(BankingApplicationService bankingApplicationService,
+        BankAccountRepository bankAccountRepository, BankTransactionRepository bankTransactionRepository,
+        LedgerEntryRepository ledgerEntryRepository, CoinExchangeRecordRepository coinExchangeRecordRepository,
+        BankingTransactionRunner bankingTransactionRunner, JdbcConnectionManager sharedConnectionManager) {
         this.bankingApplicationService = bankingApplicationService;
         this.bankAccountRepository = bankAccountRepository;
         this.bankTransactionRepository = bankTransactionRepository;
         this.ledgerEntryRepository = ledgerEntryRepository;
         this.coinExchangeRecordRepository = coinExchangeRecordRepository;
         this.bankingTransactionRunner = bankingTransactionRunner;
+        this.sharedConnectionManager = sharedConnectionManager;
     }
 
     public BankingApplicationService getBankingApplicationService() {
@@ -50,5 +61,9 @@ public class BankingInfrastructure {
 
     public BankingTransactionRunner getBankingTransactionRunner() {
         return bankingTransactionRunner;
+    }
+
+    public JdbcConnectionManager getSharedConnectionManager() {
+        return sharedConnectionManager;
     }
 }

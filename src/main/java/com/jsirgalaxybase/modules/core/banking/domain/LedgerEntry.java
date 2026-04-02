@@ -11,6 +11,8 @@ public class LedgerEntry {
     private final long amount;
     private final long balanceBefore;
     private final long balanceAfter;
+    private final long frozenBalanceBefore;
+    private final long frozenBalanceAfter;
     private final String currencyCode;
     private final short sequenceInTransaction;
     private final Instant createdAt;
@@ -18,6 +20,13 @@ public class LedgerEntry {
     public LedgerEntry(long entryId, long transactionId, long accountId, LedgerEntrySide entrySide, long amount,
         long balanceBefore, long balanceAfter, String currencyCode, short sequenceInTransaction,
         Instant createdAt) {
+        this(entryId, transactionId, accountId, entrySide, amount, balanceBefore, balanceAfter, 0L, 0L,
+            currencyCode, sequenceInTransaction, createdAt);
+    }
+
+    public LedgerEntry(long entryId, long transactionId, long accountId, LedgerEntrySide entrySide, long amount,
+        long balanceBefore, long balanceAfter, long frozenBalanceBefore, long frozenBalanceAfter, String currencyCode,
+        short sequenceInTransaction, Instant createdAt) {
         this.entryId = entryId;
         this.transactionId = transactionId;
         this.accountId = accountId;
@@ -25,6 +34,8 @@ public class LedgerEntry {
         this.amount = amount;
         this.balanceBefore = balanceBefore;
         this.balanceAfter = balanceAfter;
+        this.frozenBalanceBefore = frozenBalanceBefore;
+        this.frozenBalanceAfter = frozenBalanceAfter;
         this.currencyCode = currencyCode;
         this.sequenceInTransaction = sequenceInTransaction;
         this.createdAt = createdAt;
@@ -56,6 +67,14 @@ public class LedgerEntry {
 
     public long getBalanceAfter() {
         return balanceAfter;
+    }
+
+    public long getFrozenBalanceBefore() {
+        return frozenBalanceBefore;
+    }
+
+    public long getFrozenBalanceAfter() {
+        return frozenBalanceAfter;
     }
 
     public String getCurrencyCode() {

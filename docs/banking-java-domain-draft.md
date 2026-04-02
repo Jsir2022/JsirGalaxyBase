@@ -88,8 +88,9 @@
 当前个人账户初始化策略是：
 
 - 先不在玩家注册或登录时自动建户
-- 由 `openAccount(...)` 和当前管理员命令入口按需懒初始化
-- 也就是玩家第一次被执行 `open`、`balance`、`grant`、`transfer` 等银行动作时，如果账户不存在，就即时开户，初始余额为 `0`
+- 正式玩家入口只在显式 `openAccount(...)` 时按需建户
+- `balance`、`ledger`、`transfer` 这类读取或划转动作不会替玩家隐式开户
+- 显式 `openAccount(...)` 命中已有账户时，当前保持既有 `display_name` 与 `metadata_json` 不刷新，避免无审计的资料覆盖和无意义版本变更
 
 ### BankTransaction
 
@@ -183,6 +184,12 @@
 - 任务书硬币兑换结算
 - 基于 `request_id` 的幂等回放
 
+当前第三轮收口时点，对上层入口边界再明确一次：
+
+- 正式可用入口当前覆盖显式开户、余额/流水查询、玩家转账、管理员 grant、管理员 transfer，以及系统内部划转基础
+- 终端银行 GUI 当前只承担开户、只读快照和玩家转账
+- 任务书硬币兑换虽然服务层已有 `settleCoinExchange(...)` API，但真实业务入口明确延期到市场阶段，本轮不接 GUI 或其他玩家侧正式入口
+
 其中：
 
 - `BankingApplicationService` 负责参数校验、账户状态校验、余额校验、统一事务封装和分录生成
@@ -208,32 +215,84 @@
 - `/jsirgalaxybase bank system [summary]`
 - `/jsirgalaxybase bank system ledger [limit]`
 - `/jsirgalaxybase bank grant <player> <amount> [comment]`
+- `/jsirgalaxybase bank deduct <player> <amount> [comment]`
 - `/jsirgalaxybase bank transfer <fromPlayer> <toPlayer> <amount> [comment]`
 
 后续又进一步扩展了：
 
 - `/jsirgalaxybase bank public [all|ops|exchange]`
-- `/jsirgalaxybase bank public ledger <ops|exchange> [limit]`
+- `/jsirgalaxybase bank public [all|ops|exchange|tax]`
+- `/jsirgalaxybase bank public ledger <ops|exchange|tax> [limit]`
 - `/jsirgalaxybase bank tx <transactionId>`
 - `/jsirgalaxybase bank init system`
+
+市场阶段第一轮又新增了首个玩家侧真实兑换入口：
+
+- `/jsirgalaxybase market quote hand`
+- `/jsirgalaxybase market exchange hand`
+
+这里的职责边界当前定为：
+
+- market 负责识别玩家手持 Dreamcraft 任务书硬币、计算固定规则报价，并组织兑换业务上下文
+- banking 继续作为 `星光币` 真源，负责正式结算、分录、幂等与审计
+- 当前入口只支持“手持一叠”兑换，不做全背包批量扫描，避免首轮把部分成功/失败恢复复杂度一并引入
 
 当前受管系统账户已经收敛为两类：
 
 - `ops` 系统运营账户
 - `exchange` 兑换储备账户
 
+市场阶段第一轮之后，当前受管公共账户扩展为三类：
+
+- `ops` 系统运营账户
+- `exchange` 兑换储备账户
+- `tax` 税池公共账户
+
 其中：
 
-- 玩家个人账户继续保持按需懒初始化，不自动开户
+- 玩家个人账户继续保持按需懒初始化，但要求先显式开户后再进入转账链路
 - `ops` 与 `exchange` 会在服务端启动时自动确保存在
+
+并发语义当前也收敛为：
+
+- 玩家账户与受管系统账户都依赖数据库唯一键做“插入或回读”
+- `request_id` 依赖数据库唯一键做原子幂等，但仅允许“同一请求语义”重放；若请求体关键字段不一致必须拒绝
+- 幂等重放返回的账户余额必须以该笔交易对应的 `ledger_entry.balance_after` 为准，而不是读取当前 `bank_account` 余额
+
+市场阶段第一轮后，银行应用服务的最小市场结算能力也已补齐：
+
+- `freezeFunds(...)`
+- `releaseFunds(...)`
+- `settleFrozenTransfer(...)`
+
+对应新增的正式审计语义包括：
+
+- `MARKET_FUNDS_FREEZE`
+- `MARKET_FUNDS_RELEASE`
+- `MARKET_SETTLEMENT_FROM_FROZEN`
+- `MARKET_TAX_COLLECTION`
+- `MARKET_ORDER_FREEZE`
+- `MARKET_ORDER_CANCEL_RELEASE`
+- `MARKET_ORDER_SETTLEMENT`
+- `MARKET_TAX_INCOME`
+
+历史回放对象语义当前也定稿为：
+
+- 幂等重放返回的 `BankPostingResult.affectedAccounts` 不是完整历史快照
+- 当前已经保证 `availableBalance`、`frozenBalance` 与 `updatedAt` 都回到该笔流水对应时点
+- 这里的前提是：`ledger_entry` 现在会同时持久化 `available` 和 `frozen` 的 before/after，而不是只记录单一余额轴
+- `status`、`version`、`displayName`、`metadataJson` 继续取当前账户视图，因为当前库里仍未持久化这些字段的逐笔历史版本
 
 其中配置与模块初始化部分已经开始接入：
 
 - `ModConfiguration` 已新增 PostgreSQL 银行配置项
 - `InstitutionCoreModule` 已可在服务端按配置准备 JDBC banking infrastructure
-- 当前已经完成本机 PostgreSQL 的真实连通与启动期校验
+- `JdbcBankingInfrastructureFactory` 当前按 JDBC 连接的 `search_path/currentSchema` 校验必需表，而不是硬编码 `public`
+- 当前已经完成本机 PostgreSQL 的真实连通、工厂初始化路径与启动期校验
 - 当前已经接入管理员命令入口，并完成了服务端实际命令回显验证
-- 当前仍未做的是 GUI 和跨服同步等更正式的上层调用链
+- 当前可以通过 `./gradlew bankingIt` 或 `./gradlew banking-it` 单独执行银行 PostgreSQL 集成测试
+- 当前已经接入市场阶段第一轮的任务书硬币真实兑换入口，并在第二阶段把 `freeze/release/settleFrozenTransfer` 的 PostgreSQL 成功/重放/冲突/回滚测试补齐
+- 当前市场第二阶段已经落下标准化现货市场的最小领域骨架与应用服务，但仍未做完整订单簿 JDBC 接线、买单冻结闭环、撮合、异常恢复与跨服同步等更正式的上层调用链
 
 ## 为什么先做接口而不是 JDBC 实现
 

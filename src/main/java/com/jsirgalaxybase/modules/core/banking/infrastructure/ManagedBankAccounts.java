@@ -31,9 +31,20 @@ public final class ManagedBankAccounts {
         0L,
         "{\"purpose\":\"exchange-reserve\"}");
 
+    public static final ManagedAccountSpec TAX_ACCOUNT = new ManagedAccountSpec(
+        "tax",
+        "TAX-POOL",
+        BankAccountType.PUBLIC_FUND,
+        BankingConstants.OWNER_TYPE_PUBLIC_FUND_CODE,
+        "TAX_POOL",
+        "Market Tax Pool",
+        0L,
+        "{\"purpose\":\"market-tax\"}");
+
     private static final ManagedAccountSpec[] MANAGED_ACCOUNTS = {
         SYSTEM_OPERATIONS_ACCOUNT,
-        EXCHANGE_RESERVE_ACCOUNT
+        EXCHANGE_RESERVE_ACCOUNT,
+        TAX_ACCOUNT
     };
 
     private ManagedBankAccounts() {}
@@ -61,7 +72,7 @@ public final class ManagedBankAccounts {
         }
 
         Instant now = Instant.now();
-        return bankingInfrastructure.getBankAccountRepository().save(new BankAccount(
+        Optional<BankAccount> created = bankingInfrastructure.getBankAccountRepository().saveIfOwnerAbsent(new BankAccount(
             0L,
             spec.getAccountNo(),
             spec.getAccountType(),
@@ -76,6 +87,21 @@ public final class ManagedBankAccounts {
             spec.getMetadataJson(),
             now,
             now));
+        if (created.isPresent()) {
+            return created.get();
+        }
+
+        return bankingInfrastructure.getBankAccountRepository().findByOwner(
+            spec.getOwnerType(),
+            spec.getOwnerRef(),
+            BankingConstants.DEFAULT_CURRENCY_CODE)
+            .orElseThrow(new java.util.function.Supplier<BankingException>() {
+
+                @Override
+                public BankingException get() {
+                    return new BankingException("managed account create lost race but existing account could not be reloaded");
+                }
+            });
     }
 
     public static final class ManagedAccountSpec {

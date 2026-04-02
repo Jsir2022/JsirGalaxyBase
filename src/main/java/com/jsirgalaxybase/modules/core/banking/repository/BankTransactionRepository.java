@@ -11,4 +11,6 @@ public interface BankTransactionRepository {
     Optional<BankTransaction> findByRequestId(String requestId);
 
     BankTransaction save(BankTransaction transaction);
+
+    Optional<BankTransaction> saveIfRequestAbsent(BankTransaction transaction);
 }

@@ -69,6 +69,41 @@ public class JdbcBankAccountRepository extends AbstractJdbcRepository implements
     }
 
     @Override
+    public Optional<BankAccount> saveIfOwnerAbsent(final BankAccount account) {
+        return connectionManager.withConnection(new JdbcConnectionCallback<Optional<BankAccount>>() {
+
+            @Override
+            public Optional<BankAccount> doInConnection(java.sql.Connection connection) throws SQLException {
+                PreparedStatement statement = connection.prepareStatement(
+                    "INSERT INTO bank_account (account_no, account_type, owner_type, owner_ref, currency_code, available_balance, frozen_balance, status, version, display_name, metadata_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), ?, ?) ON CONFLICT (owner_type, owner_ref, currency_code) DO NOTHING RETURNING *");
+                try {
+                    statement.setString(1, account.getAccountNo());
+                    statement.setString(2, account.getAccountType().name());
+                    statement.setString(3, account.getOwnerType());
+                    statement.setString(4, account.getOwnerRef());
+                    statement.setString(5, account.getCurrencyCode());
+                    statement.setLong(6, account.getAvailableBalance());
+                    statement.setLong(7, account.getFrozenBalance());
+                    statement.setString(8, account.getStatus().name());
+                    statement.setLong(9, account.getVersion());
+                    statement.setString(10, account.getDisplayName());
+                    statement.setString(11, account.getMetadataJson());
+                    statement.setTimestamp(12, java.sql.Timestamp.from(account.getCreatedAt()));
+                    statement.setTimestamp(13, java.sql.Timestamp.from(account.getUpdatedAt()));
+                    ResultSet resultSet = statement.executeQuery();
+                    try {
+                        return resultSet.next() ? Optional.of(mapAccount(resultSet)) : Optional.<BankAccount>empty();
+                    } finally {
+                        resultSet.close();
+                    }
+                } finally {
+                    statement.close();
+                }
+            }
+        });
+    }
+
+    @Override
     public BankAccount save(final BankAccount account) {
         return connectionManager.withConnection(new JdbcConnectionCallback<BankAccount>() {
 

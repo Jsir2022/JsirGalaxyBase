@@ -43,9 +43,9 @@ public final class TerminalHomeSnapshotProvider {
         TerminalHomeSnapshot snapshot = create(player);
         return new String[] {
             snapshot.getMarketSummary(),
-            "市场页下一步将接价格看板、订单流、托管库存和成交摘要。",
-            "当前终端骨架已预留正式市场页位置，后续不需要再换入口。",
-            "玩家身份会继续沿用服务端权威快照。"
+            "市场一期已接真实任务书硬币兑换入口：/jsirgalaxybase market quote hand 与 /jsirgalaxybase market exchange hand。",
+            "当前只做固定规则、手持一叠兑换；订单簿、托管库存、撮合和异常恢复仍留在后续市场模块。",
+            "当前规则按 Dreamcraft Coin 物品本身识别，属于 source-blind 首轮实现。"
         };
     }
 }

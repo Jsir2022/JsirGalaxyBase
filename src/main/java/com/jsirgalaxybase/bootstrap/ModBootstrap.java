@@ -20,13 +20,14 @@ public class ModBootstrap {
     private final boolean client;
     private ModuleManager moduleManager;
     private ModuleContext moduleContext;
+    private ModConfiguration configuration;
 
     public ModBootstrap(boolean client) {
         this.client = client;
     }
 
     public void preInit(FMLPreInitializationEvent event) {
-        final ModConfiguration configuration = ModConfiguration.load(event.getSuggestedConfigurationFile());
+        configuration = ModConfiguration.load(event.getSuggestedConfigurationFile(), client);
         moduleManager = new ModuleManager();
         moduleContext = new ModuleContext(client, configuration);
 
@@ -53,5 +54,13 @@ public class ModBootstrap {
         moduleManager.serverStarting(moduleContext, event);
         event.registerServerCommand(new GalaxyBaseCommand(moduleManager));
         GalaxyBase.LOG.info("Registered /jsirgalaxybase architecture command");
+    }
+
+    public ModuleManager getModuleManager() {
+        return moduleManager;
+    }
+
+    public ModConfiguration getConfiguration() {
+        return configuration;
     }
 }

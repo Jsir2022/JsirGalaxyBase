@@ -29,9 +29,13 @@ public final class JdbcBankingInfrastructureFactory {
     private JdbcBankingInfrastructureFactory() {}
 
     public static BankingInfrastructure create(ModConfiguration configuration) {
+        return create(configuration.getBankingJdbcUrl(), configuration.getBankingJdbcUsername(),
+            configuration.getBankingJdbcPassword());
+    }
+
+    static BankingInfrastructure create(String jdbcUrl, String jdbcUsername, String jdbcPassword) {
         loadDriver();
-        DataSource dataSource = new DriverManagerDataSource(configuration.getBankingJdbcUrl(),
-            configuration.getBankingJdbcUsername(), configuration.getBankingJdbcPassword());
+        DataSource dataSource = new DriverManagerDataSource(jdbcUrl, jdbcUsername, jdbcPassword);
         JdbcConnectionManager connectionManager = new JdbcConnectionManager(dataSource);
         validateConnection(connectionManager);
         BankAccountRepository accountRepository = new JdbcBankAccountRepository(connectionManager);
@@ -43,7 +47,7 @@ public final class JdbcBankingInfrastructureFactory {
         BankingApplicationService bankingApplicationService = new BankingApplicationService(accountRepository,
             transactionRepository, ledgerEntryRepository, coinExchangeRecordRepository, transactionRunner);
         return new BankingInfrastructure(bankingApplicationService, accountRepository, transactionRepository,
-            ledgerEntryRepository, coinExchangeRecordRepository, transactionRunner);
+            ledgerEntryRepository, coinExchangeRecordRepository, transactionRunner, connectionManager);
     }
 
     private static void loadDriver() {
@@ -83,10 +87,12 @@ public final class JdbcBankingInfrastructureFactory {
     }
 
     private static void validateRequiredTables(Connection connection) throws SQLException {
-        for (String tableName : REQUIRED_BANKING_TABLES) {
-            PreparedStatement statement = connection.prepareStatement(
-                "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ?)");
-            try {
+        PreparedStatement statement = connection.prepareStatement(
+            "SELECT EXISTS (" +
+                "SELECT 1 FROM pg_catalog.pg_class c " +
+                "WHERE c.relkind IN ('r', 'p') AND c.relname = ? AND pg_catalog.pg_table_is_visible(c.oid))");
+        try {
+            for (String tableName : REQUIRED_BANKING_TABLES) {
                 statement.setString(1, tableName);
                 ResultSet resultSet = statement.executeQuery();
                 try {
@@ -96,9 +102,9 @@ public final class JdbcBankingInfrastructureFactory {
                 } finally {
                     resultSet.close();
                 }
-            } finally {
-                statement.close();
             }
+        } finally {
+            statement.close();
         }
     }
 }

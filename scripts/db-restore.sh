@@ -7,6 +7,9 @@ PGPORT="${PGPORT:-5432}"
 PGDATABASE="${PGDATABASE:-jsirgalaxybase}"
 PGUSER="${PGUSER:-jsirgalaxybase_app}"
 BACKUP_DIR="${BACKUP_DIR:-$HOME/db-backups/jsirgalaxybase}"
+PGADMIN_DATABASE="${PGADMIN_DATABASE:-postgres}"
+PGADMINUSER="${PGADMINUSER:-}"
+PGADMINPASSWORD="${PGADMINPASSWORD:-}"
 
 backup_file=""
 use_latest="false"
@@ -21,6 +24,7 @@ Usage:
 Notes:
   - Stop the Minecraft server before restoring.
   - Pass PGPASSWORD in the environment when authentication is required.
+    - When using --recreate-db, either provide an admin role via PGADMINUSER/PGADMINPASSWORD or run with local sudo access to the postgres OS user.
 EOF
 }
 
@@ -34,6 +38,30 @@ require_command() {
 require_command pg_restore
 require_command psql
 require_command sha256sum
+
+admin_psql() {
+    if [[ -n "$PGADMINUSER" ]]; then
+        local admin_env=("PGHOST=$PGHOST" "PGPORT=$PGPORT" "PGUSER=$PGADMINUSER")
+        if [[ -n "$PGADMINPASSWORD" ]]; then
+            admin_env+=("PGPASSWORD=$PGADMINPASSWORD")
+        fi
+        env "${admin_env[@]}" psql --dbname="$PGADMIN_DATABASE" "$@"
+        return
+    fi
+
+    if [[ "$(id -u)" -eq 0 ]]; then
+        sudo -u postgres psql --dbname="$PGADMIN_DATABASE" "$@"
+        return
+    fi
+
+    if command -v sudo >/dev/null 2>&1; then
+        sudo -u postgres psql --dbname="$PGADMIN_DATABASE" "$@"
+        return
+    fi
+
+    echo "--recreate-db requires either PGADMINUSER/PGADMINPASSWORD or local sudo access to the postgres user." >&2
+    exit 1
+}
 
 while [[ "$#" -gt 0 ]]; do
     case "$1" in
@@ -86,17 +114,12 @@ fi
 
 if [[ "$recreate_db" == "true" ]]; then
     echo "Recreating database: $PGDATABASE"
-    PSQL_URI="postgresql://$PGUSER@${PGHOST}:${PGPORT}/postgres"
-    PGHOST="$PGHOST" PGPORT="$PGPORT" PGUSER="$PGUSER" psql \
-        --dbname="$PSQL_URI" \
-        --set=target_db="$PGDATABASE" \
-        --command="SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'target_db' AND pid <> pg_backend_pid();"
-    PGHOST="$PGHOST" PGPORT="$PGPORT" PGUSER="$PGUSER" psql \
-        --dbname="$PSQL_URI" \
-        --set=target_db="$PGDATABASE" \
+    db_name_literal="$(printf "%s" "$PGDATABASE" | sed "s/'/''/g")"
+    admin_psql --set=ON_ERROR_STOP=1 \
+        --command="SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$db_name_literal' AND pid <> pg_backend_pid();"
+    admin_psql --set=ON_ERROR_STOP=1 \
         --command="DROP DATABASE IF EXISTS \"$PGDATABASE\";"
-    PGHOST="$PGHOST" PGPORT="$PGPORT" PGUSER="$PGUSER" psql \
-        --dbname="$PSQL_URI" \
+    admin_psql --set=ON_ERROR_STOP=1 \
         --command="CREATE DATABASE \"$PGDATABASE\" OWNER \"$PGUSER\";"
 fi
 
@@ -109,6 +132,7 @@ PGHOST="$PGHOST" PGPORT="$PGPORT" PGDATABASE="$PGDATABASE" PGUSER="$PGUSER" psql
 SELECT 'bank_account=' || count(*) FROM bank_account;
 SELECT 'bank_transaction=' || count(*) FROM bank_transaction;
 SELECT 'ledger_entry=' || count(*) FROM ledger_entry;
+SELECT 'coin_exchange_record=' || count(*) FROM coin_exchange_record;
 SELECT 'managed_accounts=' || count(*)
 FROM bank_account
 WHERE owner_ref IN ('SYSTEM_OPERATIONS', 'EXCHANGE_RESERVE');

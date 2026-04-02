@@ -100,6 +100,8 @@ CREATE TABLE IF NOT EXISTS ledger_entry (
     amount BIGINT NOT NULL,
     balance_before BIGINT NOT NULL,
     balance_after BIGINT NOT NULL,
+    frozen_balance_before BIGINT NOT NULL DEFAULT 0,
+    frozen_balance_after BIGINT NOT NULL DEFAULT 0,
     currency_code VARCHAR(16) NOT NULL,
     sequence_in_tx SMALLINT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -116,6 +118,8 @@ CREATE TABLE IF NOT EXISTS ledger_entry (
     CONSTRAINT ck_ledger_entry_amount_positive CHECK (amount > 0),
     CONSTRAINT ck_ledger_entry_balance_before_nonnegative CHECK (balance_before >= 0),
     CONSTRAINT ck_ledger_entry_balance_after_nonnegative CHECK (balance_after >= 0),
+    CONSTRAINT ck_ledger_entry_frozen_balance_before_nonnegative CHECK (frozen_balance_before >= 0),
+    CONSTRAINT ck_ledger_entry_frozen_balance_after_nonnegative CHECK (frozen_balance_after >= 0),
     CONSTRAINT ck_ledger_entry_currency_not_blank CHECK (btrim(currency_code) <> ''),
     CONSTRAINT ck_ledger_entry_sequence_positive CHECK (sequence_in_tx > 0)
 );

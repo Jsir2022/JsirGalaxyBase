@@ -16,8 +16,12 @@
   - 银行系统一期数据表与事务边界设计
 - `banking-postgresql-ddl.sql`
   - 银行系统一期 PostgreSQL DDL 草案
+- `market-postgresql-ddl.sql`
+  - 市场系统第二阶段最小骨架 DDL 草案
 - `banking-java-domain-draft.md`
   - 银行系统 Java 领域模型与仓储接口草案
+- `banking-terminal-gui-design.md`
+  - 银行终端页面信息架构与嵌套菜单设计
 - `postgresql-local-setup-and-migration.md`
   - Ubuntu 本地 PostgreSQL 安装、初始化与迁移说明
 - `postgresql-backup-and-restore.md`

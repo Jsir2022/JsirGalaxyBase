@@ -13,6 +13,8 @@ public interface BankAccountRepository {
 
     BankAccount save(BankAccount account);
 
+    Optional<BankAccount> saveIfOwnerAbsent(BankAccount account);
+
     BankAccount lockById(long accountId);
 
     List<BankAccount> lockByIdsInOrder(List<Long> accountIds);

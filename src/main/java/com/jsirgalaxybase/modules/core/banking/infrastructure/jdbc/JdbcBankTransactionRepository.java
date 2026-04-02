@@ -108,6 +108,40 @@ public class JdbcBankTransactionRepository extends AbstractJdbcRepository implem
         });
     }
 
+    @Override
+    public Optional<BankTransaction> saveIfRequestAbsent(final BankTransaction transaction) {
+        return connectionManager.withConnection(new JdbcConnectionCallback<Optional<BankTransaction>>() {
+
+            @Override
+            public Optional<BankTransaction> doInConnection(java.sql.Connection connection) throws SQLException {
+                PreparedStatement statement = connection.prepareStatement(
+                    "INSERT INTO bank_transaction (request_id, transaction_type, business_type, business_ref, source_server_id, operator_type, operator_ref, player_ref, comment, extra_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), ?) ON CONFLICT (request_id) DO NOTHING RETURNING *");
+                try {
+                    statement.setString(1, transaction.getRequestId());
+                    statement.setString(2, transaction.getTransactionType().name());
+                    statement.setString(3, transaction.getBusinessType().name());
+                    setNullableText(statement, 4, transaction.getBusinessRef());
+                    statement.setString(5, transaction.getSourceServerId());
+                    statement.setString(6, transaction.getOperatorType());
+                    setNullableText(statement, 7, transaction.getOperatorRef());
+                    setNullableText(statement, 8, transaction.getPlayerRef());
+                    setNullableText(statement, 9, transaction.getComment());
+                    statement.setString(10, transaction.getExtraJson());
+                    statement.setTimestamp(11, java.sql.Timestamp.from(transaction.getCreatedAt()));
+
+                    ResultSet resultSet = statement.executeQuery();
+                    try {
+                        return resultSet.next() ? Optional.of(mapTransaction(resultSet)) : Optional.<BankTransaction>empty();
+                    } finally {
+                        resultSet.close();
+                    }
+                } finally {
+                    statement.close();
+                }
+            }
+        });
+    }
+
     private BankTransaction mapTransaction(ResultSet resultSet) throws SQLException {
         return new BankTransaction(resultSet.getLong("transaction_id"), resultSet.getString("request_id"),
             BankTransactionType.valueOf(resultSet.getString("transaction_type")),

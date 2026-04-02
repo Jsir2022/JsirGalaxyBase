@@ -1,14 +1,13 @@
 package com.jsirgalaxybase.terminal.network;
 
-import com.jsirgalaxybase.GalaxyBase;
-
 import cpw.mods.fml.common.network.NetworkRegistry;
 import cpw.mods.fml.common.network.simpleimpl.SimpleNetworkWrapper;
 import cpw.mods.fml.relauncher.Side;
 
 public final class TerminalNetwork {
 
-    public static final SimpleNetworkWrapper CHANNEL = NetworkRegistry.INSTANCE.newSimpleChannel(GalaxyBase.MODID + ".terminal");
+    private static final String CHANNEL_NAME = "jgb_terminal";
+    public static final SimpleNetworkWrapper CHANNEL = NetworkRegistry.INSTANCE.newSimpleChannel(CHANNEL_NAME);
     private static boolean initialized;
 
     private TerminalNetwork() {}

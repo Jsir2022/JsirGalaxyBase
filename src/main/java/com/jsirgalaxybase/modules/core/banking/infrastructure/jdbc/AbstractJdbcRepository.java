@@ -6,7 +6,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 
-abstract class AbstractJdbcRepository {
+public abstract class AbstractJdbcRepository {
 
     protected final JdbcConnectionManager connectionManager;
 

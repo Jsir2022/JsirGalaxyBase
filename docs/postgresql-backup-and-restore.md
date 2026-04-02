@@ -24,6 +24,23 @@
 
 当前脚本和 systemd unit 都是围绕这个原则写的。
 
+## 当前机器上的实际部署状态
+
+当前这台机器已经不是“只有脚本”，而是已经实际安装并启用了自动备份：
+
+- 定时器：`jsirgalaxybase-db-backup.timer`
+- 服务：`jsirgalaxybase-db-backup.service`
+- systemd 环境文件：`/etc/jsirgalaxybase/db-backup.env`
+- 备份目录：`/home/u24game/db-backups/jsirgalaxybase`
+
+当前 systemd 行为是：
+
+- 每天自动执行一次
+- 默认保留最近 `7` 份
+- 首份备份已经实际成功生成
+
+这意味着后续维护者不用重新安装 PostgreSQL 备份体系，只需要会查看状态、手动触发、恢复和演练。
+
 ## 当前主方案结论
 
 如果只在下面几个选项里选一个作为主方案：
@@ -170,6 +187,41 @@
 
 ## 典型用法
 
+下面这些命令按“当前已经部署好的机器”来写，后续维护者可以直接照抄。
+
+## 日常查看与手动触发
+
+### 1. 查看定时器状态
+
+```bash
+sudo systemctl status --no-pager jsirgalaxybase-db-backup.timer
+sudo systemctl list-timers --all | grep jsirgalaxybase-db-backup
+```
+
+### 2. 查看最近一次备份服务执行情况
+
+```bash
+sudo systemctl status --no-pager jsirgalaxybase-db-backup.service
+```
+
+### 3. 立即手动执行一次备份
+
+```bash
+sudo systemctl start jsirgalaxybase-db-backup.service
+sudo systemctl status --no-pager jsirgalaxybase-db-backup.service
+```
+
+### 4. 查看备份目录中的文件
+
+```bash
+ls -lah /home/u24game/db-backups/jsirgalaxybase
+```
+
+正常情况下，每一份备份都应该成对出现：
+
+- 一个 `.dump`
+- 一个对应的 `.dump.sha256`
+
 ### 1. 手动做一份备份
 
 ```bash
@@ -197,6 +249,13 @@ PGPASSWORD='你的密码' scripts/db-restore.sh --latest
 
 这适合做“整库回滚”或迁移演练。
 
+注意：
+
+- 这条路径需要有创建/删除数据库的权限
+- 当前脚本支持两种方式：
+	- 提供 `PGADMINUSER` 与可选 `PGADMINPASSWORD`
+	- 或者在本机通过 `sudo -u postgres` 执行数据库重建
+
 ```bash
 cd /media/u24game/gtnh/JsirGalaxyBase
 PGPASSWORD='你的密码' scripts/db-restore.sh --latest --recreate-db
@@ -207,6 +266,127 @@ PGPASSWORD='你的密码' scripts/db-restore.sh --latest --recreate-db
 ```bash
 cd /media/u24game/gtnh/JsirGalaxyBase
 PGPASSWORD='你的密码' scripts/db-restore.sh "$HOME/db-backups/jsirgalaxybase/jsirgalaxybase-2026-03-30-143000.dump"
+```
+
+## 标准恢复流程
+
+下面把“恢复数据库”拆成两个实际场景。
+
+### 场景 A：恢复到临时测试库做演练
+
+这是最推荐、也最安全的方式。
+
+用途：
+
+- 验证备份是否可恢复
+- 核对账本和系统账户是否完整
+- 不影响当前正式库
+
+步骤：
+
+1. 选择备份文件
+2. 恢复到临时测试库
+3. 核对核心表与系统账户
+4. 验证完后删除临时测试库
+
+命令示例：
+
+```bash
+cd /media/u24game/gtnh/JsirGalaxyBase
+PGPASSWORD='你的密码' scripts/db-restore.sh /home/u24game/db-backups/jsirgalaxybase/你的备份文件.dump --recreate-db
+```
+
+如果要显式指定测试库名：
+
+```bash
+cd /media/u24game/gtnh/JsirGalaxyBase
+PGPASSWORD='你的密码' PGDATABASE=jsirgalaxybase_restore_test scripts/db-restore.sh /home/u24game/db-backups/jsirgalaxybase/你的备份文件.dump --recreate-db
+```
+
+恢复后核对示例：
+
+```bash
+PGPASSWORD='你的密码' psql -h 127.0.0.1 -U jsirgalaxybase_app -d jsirgalaxybase_restore_test -Atc "select 'bank_account='||count(*) from bank_account union all select 'bank_transaction='||count(*) from bank_transaction union all select 'ledger_entry='||count(*) from ledger_entry union all select 'coin_exchange_record='||count(*) from coin_exchange_record union all select 'managed_accounts='||count(*) from bank_account where owner_ref in ('SYSTEM_OPERATIONS','EXCHANGE_RESERVE');"
+```
+
+删除测试库示例：
+
+```bash
+sudo -u postgres psql -d postgres -c 'DROP DATABASE IF EXISTS "jsirgalaxybase_restore_test";'
+```
+
+### 场景 B：覆盖正式库恢复
+
+这是事故处理场景，只在你确认正式库需要回滚时使用。
+
+用途：
+
+- 正式回滚数据库到某份备份状态
+
+步骤：
+
+1. 先停 Minecraft 服务端
+2. 先确认选中的备份文件没问题
+3. 先尽量恢复到测试库再看一遍
+4. 再对正式库执行恢复
+5. 恢复后核对系统账户、表行数和模组启动期数据库校验
+6. 最后再重启服务端
+
+命令示例：
+
+```bash
+cd /media/u24game/gtnh/JsirGalaxyBase
+PGPASSWORD='你的密码' scripts/db-restore.sh /home/u24game/db-backups/jsirgalaxybase/你的备份文件.dump
+```
+
+如果确认需要先删库重建再恢复：
+
+```bash
+cd /media/u24game/gtnh/JsirGalaxyBase
+PGPASSWORD='你的密码' scripts/db-restore.sh /home/u24game/db-backups/jsirgalaxybase/你的备份文件.dump --recreate-db
+```
+
+### 恢复后的最小验收命令
+
+```bash
+PGPASSWORD='你的密码' psql -h 127.0.0.1 -U jsirgalaxybase_app -d jsirgalaxybase -Atc "select 'bank_account='||count(*) from bank_account union all select 'bank_transaction='||count(*) from bank_transaction union all select 'ledger_entry='||count(*) from ledger_entry union all select 'coin_exchange_record='||count(*) from coin_exchange_record union all select 'managed_accounts='||count(*) from bank_account where owner_ref in ('SYSTEM_OPERATIONS','EXCHANGE_RESERVE');"
+```
+
+然后再看模组日志里 JDBC 启动校验是否正常。
+
+## 给后续维护者的最短指令清单
+
+如果后人只想要“最短可用命令”，看这一段就够了。
+
+### 立即备份一次
+
+```bash
+sudo systemctl start jsirgalaxybase-db-backup.service
+```
+
+### 查看下一次自动备份时间
+
+```bash
+sudo systemctl list-timers --all | grep jsirgalaxybase-db-backup
+```
+
+### 查看已有备份文件
+
+```bash
+ls -lah /home/u24game/db-backups/jsirgalaxybase
+```
+
+### 恢复到测试库演练
+
+```bash
+cd /media/u24game/gtnh/JsirGalaxyBase
+PGPASSWORD='你的密码' PGDATABASE=jsirgalaxybase_restore_test scripts/db-restore.sh /home/u24game/db-backups/jsirgalaxybase/你的备份文件.dump --recreate-db
+```
+
+### 删除测试库
+
+```bash
+sudo -u postgres psql -d postgres -c 'DROP DATABASE IF EXISTS "jsirgalaxybase_restore_test";'
 ```
 
 ## 我对备份脚本的要求
@@ -267,6 +447,20 @@ sudo systemctl status --no-pager jsirgalaxybase-db-backup.service
 sudo systemctl list-timers --all | grep jsirgalaxybase-db-backup
 ```
 
+## 当前已完成的真实演练
+
+当前已经实际完成过一次“备份文件恢复到临时测试库”的演练，结论是：
+
+- 最新 `.dump` 可以成功通过 `sha256` 校验
+- 可以成功恢复到临时测试库 `jsirgalaxybase_restore_test`
+- 恢复后核心表计数与线上基线一致
+- `ops` 与 `exchange` 两个系统账户也都恢复成功
+
+本次演练也顺手修正了恢复脚本里两类真实问题：
+
+- `--recreate-db` 路径原先的 psql 变量替换写法不稳
+- 业务账号本身没有建库权限，所以脚本改为支持管理员连接或本机 `sudo -u postgres`
+
 ## 推荐操作节奏
 
 对你现在这套本地开发和后续换机场景，我建议：
@@ -275,6 +469,32 @@ sudo systemctl list-timers --all | grep jsirgalaxybase-db-backup
 2. 每次改 DDL 或大规模联调前再手动备份一次
 3. 每周至少做一次“恢复到测试库”的演练
 4. 真迁移主机时，先恢复到新机测试，再切 JDBC 指向
+
+## 常见注意事项
+
+### 1. 看到 service 是 inactive (dead) 不代表失败
+
+这个 service 是 `oneshot`，跑完退出是正常表现。
+
+关键看的是：
+
+- `ExecStart` 是否 `status=0/SUCCESS`
+- 备份目录里是否出现新的 `.dump` 和 `.sha256`
+
+### 2. 业务账号默认没有建库权限
+
+当前 `jsirgalaxybase_app` 默认不是 `CREATEDB` 角色。
+
+所以：
+
+- 日常连接数据库没问题
+- 但 `--recreate-db` 需要走管理员连接或 `sudo -u postgres`
+
+### 3. 恢复正式库前必须先停服
+
+因为恢复脚本不会替你停 Minecraft 服务端。
+
+这条规则不要省略。
 
 ## 恢复后的最小核验
 
