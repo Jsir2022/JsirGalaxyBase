@@ -372,22 +372,24 @@ public final class TerminalBankingService {
 
         private final boolean success;
         private final String message;
+        private final TerminalNotificationSeverity severity;
 
-        private ActionResult(boolean success, String message) {
+        private ActionResult(boolean success, String message, TerminalNotificationSeverity severity) {
             this.success = success;
             this.message = message;
+            this.severity = severity;
         }
 
         public static ActionResult success(String message) {
-            return new ActionResult(true, EnumChatFormatting.GREEN + message);
+            return new ActionResult(true, EnumChatFormatting.GREEN + message, TerminalNotificationSeverity.SUCCESS);
         }
 
         public static ActionResult error(String message) {
-            return new ActionResult(false, EnumChatFormatting.RED + message);
+            return new ActionResult(false, EnumChatFormatting.RED + message, TerminalNotificationSeverity.ERROR);
         }
 
         public static ActionResult info(String message) {
-            return new ActionResult(true, EnumChatFormatting.GOLD + message);
+            return new ActionResult(true, EnumChatFormatting.GOLD + message, TerminalNotificationSeverity.WARNING);
         }
 
         public boolean isSuccess() {
@@ -396,6 +398,18 @@ public final class TerminalBankingService {
 
         public String getMessage() {
             return message;
+        }
+
+        public TerminalNotificationSeverity getSeverity() {
+            return severity;
+        }
+
+        public TerminalActionFeedback toFeedback(long autoCloseMillis) {
+            return TerminalActionFeedback.of(
+                severity,
+                severity.getDefaultTitle(),
+                TerminalNotification.stripFormatting(message),
+                autoCloseMillis);
         }
     }
 

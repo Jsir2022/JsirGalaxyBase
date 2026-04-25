@@ -6,8 +6,10 @@ import com.jsirgalaxybase.config.ModConfiguration;
 import com.jsirgalaxybase.module.ModuleContext;
 import com.jsirgalaxybase.module.ModuleManager;
 import com.jsirgalaxybase.modules.capability.ChainMiningCapabilityModule;
+import com.jsirgalaxybase.modules.cluster.ClusterModule;
 import com.jsirgalaxybase.modules.core.InstitutionCoreModule;
 import com.jsirgalaxybase.modules.diagnostics.ClientItemDumpModule;
+import com.jsirgalaxybase.modules.servertools.ServerToolsModule;
 import com.jsirgalaxybase.modules.terminal.TerminalModule;
 
 import cpw.mods.fml.common.event.FMLInitializationEvent;
@@ -29,9 +31,11 @@ public class ModBootstrap {
     public void preInit(FMLPreInitializationEvent event) {
         configuration = ModConfiguration.load(event.getSuggestedConfigurationFile(), client);
         moduleManager = new ModuleManager();
-        moduleContext = new ModuleContext(client, configuration);
+        moduleContext = new ModuleContext(client, configuration, moduleManager);
 
         moduleManager.addModule(new InstitutionCoreModule());
+        moduleManager.addModule(new ClusterModule());
+        moduleManager.addModule(new ServerToolsModule());
         moduleManager.addModule(new ChainMiningCapabilityModule());
         moduleManager.addModule(new TerminalModule());
         if (client) {

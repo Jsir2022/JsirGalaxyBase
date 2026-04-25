@@ -182,6 +182,28 @@ public class BankingPostgresIntegrationTest {
     }
 
     @Test
+    public void factoryRejectsOutdatedLedgerEntrySchemaAndGuidesOperatorToRunMigration() throws Exception {
+        try (Connection connection = testContext.getSchemaDataSource().getConnection();
+            Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO \"" + testContext.schemaName + "\", public");
+            statement.execute("ALTER TABLE ledger_entry DROP COLUMN frozen_balance_before");
+            statement.execute("ALTER TABLE ledger_entry DROP COLUMN frozen_balance_after");
+        }
+
+        try {
+            JdbcBankingInfrastructureFactory.create(
+                testContext.getSchemaJdbcUrl(),
+                config.username,
+                config.password);
+            fail("Expected outdated schema to be rejected");
+        } catch (BankingException exception) {
+            assertTrue(exception.getMessage().contains("ledger_entry.frozen_balance_before"));
+            assertTrue(exception.getMessage().contains("ledger_entry.frozen_balance_after"));
+            assertTrue(exception.getMessage().contains("scripts/db-migrate.sh"));
+        }
+    }
+
+    @Test
     public void factoryCreateUsesCurrentSchemaForInitializationValidation() {
         BankingInfrastructure infrastructure = JdbcBankingInfrastructureFactory.create(
             testContext.getSchemaJdbcUrl(),

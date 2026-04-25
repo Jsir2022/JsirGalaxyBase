@@ -132,14 +132,14 @@ public class JdbcMarketOrderBookRepository extends AbstractJdbcRepository implem
     @Override
     public List<MarketOrder> findOpenSellOrdersByProductKey(String productKey) {
         return findOrders(
-            "SELECT * FROM market_order WHERE product_key = ? AND order_side = 'SELL' AND order_status = 'OPEN' ORDER BY unit_price ASC, created_at ASC, order_id ASC",
+            "SELECT * FROM market_order WHERE product_key = ? AND order_side = 'SELL' AND order_status IN ('OPEN', 'PARTIALLY_FILLED') ORDER BY unit_price ASC, created_at ASC, order_id ASC",
             productKey);
     }
 
     @Override
     public List<MarketOrder> findOpenBuyOrdersByProductKey(String productKey) {
         return findOrders(
-            "SELECT * FROM market_order WHERE product_key = ? AND order_side = 'BUY' AND order_status = 'OPEN' ORDER BY unit_price DESC, created_at ASC, order_id ASC",
+            "SELECT * FROM market_order WHERE product_key = ? AND order_side = 'BUY' AND order_status IN ('OPEN', 'PARTIALLY_FILLED') ORDER BY unit_price DESC, created_at ASC, order_id ASC",
             productKey);
     }
 
@@ -155,6 +155,63 @@ public class JdbcMarketOrderBookRepository extends AbstractJdbcRepository implem
         return findOrdersForMatch(
             "SELECT * FROM market_order WHERE product_key = ? AND order_side = 'BUY' AND order_status IN ('OPEN', 'PARTIALLY_FILLED') AND unit_price >= ? ORDER BY unit_price DESC, created_at ASC, order_id ASC FOR UPDATE",
             productKey, minUnitPrice);
+    }
+
+    @Override
+    public List<MarketOrder> findOrdersByOwnerAndProductKey(final String ownerPlayerRef, final String productKey,
+        final int limit) {
+        return connectionManager.withConnection(new JdbcConnectionCallback<List<MarketOrder>>() {
+
+            @Override
+            public List<MarketOrder> doInConnection(java.sql.Connection connection) throws SQLException {
+                PreparedStatement statement = connection.prepareStatement(
+                    "SELECT * FROM market_order WHERE owner_player_ref = ? AND product_key = ? ORDER BY created_at DESC, order_id DESC LIMIT ?");
+                try {
+                    statement.setString(1, ownerPlayerRef);
+                    statement.setString(2, productKey);
+                    statement.setInt(3, sanitizeLimit(limit));
+                    ResultSet resultSet = statement.executeQuery();
+                    try {
+                        return mapOrders(resultSet);
+                    } finally {
+                        resultSet.close();
+                    }
+                } finally {
+                    statement.close();
+                }
+            }
+        });
+    }
+
+    @Override
+    public List<String> findActiveProductKeys(final int limit) {
+        return findProductKeys(
+            "SELECT product_key FROM market_order WHERE order_status IN ('OPEN', 'PARTIALLY_FILLED') GROUP BY product_key ORDER BY MAX(updated_at) DESC LIMIT ?",
+            sanitizeLimit(limit));
+    }
+
+    @Override
+    public List<String> findDistinctProductKeysByOwner(final String ownerPlayerRef, final int limit) {
+        return connectionManager.withConnection(new JdbcConnectionCallback<List<String>>() {
+
+            @Override
+            public List<String> doInConnection(java.sql.Connection connection) throws SQLException {
+                PreparedStatement statement = connection.prepareStatement(
+                    "SELECT product_key FROM market_order WHERE owner_player_ref = ? GROUP BY product_key ORDER BY MAX(updated_at) DESC LIMIT ?");
+                try {
+                    statement.setString(1, ownerPlayerRef);
+                    statement.setInt(2, sanitizeLimit(limit));
+                    ResultSet resultSet = statement.executeQuery();
+                    try {
+                        return mapProductKeys(resultSet);
+                    } finally {
+                        resultSet.close();
+                    }
+                } finally {
+                    statement.close();
+                }
+            }
+        });
     }
 
     private void bindOrder(PreparedStatement statement, MarketOrder order) throws SQLException {
@@ -223,12 +280,45 @@ public class JdbcMarketOrderBookRepository extends AbstractJdbcRepository implem
         });
     }
 
+    private List<String> findProductKeys(final String sql, final int limit) {
+        return connectionManager.withConnection(new JdbcConnectionCallback<List<String>>() {
+
+            @Override
+            public List<String> doInConnection(java.sql.Connection connection) throws SQLException {
+                PreparedStatement statement = connection.prepareStatement(sql);
+                try {
+                    statement.setInt(1, limit);
+                    ResultSet resultSet = statement.executeQuery();
+                    try {
+                        return mapProductKeys(resultSet);
+                    } finally {
+                        resultSet.close();
+                    }
+                } finally {
+                    statement.close();
+                }
+            }
+        });
+    }
+
     private List<MarketOrder> mapOrders(ResultSet resultSet) throws SQLException {
         List<MarketOrder> orders = new ArrayList<MarketOrder>();
         while (resultSet.next()) {
             orders.add(mapOrder(resultSet));
         }
         return orders;
+    }
+
+    private List<String> mapProductKeys(ResultSet resultSet) throws SQLException {
+        List<String> productKeys = new ArrayList<String>();
+        while (resultSet.next()) {
+            productKeys.add(resultSet.getString("product_key"));
+        }
+        return productKeys;
+    }
+
+    private int sanitizeLimit(int limit) {
+        return Math.max(1, limit);
     }
 
     private MarketOrder mapOrder(ResultSet resultSet) throws SQLException {

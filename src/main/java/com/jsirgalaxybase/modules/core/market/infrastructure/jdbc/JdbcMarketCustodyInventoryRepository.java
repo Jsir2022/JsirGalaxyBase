@@ -4,6 +4,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -171,7 +172,7 @@ public class JdbcMarketCustodyInventoryRepository extends AbstractJdbcRepository
             @Override
             public List<MarketCustodyInventory> doInConnection(java.sql.Connection connection) throws SQLException {
                 PreparedStatement statement = connection.prepareStatement(
-                    "SELECT * FROM market_custody_inventory WHERE owner_player_ref = ? AND custody_status = ? ORDER BY created_at ASC, custody_id ASC");
+                    "SELECT * FROM market_custody_inventory WHERE owner_player_ref = ? AND custody_status = ? AND quantity > 0 ORDER BY created_at ASC, custody_id ASC");
                 try {
                     statement.setString(1, ownerPlayerRef);
                     statement.setString(2, status.name());
@@ -182,6 +183,67 @@ public class JdbcMarketCustodyInventoryRepository extends AbstractJdbcRepository
                             results.add(mapCustody(resultSet));
                         }
                         return results;
+                    } finally {
+                        resultSet.close();
+                    }
+                } finally {
+                    statement.close();
+                }
+            }
+        });
+    }
+
+    @Override
+    public List<MarketCustodyInventory> findByOwnerProductKeyAndStatuses(final String ownerPlayerRef,
+        final String productKey, final List<MarketCustodyStatus> statuses) {
+        if (statuses == null || statuses.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return connectionManager.withConnection(new JdbcConnectionCallback<List<MarketCustodyInventory>>() {
+
+            @Override
+            public List<MarketCustodyInventory> doInConnection(java.sql.Connection connection) throws SQLException {
+                PreparedStatement statement = connection.prepareStatement(
+                    "SELECT * FROM market_custody_inventory WHERE owner_player_ref = ? AND product_key = ? AND quantity > 0 AND custody_status IN ("
+                        + createPlaceholders(statuses.size())
+                        + ") ORDER BY created_at ASC, custody_id ASC");
+                try {
+                    statement.setString(1, ownerPlayerRef);
+                    statement.setString(2, productKey);
+                    for (int index = 0; index < statuses.size(); index++) {
+                        statement.setString(index + 3, statuses.get(index).name());
+                    }
+                    ResultSet resultSet = statement.executeQuery();
+                    try {
+                        List<MarketCustodyInventory> results = new ArrayList<MarketCustodyInventory>();
+                        while (resultSet.next()) {
+                            results.add(mapCustody(resultSet));
+                        }
+                        return results;
+                    } finally {
+                        resultSet.close();
+                    }
+                } finally {
+                    statement.close();
+                }
+            }
+        });
+    }
+
+    @Override
+    public List<String> findDistinctProductKeysByOwner(final String ownerPlayerRef, final int limit) {
+        return connectionManager.withConnection(new JdbcConnectionCallback<List<String>>() {
+
+            @Override
+            public List<String> doInConnection(java.sql.Connection connection) throws SQLException {
+                PreparedStatement statement = connection.prepareStatement(
+                    "SELECT product_key FROM market_custody_inventory WHERE owner_player_ref = ? AND quantity > 0 GROUP BY product_key ORDER BY MAX(updated_at) DESC LIMIT ?");
+                try {
+                    statement.setString(1, ownerPlayerRef);
+                    statement.setInt(2, sanitizeLimit(limit));
+                    ResultSet resultSet = statement.executeQuery();
+                    try {
+                        return mapProductKeys(resultSet);
                     } finally {
                         resultSet.close();
                     }
@@ -222,5 +284,28 @@ public class JdbcMarketCustodyInventoryRepository extends AbstractJdbcRepository
             MarketCustodyStatus.valueOf(resultSet.getString("custody_status")), resultSet.getLong("related_order_id"),
             resultSet.getLong("related_operation_id"), resultSet.getString("source_server_id"),
             readInstant(resultSet, "created_at"), readInstant(resultSet, "updated_at"));
+    }
+
+    private List<String> mapProductKeys(ResultSet resultSet) throws SQLException {
+        List<String> productKeys = new ArrayList<String>();
+        while (resultSet.next()) {
+            productKeys.add(resultSet.getString("product_key"));
+        }
+        return productKeys;
+    }
+
+    private String createPlaceholders(int count) {
+        StringBuilder builder = new StringBuilder();
+        for (int index = 0; index < count; index++) {
+            if (index > 0) {
+                builder.append(',');
+            }
+            builder.append('?');
+        }
+        return builder.toString();
+    }
+
+    private int sanitizeLimit(int limit) {
+        return Math.max(1, limit);
     }
 }

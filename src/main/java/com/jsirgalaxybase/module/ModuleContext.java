@@ -6,10 +6,12 @@ public class ModuleContext {
 
     private final boolean client;
     private final ModConfiguration configuration;
+    private final ModuleManager moduleManager;
 
-    public ModuleContext(boolean client, ModConfiguration configuration) {
+    public ModuleContext(boolean client, ModConfiguration configuration, ModuleManager moduleManager) {
         this.client = client;
         this.configuration = configuration;
+        this.moduleManager = moduleManager;
     }
 
     public boolean isClient() {
@@ -18,5 +20,9 @@ public class ModuleContext {
 
     public ModConfiguration getConfiguration() {
         return configuration;
+    }
+
+    public ModuleManager getModuleManager() {
+        return moduleManager;
     }
 }

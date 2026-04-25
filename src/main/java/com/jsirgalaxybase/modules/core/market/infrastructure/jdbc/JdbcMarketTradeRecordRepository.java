@@ -1,5 +1,6 @@
 package com.jsirgalaxybase.modules.core.market.infrastructure.jdbc;
 
+import java.time.Instant;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -109,5 +110,91 @@ public class JdbcMarketTradeRecordRepository extends AbstractJdbcRepository impl
                 }
             }
         });
+    }
+
+    @Override
+    public List<MarketTradeRecord> findByProductKey(final String productKey, final int limit) {
+        return findTrades(
+            "SELECT * FROM market_trade_record WHERE product_key = ? ORDER BY created_at DESC, trade_id DESC LIMIT ?",
+            productKey, null, sanitizeLimit(limit));
+    }
+
+    @Override
+    public List<MarketTradeRecord> findByProductKeySince(final String productKey, final Instant since, final int limit) {
+        return findTrades(
+            "SELECT * FROM market_trade_record WHERE product_key = ? AND created_at >= ? ORDER BY created_at DESC, trade_id DESC LIMIT ?",
+            productKey, since, sanitizeLimit(limit));
+    }
+
+    @Override
+    public List<String> findDistinctProductKeys(final int limit) {
+        return connectionManager.withConnection(new JdbcConnectionCallback<List<String>>() {
+
+            @Override
+            public List<String> doInConnection(java.sql.Connection connection) throws SQLException {
+                PreparedStatement statement = connection.prepareStatement(
+                    "SELECT product_key FROM market_trade_record GROUP BY product_key ORDER BY MAX(created_at) DESC LIMIT ?");
+                try {
+                    statement.setInt(1, sanitizeLimit(limit));
+                    ResultSet resultSet = statement.executeQuery();
+                    try {
+                        List<String> productKeys = new ArrayList<String>();
+                        while (resultSet.next()) {
+                            productKeys.add(resultSet.getString("product_key"));
+                        }
+                        return productKeys;
+                    } finally {
+                        resultSet.close();
+                    }
+                } finally {
+                    statement.close();
+                }
+            }
+        });
+    }
+
+    private List<MarketTradeRecord> findTrades(final String sql, final String productKey, final Instant since,
+        final int limit) {
+        return connectionManager.withConnection(new JdbcConnectionCallback<List<MarketTradeRecord>>() {
+
+            @Override
+            public List<MarketTradeRecord> doInConnection(java.sql.Connection connection) throws SQLException {
+                PreparedStatement statement = connection.prepareStatement(sql);
+                try {
+                    statement.setString(1, productKey);
+                    if (since == null) {
+                        statement.setInt(2, limit);
+                    } else {
+                        statement.setTimestamp(2, java.sql.Timestamp.from(since));
+                        statement.setInt(3, limit);
+                    }
+                    ResultSet resultSet = statement.executeQuery();
+                    try {
+                        List<MarketTradeRecord> trades = new ArrayList<MarketTradeRecord>();
+                        while (resultSet.next()) {
+                            trades.add(mapTrade(resultSet));
+                        }
+                        return trades;
+                    } finally {
+                        resultSet.close();
+                    }
+                } finally {
+                    statement.close();
+                }
+            }
+        });
+    }
+
+    private MarketTradeRecord mapTrade(ResultSet resultSet) throws SQLException {
+        return new MarketTradeRecord(resultSet.getLong("trade_id"), resultSet.getString("buyer_player_ref"),
+            resultSet.getString("seller_player_ref"),
+            new StandardizedMarketProduct(resultSet.getString("registry_name"), resultSet.getInt("meta")),
+            resultSet.getBoolean("stackable"), resultSet.getLong("unit_price"), resultSet.getLong("quantity"),
+            resultSet.getLong("fee_amount"), resultSet.getLong("buy_order_id"), resultSet.getLong("sell_order_id"),
+            resultSet.getLong("operation_id"), readInstant(resultSet, "created_at"));
+    }
+
+    private int sanitizeLimit(int limit) {
+        return Math.max(1, limit);
     }
 }

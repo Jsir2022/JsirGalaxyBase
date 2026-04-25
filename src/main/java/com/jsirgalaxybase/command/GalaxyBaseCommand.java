@@ -36,27 +36,34 @@ import com.jsirgalaxybase.modules.core.banking.infrastructure.ManagedBankAccount
 import com.jsirgalaxybase.modules.core.banking.infrastructure.ManagedBankAccounts.ManagedAccountSpec;
 import com.jsirgalaxybase.modules.core.market.application.MarketOperationException;
 import com.jsirgalaxybase.modules.core.market.application.MarketExchangeException;
-import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketProductParser;
+import com.jsirgalaxybase.modules.core.market.application.CustomMarketService;
+import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketAdmissionDecision;
 import com.jsirgalaxybase.modules.core.market.application.TaskCoinExchangeService;
 import com.jsirgalaxybase.modules.core.market.application.StandardizedSpotMarketService;
+import com.jsirgalaxybase.modules.core.market.application.command.CancelCustomMarketListingCommand;
+import com.jsirgalaxybase.modules.core.market.application.command.ClaimCustomMarketListingCommand;
+import com.jsirgalaxybase.modules.core.market.application.command.PublishCustomMarketListingCommand;
+import com.jsirgalaxybase.modules.core.market.application.command.PurchaseCustomMarketListingCommand;
 import com.jsirgalaxybase.modules.core.market.application.command.CancelBuyOrderCommand;
 import com.jsirgalaxybase.modules.core.market.application.command.CancelSellOrderCommand;
 import com.jsirgalaxybase.modules.core.market.application.command.ClaimMarketAssetCommand;
 import com.jsirgalaxybase.modules.core.market.application.command.CreateBuyOrderCommand;
 import com.jsirgalaxybase.modules.core.market.application.command.CreateSellOrderCommand;
+import com.jsirgalaxybase.modules.core.market.application.command.DepositMarketInventoryCommand;
 import com.jsirgalaxybase.modules.core.market.domain.MarketCustodyInventory;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOperationLog;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOrder;
+import com.jsirgalaxybase.modules.core.market.domain.CustomMarketItemSnapshot;
+import com.jsirgalaxybase.modules.core.market.domain.ExchangeMarketExecutionResult;
+import com.jsirgalaxybase.modules.core.market.domain.ExchangeMarketQuoteResult;
 import com.jsirgalaxybase.modules.core.market.domain.StandardizedMarketProduct;
 import com.jsirgalaxybase.modules.core.market.domain.TaskCoinExchangeQuote;
 
-import cpw.mods.fml.common.registry.GameData;
 import cpw.mods.fml.common.registry.GameRegistry;
 
 public class GalaxyBaseCommand extends CommandBase {
 
     private final ModuleManager moduleManager;
-    private final StandardizedMarketProductParser standardizedProductParser = new StandardizedMarketProductParser();
 
     public GalaxyBaseCommand(ModuleManager moduleManager) {
         this.moduleManager = moduleManager;
@@ -112,7 +119,7 @@ public class GalaxyBaseCommand extends CommandBase {
         if (args.length == 2 && "market".equalsIgnoreCase(args[0])) {
             return getListOfStringsMatchingLastWord(args,
                 new String[] { "help", "quote", "exchange", "sell", "buy", "book", "claims", "claim",
-                    "recover" });
+                    "custom", "recover" });
         }
         if (args.length >= 3 && "bank".equalsIgnoreCase(args[0])) {
             String action = args[1].toLowerCase();
@@ -142,12 +149,21 @@ public class GalaxyBaseCommand extends CommandBase {
             if ("quote".equals(action) || "exchange".equals(action)) {
                 return getListOfStringsMatchingLastWord(args, new String[] { "hand" });
             }
+            if ("custom".equals(action)) {
+                return getListOfStringsMatchingLastWord(args,
+                    new String[] { "list", "browse", "inspect", "buy", "claim", "cancel", "pending" });
+            }
             if ("sell".equals(action) || "buy".equals(action)) {
-                return getListOfStringsMatchingLastWord(args, new String[] { "create", "cancel" });
+                return getListOfStringsMatchingLastWord(args,
+                    "sell".equals(action) ? new String[] { "deposit", "create", "cancel" }
+                        : new String[] { "create", "cancel" });
             }
         }
         if (args.length == 4 && "market".equalsIgnoreCase(args[0])) {
-            if ("sell".equalsIgnoreCase(args[1]) && "create".equalsIgnoreCase(args[2])) {
+            if ("custom".equalsIgnoreCase(args[1]) && "list".equalsIgnoreCase(args[2])) {
+                return getListOfStringsMatchingLastWord(args, new String[] { "hand" });
+            }
+            if ("sell".equalsIgnoreCase(args[1]) && "deposit".equalsIgnoreCase(args[2])) {
                 return getListOfStringsMatchingLastWord(args, new String[] { "hand" });
             }
         }
@@ -249,13 +265,27 @@ public class GalaxyBaseCommand extends CommandBase {
                 return;
             }
 
+            if ("custom".equals(action)) {
+                if (!(sender instanceof EntityPlayerMP)) {
+                    reply.send("定制商品市场兼容指令只能由在线玩家执行。");
+                    return;
+                }
+                if (institutionCoreModule == null || institutionCoreModule.getCustomMarketService() == null) {
+                    reply.send("定制商品市场最小挂牌链未就绪，请检查独立服 PostgreSQL 市场启动日志。");
+                    return;
+                }
+                processCustomMarketCommand(new LiveStandardizedMarketPlayerContext((EntityPlayerMP) sender), reply,
+                    args, institutionCoreModule);
+                return;
+            }
+
             if ("quote".equals(action)) {
                 if (!(sender instanceof EntityPlayerMP)) {
-                    reply.send("市场一期任务书硬币指令只能由在线玩家执行。");
+                    reply.send("汇率市场兼容指令只能由在线玩家执行。");
                     return;
                 }
                 if (institutionCoreModule == null || institutionCoreModule.getBankingInfrastructure() == null) {
-                    reply.send("市场一期任务书硬币兑换未就绪，因为银行基础设施尚未完成启动。");
+                    reply.send("汇率市场兑换未就绪，因为银行基础设施尚未完成启动。");
                     return;
                 }
                 EntityPlayerMP player = (EntityPlayerMP) sender;
@@ -265,11 +295,11 @@ public class GalaxyBaseCommand extends CommandBase {
             }
             if ("exchange".equals(action)) {
                 if (!(sender instanceof EntityPlayerMP)) {
-                    reply.send("市场一期任务书硬币指令只能由在线玩家执行。");
+                    reply.send("汇率市场兼容指令只能由在线玩家执行。");
                     return;
                 }
                 if (institutionCoreModule == null || institutionCoreModule.getBankingInfrastructure() == null) {
-                    reply.send("市场一期任务书硬币兑换未就绪，因为银行基础设施尚未完成启动。");
+                    reply.send("汇率市场兑换未就绪，因为银行基础设施尚未完成启动。");
                     return;
                 }
                 EntityPlayerMP player = (EntityPlayerMP) sender;
@@ -279,11 +309,11 @@ public class GalaxyBaseCommand extends CommandBase {
             }
 
             if (!(sender instanceof EntityPlayerMP)) {
-                reply.send("第二层标准化现货指令只能由在线玩家执行。管理员恢复可用 /jsirgalaxybase market recover。");
+                reply.send("标准商品市场指令只能由在线玩家执行。管理员恢复可用 /jsirgalaxybase market recover。");
                 return;
             }
             if (institutionCoreModule == null || institutionCoreModule.getStandardizedSpotMarketService() == null) {
-                reply.send("第二层标准化现货市场未就绪，请检查独立服 PostgreSQL 市场启动日志。");
+                reply.send("标准商品市场入口未就绪，请检查独立服 PostgreSQL 市场启动日志。");
                 return;
             }
 
@@ -356,25 +386,106 @@ public class GalaxyBaseCommand extends CommandBase {
         sendMarketUsage(reply);
     }
 
+    void processCustomMarketCommand(StandardizedMarketPlayerContext playerContext, ReplySink reply, String[] args,
+        InstitutionCoreModule institutionCoreModule) {
+        if (args.length < 3) {
+            sendMarketUsage(reply);
+            return;
+        }
+
+        String customAction = args[2].toLowerCase();
+        if ("list".equals(customAction)) {
+            if (args.length < 5 || !"hand".equalsIgnoreCase(args[3])) {
+                reply.send("Usage: /jsirgalaxybase market custom list hand <price>");
+                return;
+            }
+            executeCustomListHand(playerContext, reply, institutionCoreModule, parsePositiveLong(args[4], "price"));
+            return;
+        }
+        if ("browse".equals(customAction)) {
+            int limit = args.length >= 4 ? Math.min(parsePositiveInt(args[3], "limit"), 20) : 10;
+            handleCustomBrowseCommand(reply, institutionCoreModule, limit);
+            return;
+        }
+        if ("inspect".equals(customAction)) {
+            if (args.length < 4) {
+                reply.send("Usage: /jsirgalaxybase market custom inspect <listingId>");
+                return;
+            }
+            handleCustomInspectCommand(reply, institutionCoreModule, parsePositiveLong(args[3], "listingId"));
+            return;
+        }
+        if ("buy".equals(customAction)) {
+            if (args.length < 4) {
+                reply.send("Usage: /jsirgalaxybase market custom buy <listingId>");
+                return;
+            }
+            handleCustomBuyCommand(playerContext, reply, institutionCoreModule,
+                parsePositiveLong(args[3], "listingId"));
+            return;
+        }
+        if ("claim".equals(customAction)) {
+            if (args.length < 4) {
+                reply.send("Usage: /jsirgalaxybase market custom claim <listingId>");
+                return;
+            }
+            handleCustomClaimCommand(playerContext, reply, institutionCoreModule,
+                parsePositiveLong(args[3], "listingId"));
+            return;
+        }
+        if ("cancel".equals(customAction)) {
+            if (args.length < 4) {
+                reply.send("Usage: /jsirgalaxybase market custom cancel <listingId>");
+                return;
+            }
+            handleCustomCancelCommand(playerContext, reply, institutionCoreModule,
+                parsePositiveLong(args[3], "listingId"));
+            return;
+        }
+        if ("pending".equals(customAction)) {
+            handleCustomPendingCommand(playerContext, reply, institutionCoreModule);
+            return;
+        }
+
+        sendMarketUsage(reply);
+    }
+
     private void handleStandardizedSellCommand(StandardizedMarketPlayerContext playerContext, ReplySink reply,
         String[] args, InstitutionCoreModule institutionCoreModule) {
         if (args.length < 3) {
-            reply.send("Usage: /jsirgalaxybase market sell create hand <unitPrice> [quantity]");
+            reply.send("Usage: /jsirgalaxybase market sell deposit hand [quantity]");
+            reply.send("Usage: /jsirgalaxybase market sell create <productKey> <unitPrice> <quantity>");
             reply.send("Usage: /jsirgalaxybase market sell cancel <orderId>");
             return;
         }
 
         String sellAction = args[2].toLowerCase();
-        if ("create".equals(sellAction)) {
-            if (args.length < 5 || !"hand".equalsIgnoreCase(args[3])) {
-                reply.send("Usage: /jsirgalaxybase market sell create hand <unitPrice> [quantity]");
+        if ("deposit".equals(sellAction)) {
+            if (args.length < 4 || !"hand".equalsIgnoreCase(args[3])) {
+                reply.send("Usage: /jsirgalaxybase market sell deposit hand [quantity]");
                 return;
             }
 
-            HeldStandardizedItem heldItem = resolveHeldStandardizedItem(playerContext);
+            HeldStandardizedItem heldItem = resolveHeldStandardizedItem(playerContext, institutionCoreModule);
+            long quantity = args.length >= 5 ? parsePositiveLong(args[4], "quantity") : heldItem.snapshot.stackSize;
+            executeStandardizedSellDeposit(playerContext, reply, institutionCoreModule, heldItem, quantity);
+            return;
+        }
+
+        if ("create".equals(sellAction)) {
+            if (args.length < 6) {
+                reply.send("Usage: /jsirgalaxybase market sell create <productKey> <unitPrice> <quantity>");
+                return;
+            }
+
+            StandardizedMarketAdmissionDecision admissionDecision = inspectRuntimeCatalogProduct(institutionCoreModule,
+                args[3]);
+            StandardizedMarketProduct product = admissionDecision.requireProduct();
             long unitPrice = parsePositiveLong(args[4], "unitPrice");
-            long quantity = args.length >= 6 ? parsePositiveLong(args[5], "quantity") : heldItem.snapshot.stackSize;
-            executeStandardizedSellCreate(playerContext, reply, institutionCoreModule, heldItem, unitPrice, quantity);
+            long quantity = parsePositiveLong(args[5], "quantity");
+            executeStandardizedSellCreate(playerContext, reply, institutionCoreModule, product.getProductKey(), unitPrice,
+                quantity, resolveStackability(institutionCoreModule, product.getProductKey()));
+            reply.send(buildStandardizedCatalogAdmissionMessage(admissionDecision));
             return;
         }
 
@@ -388,7 +499,7 @@ public class GalaxyBaseCommand extends CommandBase {
                 .getStandardizedSpotMarketService().cancelSellOrder(new CancelSellOrderCommand(
                     newRequestId("market-sell-cancel"), playerContext.getPlayerRef(),
                     institutionCoreModule.getBankingSourceServerId(), orderId));
-            reply.send("卖单已撤销: orderId=" + result.getOrder().getOrderId() + ", remainingClaimableCustodyId="
+            reply.send("卖单已撤销: orderId=" + result.getOrder().getOrderId() + ", returnedAvailableCustodyId="
                 + result.getCustody().getCustodyId() + ", quantity=" + result.getCustody().getQuantity());
             return;
         }
@@ -410,12 +521,15 @@ public class GalaxyBaseCommand extends CommandBase {
                 reply.send("Usage: /jsirgalaxybase market buy create <productKey> <quantity> <unitPrice>");
                 return;
             }
-            String productKey = standardizedProductParser.parse(args[3]).getProductKey();
+            StandardizedMarketAdmissionDecision admissionDecision = inspectRuntimeCatalogProduct(institutionCoreModule,
+                args[3]);
+            String productKey = admissionDecision.requireProduct().getProductKey();
             long quantity = parsePositiveLong(args[4], "quantity");
             long unitPrice = parsePositiveLong(args[5], "unitPrice");
-            boolean stackable = resolveStackability(productKey);
+            boolean stackable = resolveStackability(institutionCoreModule, productKey);
             executeStandardizedBuyCreate(playerContext, reply, institutionCoreModule, productKey, quantity, unitPrice,
                 stackable);
+            reply.send(buildStandardizedCatalogAdmissionMessage(admissionDecision));
             return;
         }
 
@@ -430,7 +544,7 @@ public class GalaxyBaseCommand extends CommandBase {
                     newRequestId("market-buy-cancel"), playerContext.getPlayerRef(),
                     institutionCoreModule.getBankingSourceServerId(), orderId));
             reply.send("买单已撤销: orderId=" + result.getOrder().getOrderId() + ", releasedFunds="
-                + result.getOrder().getReservedFunds());
+                + result.getReleasedFunds());
             return;
         }
 
@@ -443,16 +557,20 @@ public class GalaxyBaseCommand extends CommandBase {
             reply.send("Usage: /jsirgalaxybase market book <productKey> [limit]");
             return;
         }
-        String productKey = standardizedProductParser.parse(args[2]).getProductKey();
+        StandardizedMarketAdmissionDecision admissionDecision = inspectRuntimeCatalogProduct(institutionCoreModule,
+            args[2]);
+        String productKey = admissionDecision.requireProduct().getProductKey();
         int limit = args.length >= 4 ? Math.min(parsePositiveInt(args[3], "limit"), 20) : 10;
         List<MarketOrder> orders = institutionCoreModule.getStandardizedSpotMarketService().listOpenSellOrders(productKey);
         if (orders.isEmpty()) {
             reply.send("当前没有该标准化标的的开放卖单: " + productKey);
+            reply.send(buildStandardizedCatalogAdmissionMessage(admissionDecision));
             return;
         }
 
         reply.send("开放卖单簿: product=" + productKey + ", showing=" + Math.min(limit, orders.size()) + "/"
             + orders.size());
+        reply.send(buildStandardizedCatalogAdmissionMessage(admissionDecision));
         for (int i = 0; i < orders.size() && i < limit; i++) {
             MarketOrder order = orders.get(i);
             reply.send("orderId=" + order.getOrderId() + ", owner=" + order.getOwnerPlayerRef() + ", open="
@@ -492,44 +610,163 @@ public class GalaxyBaseCommand extends CommandBase {
             + ", status=" + result.getCustody().getStatus());
     }
 
-    private HeldStandardizedItem resolveHeldStandardizedItem(StandardizedMarketPlayerContext playerContext) {
-        ItemStack heldStack = playerContext.getHeldItem();
-        if (heldStack == null || heldStack.getItem() == null || heldStack.stackSize <= 0) {
-            throw new MarketOperationException("请先把标准化物品拿在手上，再创建卖单");
+    private void handleCustomBrowseCommand(ReplySink reply, InstitutionCoreModule institutionCoreModule, int limit) {
+        List<CustomMarketService.ListingView> listings = institutionCoreModule.getCustomMarketService()
+            .browseListings(limit);
+        if (listings.isEmpty()) {
+            reply.send("当前没有开放中的定制商品挂牌。");
+            return;
         }
-        String registryName = resolveRegistryName(heldStack.getItem());
-        if (registryName == null || registryName.trim().isEmpty()) {
-            throw new MarketOperationException("当前手持物品没有可用的注册名，不能进入标准化现货市场");
+
+        reply.send("定制商品市场兼容入口 - 开放挂牌 " + listings.size() + " 条:");
+        for (CustomMarketService.ListingView listingView : listings) {
+            reply.send("listingId=" + listingView.getListing().getListingId() + ", item="
+                + listingView.getSnapshot().getDisplayName() + ", price=" + listingView.getListing().getAskingPrice()
+                + " " + listingView.getListing().getCurrencyCode() + ", seller="
+                + listingView.getListing().getSellerPlayerRef() + ", deliveryStatus="
+                + listingView.getListing().getDeliveryStatus());
         }
-        String productKey = registryName + ":" + heldStack.getItemDamage();
-        standardizedProductParser.parse(productKey);
-        return new HeldStandardizedItem(productKey, heldStack.getMaxStackSize() > 1, heldStack.copy());
     }
 
-    void executeStandardizedSellCreate(StandardizedMarketPlayerContext playerContext, ReplySink reply,
-        InstitutionCoreModule institutionCoreModule, HeldStandardizedItem heldItem, long unitPrice, long quantity) {
+    private void handleCustomInspectCommand(ReplySink reply, InstitutionCoreModule institutionCoreModule,
+        long listingId) {
+        CustomMarketService.ListingView listingView = institutionCoreModule.getCustomMarketService()
+            .inspectListing(listingId);
+        reply.send("定制商品挂牌详情: listingId=" + listingView.getListing().getListingId() + ", status="
+            + listingView.getListing().getListingStatus() + ", deliveryStatus="
+            + listingView.getListing().getDeliveryStatus());
+        reply.send("item=" + listingView.getSnapshot().getDisplayName() + ", itemId="
+            + listingView.getSnapshot().getItemId() + ", meta=" + listingView.getSnapshot().getMeta()
+            + ", stackSize=" + listingView.getSnapshot().getStackSize() + ", price="
+            + listingView.getListing().getAskingPrice() + " " + listingView.getListing().getCurrencyCode());
+        reply.send("seller=" + listingView.getListing().getSellerPlayerRef() + ", buyer="
+            + safeText(listingView.getListing().getBuyerPlayerRef()));
+    }
+
+    private void handleCustomBuyCommand(StandardizedMarketPlayerContext playerContext, ReplySink reply,
+        InstitutionCoreModule institutionCoreModule, long listingId) {
+        CustomMarketService.PurchaseListingResult result = institutionCoreModule.getCustomMarketService()
+            .purchaseListing(new PurchaseCustomMarketListingCommand(newRequestId("market-custom-buy"),
+                playerContext.getPlayerRef(), institutionCoreModule.getBankingSourceServerId(), listingId));
+        reply.send("定制商品已购买: listingId=" + result.getListing().getListingId() + ", item="
+            + result.getSnapshot().getDisplayName() + ", price=" + result.getTradeRecord().getSettledAmount() + " "
+            + result.getTradeRecord().getCurrencyCode() + ", deliveryStatus="
+            + result.getListing().getDeliveryStatus());
+        reply.send("这条成交不会进入标准商品市场 CLAIMABLE，而是进入定制商品市场待领取链路；买家后续需执行 custom claim 完结。");
+    }
+
+    private void handleCustomClaimCommand(StandardizedMarketPlayerContext playerContext, ReplySink reply,
+        InstitutionCoreModule institutionCoreModule, long listingId) {
+        CustomMarketService.ListingView listingView = institutionCoreModule.getCustomMarketService()
+            .inspectListing(listingId);
+        ItemStack restoredStack = requirePreparedCustomClaimStack(playerContext, listingView.getSnapshot());
+        CustomMarketService.ClaimListingResult result = institutionCoreModule.getCustomMarketService()
+            .claimPurchasedListing(new ClaimCustomMarketListingCommand(newRequestId("market-custom-claim"),
+                playerContext.getPlayerRef(), institutionCoreModule.getBankingSourceServerId(), listingId));
+        playerContext.setHeldItem(restoredStack);
+        playerContext.syncInventory();
+        reply.send("定制商品已领取并完结: listingId=" + result.getListing().getListingId() + ", item="
+            + result.getSnapshot().getDisplayName() + ", deliveryStatus=" + result.getListing().getDeliveryStatus());
+    }
+
+    private void handleCustomCancelCommand(StandardizedMarketPlayerContext playerContext, ReplySink reply,
+        InstitutionCoreModule institutionCoreModule, long listingId) {
+        CustomMarketService.ListingView listingView = institutionCoreModule.getCustomMarketService()
+            .inspectListing(listingId);
+        ensureHandEmptyForCustomRestore(playerContext, listingView.getSnapshot());
+        CustomMarketService.CancelListingResult result = institutionCoreModule.getCustomMarketService()
+            .cancelListing(new CancelCustomMarketListingCommand(newRequestId("market-custom-cancel"),
+                playerContext.getPlayerRef(), institutionCoreModule.getBankingSourceServerId(), listingId));
+        restoreCustomSnapshotToHand(playerContext, result.getSnapshot());
+        reply.send("定制商品挂牌已下架并返还到当前手持槽: listingId=" + result.getListing().getListingId() + ", item="
+            + result.getSnapshot().getDisplayName() + ", status=" + result.getListing().getListingStatus());
+    }
+
+    private void handleCustomPendingCommand(StandardizedMarketPlayerContext playerContext, ReplySink reply,
+        InstitutionCoreModule institutionCoreModule) {
+        List<CustomMarketService.ListingView> sellerPending = institutionCoreModule.getCustomMarketService()
+            .listSellerPendingDeliveries(playerContext.getPlayerRef());
+        List<CustomMarketService.ListingView> buyerPending = institutionCoreModule.getCustomMarketService()
+            .listBuyerPendingClaims(playerContext.getPlayerRef());
+        if (sellerPending.isEmpty() && buyerPending.isEmpty()) {
+            reply.send("当前没有定制商品市场待交付或待领取记录。");
+            return;
+        }
+        reply.send("定制商品市场兼容入口 - pending 概览:");
+        if (sellerPending.isEmpty()) {
+            reply.send("卖家侧待交付记录: 0");
+        } else {
+            reply.send("卖家侧待交付记录: " + sellerPending.size());
+            for (CustomMarketService.ListingView listingView : sellerPending) {
+                reply.send("seller listingId=" + listingView.getListing().getListingId() + ", item="
+                    + listingView.getSnapshot().getDisplayName() + ", buyer="
+                    + safeText(listingView.getListing().getBuyerPlayerRef()) + ", deliveryStatus="
+                    + listingView.getListing().getDeliveryStatus());
+            }
+        }
+        if (buyerPending.isEmpty()) {
+            reply.send("买家侧待领取记录: 0");
+        } else {
+            reply.send("买家侧待领取记录: " + buyerPending.size());
+            for (CustomMarketService.ListingView listingView : buyerPending) {
+                reply.send("buyer listingId=" + listingView.getListing().getListingId() + ", item="
+                    + listingView.getSnapshot().getDisplayName() + ", seller="
+                    + listingView.getListing().getSellerPlayerRef() + ", deliveryStatus="
+                    + listingView.getListing().getDeliveryStatus());
+            }
+        }
+    }
+
+    private HeldStandardizedItem resolveHeldStandardizedItem(StandardizedMarketPlayerContext playerContext,
+        InstitutionCoreModule institutionCoreModule) {
+        ItemStack heldStack = playerContext.getHeldItem();
+        if (heldStack == null || heldStack.getItem() == null || heldStack.stackSize <= 0) {
+            throw new MarketOperationException("请先把标准化金属物品拿在手上，再执行存入");
+        }
+        StandardizedMarketAdmissionDecision admissionDecision = inspectRuntimeCatalogStack(institutionCoreModule,
+            heldStack);
+        StandardizedMarketProduct product = admissionDecision.requireProduct();
+        return new HeldStandardizedItem(product.getProductKey(), heldStack.getMaxStackSize() > 1, heldStack.copy(),
+            admissionDecision);
+    }
+
+    void executeStandardizedSellDeposit(StandardizedMarketPlayerContext playerContext, ReplySink reply,
+        InstitutionCoreModule institutionCoreModule, HeldStandardizedItem heldItem, long quantity) {
         if (quantity > heldItem.snapshot.stackSize) {
-            throw new MarketOperationException("sell quantity exceeds held stack size");
+            throw new MarketOperationException("deposit quantity exceeds held stack size");
         }
 
         applyHeldSellDeduction(playerContext, heldItem.snapshot, quantity);
         try {
-            StandardizedSpotMarketService.CreateSellOrderResult result = institutionCoreModule
-                .getStandardizedSpotMarketService().createSellOrder(new CreateSellOrderCommand(
-                    newRequestId("market-sell-create"), playerContext.getPlayerRef(),
+            StandardizedSpotMarketService.DepositInventoryResult result = institutionCoreModule
+                .getStandardizedSpotMarketService().depositInventory(new DepositMarketInventoryCommand(
+                    newRequestId("market-sell-deposit"), playerContext.getPlayerRef(),
                     institutionCoreModule.getBankingSourceServerId(), heldItem.productKey, quantity,
-                    heldItem.stackable, unitPrice));
-            reply.send("卖单已创建: orderId=" + result.getOrder().getOrderId() + ", product="
-                + result.getOrder().getProduct().getProductKey() + ", open=" + result.getOrder().getOpenQuantity()
-                + ", price=" + result.getOrder().getUnitPrice() + ", custodyId="
-                + result.getCustody().getCustodyId());
-            if (!result.getTradeRecords().isEmpty()) {
-                reply.send("本次创建已立即撮合 " + result.getTradeRecords().size() + " 笔成交，新增 claimable="
-                    + result.getClaimableAssets().size());
-            }
+                    heldItem.stackable));
+            reply.send("仓储存入完成: custodyId=" + result.getCustody().getCustodyId() + ", product="
+                + result.getCustody().getProduct().getProductKey() + ", quantity=" + result.getCustody().getQuantity()
+                + ", totalAvailable=" + result.getTotalAvailableQuantity());
+            reply.send(buildStandardizedCatalogAdmissionMessage(heldItem.admissionDecision));
         } catch (RuntimeException exception) {
             restoreHeldItem(playerContext, heldItem.snapshot);
             throw exception;
+        }
+    }
+
+    void executeStandardizedSellCreate(StandardizedMarketPlayerContext playerContext, ReplySink reply,
+        InstitutionCoreModule institutionCoreModule, String productKey, long unitPrice, long quantity,
+        boolean stackable) {
+        StandardizedSpotMarketService.CreateSellOrderResult result = institutionCoreModule
+            .getStandardizedSpotMarketService().createSellOrder(new CreateSellOrderCommand(
+                newRequestId("market-sell-create"), playerContext.getPlayerRef(),
+                institutionCoreModule.getBankingSourceServerId(), productKey, quantity, stackable, unitPrice));
+        reply.send("卖单已创建: orderId=" + result.getOrder().getOrderId() + ", product="
+            + result.getOrder().getProduct().getProductKey() + ", open=" + result.getOrder().getOpenQuantity()
+            + ", price=" + result.getOrder().getUnitPrice() + ", escrowCustodyId="
+            + result.getCustody().getCustodyId());
+        if (!result.getTradeRecords().isEmpty()) {
+            reply.send("本次创建已立即撮合 " + result.getTradeRecords().size() + " 笔成交，新增 claimable="
+                + result.getClaimableAssets().size());
         }
     }
 
@@ -561,10 +798,81 @@ public class GalaxyBaseCommand extends CommandBase {
         playerContext.syncInventory();
     }
 
-    private boolean resolveStackability(String productKey) {
-        StandardizedMarketProduct product = standardizedProductParser.parse(productKey);
+    private void executeCustomListHand(StandardizedMarketPlayerContext playerContext, ReplySink reply,
+        InstitutionCoreModule institutionCoreModule, long price) {
+        ItemStack heldStack = requireHeldCustomItem(playerContext);
+        CustomMarketService.PublishListingResult result = institutionCoreModule.getCustomMarketService()
+            .publishListing(new PublishCustomMarketListingCommand(newRequestId("market-custom-list"),
+                playerContext.getPlayerRef(), institutionCoreModule.getBankingSourceServerId(), price,
+                BankingConstants.DEFAULT_CURRENCY_CODE, heldStack.copy()));
+        playerContext.setHeldItem(null);
+        playerContext.syncInventory();
+        reply.send("定制商品挂牌已发布: listingId=" + result.getListing().getListingId() + ", item="
+            + result.getSnapshot().getDisplayName() + ", price=" + result.getListing().getAskingPrice() + " "
+            + result.getListing().getCurrencyCode() + ", deliveryStatus=" + result.getListing().getDeliveryStatus());
+    }
+
+    private ItemStack requireHeldCustomItem(StandardizedMarketPlayerContext playerContext) {
+        ItemStack heldStack = playerContext.getHeldItem();
+        if (heldStack == null || heldStack.stackSize <= 0) {
+            throw new MarketOperationException("请先把要挂牌的定制商品拿在手上");
+        }
+        if (heldStack.stackSize != 1) {
+            throw new MarketOperationException("定制商品市场最小挂牌链 v1 只允许手持单件商品挂牌，请先把当前堆叠拆成 1 件");
+        }
+        return heldStack;
+    }
+
+    private void ensureHandEmptyForCustomRestore(StandardizedMarketPlayerContext playerContext,
+        CustomMarketItemSnapshot snapshot) {
+        ItemStack heldStack = playerContext.getHeldItem();
+        if (heldStack != null && heldStack.getItem() != null && heldStack.stackSize > 0) {
+            throw new MarketOperationException("下架返还会把物品放回当前手持槽，请先清空手持槽: " + snapshot.getDisplayName());
+        }
+    }
+
+    private void restoreCustomSnapshotToHand(StandardizedMarketPlayerContext playerContext,
+        CustomMarketItemSnapshot snapshot) {
+        playerContext.setHeldItem(snapshot.toItemStack());
+        playerContext.syncInventory();
+    }
+
+    private ItemStack requirePreparedCustomClaimStack(StandardizedMarketPlayerContext playerContext,
+        CustomMarketItemSnapshot snapshot) {
+        ensureHandEmptyForCustomRestore(playerContext, snapshot);
+        ItemStack restoredStack = snapshot.toItemStack();
+        if (restoredStack == null || restoredStack.getItem() == null || restoredStack.stackSize != 1) {
+            throw new MarketOperationException("定制商品领取快照无法恢复为单件物品: " + snapshot.getDisplayName());
+        }
+        return restoredStack;
+    }
+
+    private boolean resolveStackability(InstitutionCoreModule institutionCoreModule, String productKey) {
+        StandardizedMarketProduct product = inspectRuntimeCatalogProduct(institutionCoreModule, productKey)
+            .requireProduct();
         Item item = resolveItem(product);
         return new ItemStack(item, 1, product.getMeta()).getMaxStackSize() > 1;
+    }
+
+    StandardizedMarketAdmissionDecision inspectRuntimeCatalogProduct(InstitutionCoreModule institutionCoreModule,
+        String productKey) {
+        if (institutionCoreModule == null) {
+            throw new MarketOperationException("标准商品市场目录运行时未就绪");
+        }
+        return institutionCoreModule.inspectStandardizedCatalogProduct(productKey);
+    }
+
+    StandardizedMarketAdmissionDecision inspectRuntimeCatalogStack(InstitutionCoreModule institutionCoreModule,
+        ItemStack stack) {
+        if (institutionCoreModule == null) {
+            throw new MarketOperationException("标准商品市场目录运行时未就绪");
+        }
+        return institutionCoreModule.inspectStandardizedCatalogStack(stack);
+    }
+
+    String buildStandardizedCatalogAdmissionMessage(StandardizedMarketAdmissionDecision admissionDecision) {
+        return "目录准入: version=" + admissionDecision.getCatalogVersion().getVersionKey() + ", reason="
+            + admissionDecision.getReasonCode() + ", source=" + admissionDecision.getSourceKey();
     }
 
     private Item resolveItem(StandardizedMarketProduct product) {
@@ -579,15 +887,6 @@ public class GalaxyBaseCommand extends CommandBase {
             throw new MarketOperationException("standardized product item is not registered: " + product.getProductKey());
         }
         return item;
-    }
-
-    private String resolveRegistryName(Item item) {
-        GameRegistry.UniqueIdentifier identifier = GameRegistry.findUniqueIdentifierFor(item);
-        if (identifier != null) {
-            return identifier.modId + ":" + identifier.name;
-        }
-        Object fallback = GameData.getItemRegistry().getNameForObject(item);
-        return fallback == null ? "" : String.valueOf(fallback);
     }
 
     private long parsePositiveLong(String rawValue, String fieldName) {
@@ -897,16 +1196,30 @@ public class GalaxyBaseCommand extends CommandBase {
             return;
         }
 
-        TaskCoinExchangeQuote quote = exchangeService.previewHeldCoin(player);
-        player.addChatMessage(new ChatComponentText(
-            "Held task coin quote: registry=" + quote.getDescriptor().getRegistryName() + ", family="
-                + quote.getDescriptor().getFamily() + ", tier=" + quote.getDescriptor().getTier() + ", faceValue="
-                + quote.getDescriptor().getFaceValue() + ", quantity=" + quote.getQuantity()));
-        player.addChatMessage(new ChatComponentText(
-            "effectiveExchangeValue=" + quote.getEffectiveExchangeValue() + ", contributionValue="
-                + quote.getContributionValue() + ", ruleVersion=" + quote.getExchangeRuleVersion()));
-        player.addChatMessage(new ChatComponentText(
-            "Current phase is source-blind: the system recognizes the held Dreamcraft coin item itself, not the original quest source."));
+        TaskCoinExchangeService.PreviewResult previewResult = exchangeService.previewHeldCoinFormal(player);
+        for (String line : buildMarketQuoteMessages(previewResult)) {
+            player.addChatMessage(new ChatComponentText(line));
+        }
+    }
+
+    List<String> buildMarketQuoteMessages(TaskCoinExchangeService.PreviewResult previewResult) {
+        ExchangeMarketQuoteResult formalQuote = previewResult.getFormalQuote();
+        TaskCoinExchangeQuote quote = previewResult.getLegacyQuote();
+        List<String> lines = new ArrayList<String>(3);
+        lines.add("汇率市场报价: pair=" + formalQuote.getPairDefinition().getPairCode() + ", registry="
+            + quote.getDescriptor().getRegistryName() + ", family=" + quote.getDescriptor().getFamily()
+            + ", tier=" + quote.getDescriptor().getTier() + ", quantity=" + quote.getQuantity()
+            + ", unitFaceValue=" + quote.getDescriptor().getFaceValue() + ", totalFaceValue="
+            + quote.getInputTotalFaceValue());
+        lines.add("effectiveExchangeValue=" + quote.getEffectiveExchangeValue() + ", contributionValue="
+            + quote.getContributionValue() + ", rate=" + formalQuote.getExchangeRateNumerator() + "/"
+            + formalQuote.getExchangeRateDenominator() + ", discountBasisPoints="
+            + formalQuote.getDiscountBasisPoints() + ", limitStatus="
+            + formalQuote.getLimitPolicy().getStatus().name());
+        lines.add("ruleVersion=" + formalQuote.getRuleVersion().getRuleKey() + ", reasonCode="
+            + formalQuote.getLimitPolicy().getReasonCode() + ", sourceServerId=" + formalQuote.getSourceServerId()
+            + ", notes=" + formalQuote.getNotes());
+        return lines;
     }
 
     private void handleMarketExchange(EntityPlayerMP player, String[] args, TaskCoinExchangeService exchangeService) {
@@ -915,12 +1228,19 @@ public class GalaxyBaseCommand extends CommandBase {
             return;
         }
 
-        TaskCoinExchangeService.TaskCoinExchangeExecutionResult result = exchangeService.exchangeHeldCoin(player);
+        TaskCoinExchangeService.ExchangeMarketExecutionCompatibilityResult compatibilityResult = exchangeService
+            .exchangeHeldCoinFormal(player);
+        ExchangeMarketExecutionResult result = compatibilityResult.getFormalResult();
+        ExchangeMarketQuoteResult formalQuote = result.getQuoteResult();
         player.addChatMessage(new ChatComponentText(
-            "Task coin exchange posted: transactionId=" + result.getPostingResult().getTransaction().getTransactionId()
-                + ", registry=" + result.getQuote().getDescriptor().getRegistryName() + ", quantity="
-                + result.getQuote().getQuantity() + ", effectiveExchangeValue="
-                + result.getQuote().getEffectiveExchangeValue()));
+            "汇率市场兑换已入账: transactionId=" + result.getPostingResult().getTransaction().getTransactionId()
+                + ", pair=" + formalQuote.getPairDefinition().getPairCode() + ", registry="
+                + formalQuote.getInputRegistryName() + ", quantity=" + formalQuote.getInputQuantity()
+                + ", effectiveExchangeValue=" + formalQuote.getEffectiveExchangeValue()));
+        player.addChatMessage(new ChatComponentText(
+            "ruleVersion=" + formalQuote.getRuleVersion().getRuleKey() + ", requestId="
+                + formalQuote.getRequestId() + ", limitStatus=" + formalQuote.getLimitPolicy().getStatus().name()
+                + ", reasonCode=" + formalQuote.getLimitPolicy().getReasonCode()));
         BankAccount playerAccount = findAffectedAccountByOwnerRef(result.getPostingResult(),
             player.getUniqueID().toString());
         if (playerAccount != null) {
@@ -1048,17 +1368,28 @@ public class GalaxyBaseCommand extends CommandBase {
     }
 
     private void sendMarketUsage(ReplySink reply) {
-        reply.send("Market phase-1 commands:");
-        reply.send("/jsirgalaxybase market quote hand");
-        reply.send("/jsirgalaxybase market exchange hand");
-        reply.send("Market phase-2 standardized spot commands:");
-        reply.send("/jsirgalaxybase market sell create hand <unitPrice> [quantity]");
+        reply.send("MARKET 总入口已拆分为三类子入口:");
+        reply.send("标准商品市场入口（兼容旧 market sell / buy / book / claim 路径）:");
+        reply.send("/jsirgalaxybase market sell deposit hand [quantity]");
+        reply.send("/jsirgalaxybase market sell create <productKey> <unitPrice> <quantity>");
         reply.send("/jsirgalaxybase market sell cancel <orderId>");
         reply.send("/jsirgalaxybase market buy create <productKey> <quantity> <unitPrice>");
         reply.send("/jsirgalaxybase market buy cancel <orderId>");
         reply.send("/jsirgalaxybase market book <productKey> [limit]");
         reply.send("/jsirgalaxybase market claims");
         reply.send("/jsirgalaxybase market claim <custodyId>");
+        reply.send("定制商品市场入口（custom 子入口）:");
+        reply.send("/jsirgalaxybase market custom list hand <price>  (仅允许当前手持单件)");
+        reply.send("/jsirgalaxybase market custom browse [limit]");
+        reply.send("/jsirgalaxybase market custom inspect <listingId>");
+        reply.send("/jsirgalaxybase market custom buy <listingId>");
+        reply.send("/jsirgalaxybase market custom claim <listingId>");
+        reply.send("/jsirgalaxybase market custom cancel <listingId>");
+        reply.send("/jsirgalaxybase market custom pending");
+        reply.send("汇率市场入口（quote / exchange 兼容子入口）:");
+        reply.send("/jsirgalaxybase market quote hand");
+        reply.send("/jsirgalaxybase market exchange hand");
+        reply.send("共享运维入口:");
         reply.send("/jsirgalaxybase market recover [limit]");
     }
 
@@ -1136,11 +1467,14 @@ public class GalaxyBaseCommand extends CommandBase {
         private final String productKey;
         private final boolean stackable;
         private final ItemStack snapshot;
+        private final StandardizedMarketAdmissionDecision admissionDecision;
 
-        HeldStandardizedItem(String productKey, boolean stackable, ItemStack snapshot) {
+        HeldStandardizedItem(String productKey, boolean stackable, ItemStack snapshot,
+            StandardizedMarketAdmissionDecision admissionDecision) {
             this.productKey = productKey;
             this.stackable = stackable;
             this.snapshot = snapshot;
+            this.admissionDecision = admissionDecision;
         }
     }
 }

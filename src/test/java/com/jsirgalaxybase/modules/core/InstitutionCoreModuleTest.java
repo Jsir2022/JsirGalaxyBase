@@ -39,7 +39,7 @@ public class InstitutionCoreModuleTest {
 
     @Test
     public void serverStartingOnDedicatedServerAssemblesSharedMarketRuntime() throws Exception {
-        ModuleContext context = new ModuleContext(false, createServerConfiguration(true, "test-server"));
+        ModuleContext context = new ModuleContext(false, createServerConfiguration(true, "test-server"), null);
         BankingInfrastructure bankingInfrastructure = new BankingInfrastructure(null, null, null, null, null, null);
         MarketInfrastructure marketInfrastructure = new MarketInfrastructure(new NoOpOrderBookRepository(),
             new NoOpCustodyRepository(), new NoOpOperationLogRepository(), new NoOpTradeRecordRepository(),
@@ -67,7 +67,7 @@ public class InstitutionCoreModuleTest {
 
     @Test
     public void serverStartingOnNonDedicatedServerSkipsBankingAndMarketRuntime() throws Exception {
-        ModuleContext context = new ModuleContext(false, createServerConfiguration(true, "test-server"));
+        ModuleContext context = new ModuleContext(false, createServerConfiguration(true, "test-server"), null);
         TestInstitutionCoreModule module = new TestInstitutionCoreModule(new BankingInfrastructure(null, null, null,
             null, null, null), new MarketInfrastructure(new NoOpOrderBookRepository(), new NoOpCustodyRepository(),
                 new NoOpOperationLogRepository(), new NoOpTradeRecordRepository(),

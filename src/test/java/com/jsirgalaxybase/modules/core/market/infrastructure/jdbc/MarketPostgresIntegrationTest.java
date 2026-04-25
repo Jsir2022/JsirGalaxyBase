@@ -35,11 +35,23 @@ import com.jsirgalaxybase.modules.core.market.application.MarketRecoveryMetadata
 import com.jsirgalaxybase.modules.core.market.application.MarketRecoveryService;
 import com.jsirgalaxybase.modules.core.market.application.MarketSettlementFacade;
 import com.jsirgalaxybase.modules.core.market.application.MarketOperationException;
+import com.jsirgalaxybase.modules.core.market.application.CustomMarketService;
+import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketAdmissionDecision;
+import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketAdmissionReason;
+import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketCatalogEntry;
+import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketCatalogVersion;
+import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketProductCatalog;
+import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketProductParser;
 import com.jsirgalaxybase.modules.core.market.application.StandardizedSpotMarketService;
 import com.jsirgalaxybase.modules.core.market.application.command.ClaimMarketAssetCommand;
 import com.jsirgalaxybase.modules.core.market.application.command.CreateBuyOrderCommand;
 import com.jsirgalaxybase.modules.core.market.application.command.CancelSellOrderCommand;
+import com.jsirgalaxybase.modules.core.market.application.command.CancelCustomMarketListingCommand;
+import com.jsirgalaxybase.modules.core.market.application.command.ClaimCustomMarketListingCommand;
 import com.jsirgalaxybase.modules.core.market.application.command.CreateSellOrderCommand;
+import com.jsirgalaxybase.modules.core.market.application.command.DepositMarketInventoryCommand;
+import com.jsirgalaxybase.modules.core.market.application.command.PublishCustomMarketListingCommand;
+import com.jsirgalaxybase.modules.core.market.application.command.PurchaseCustomMarketListingCommand;
 import com.jsirgalaxybase.modules.core.market.domain.MarketCustodyInventory;
 import com.jsirgalaxybase.modules.core.market.domain.MarketCustodyStatus;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOperationLog;
@@ -47,9 +59,16 @@ import com.jsirgalaxybase.modules.core.market.domain.MarketOperationStatus;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOperationType;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOrder;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOrderStatus;
+import com.jsirgalaxybase.modules.core.market.domain.CustomMarketDeliveryStatus;
+import com.jsirgalaxybase.modules.core.market.domain.CustomMarketListingStatus;
+import com.jsirgalaxybase.modules.core.market.domain.StandardizedMarketProduct;
 import com.jsirgalaxybase.modules.core.market.infrastructure.MarketInfrastructure;
 import com.jsirgalaxybase.modules.core.market.port.MarketClaimDeliveryPort;
 import com.jsirgalaxybase.modules.core.market.repository.MarketTransactionRunner;
+
+import net.minecraft.init.Blocks;
+import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NBTTagCompound;
 
 public class MarketPostgresIntegrationTest {
 
@@ -58,6 +77,7 @@ public class MarketPostgresIntegrationTest {
     private JdbcConnectionManager connectionManager;
     private MarketInfrastructure marketInfrastructure;
     private StandardizedSpotMarketService marketService;
+    private CustomMarketService customMarketService;
 
     @Before
     public void setUp() throws Exception {
@@ -68,9 +88,11 @@ public class MarketPostgresIntegrationTest {
         testContext = PostgresTestContext.create(config);
         connectionManager = new JdbcConnectionManager(testContext.getSchemaDataSource());
         marketInfrastructure = JdbcMarketInfrastructureFactory.createShared(connectionManager);
-        marketService = new StandardizedSpotMarketService(marketInfrastructure.getOrderBookRepository(),
-            marketInfrastructure.getCustodyInventoryRepository(), marketInfrastructure.getOperationLogRepository(),
-            marketInfrastructure.getTradeRecordRepository(), marketInfrastructure.getTransactionRunner(), null);
+        marketService = createService(marketInfrastructure, marketInfrastructure.getTransactionRunner(), null, null);
+        customMarketService = new CustomMarketService(marketInfrastructure.getCustomMarketListingRepository(),
+            marketInfrastructure.getCustomMarketItemSnapshotRepository(),
+            marketInfrastructure.getCustomMarketTradeRecordRepository(),
+            marketInfrastructure.getCustomMarketAuditLogRepository(), marketInfrastructure.getTransactionRunner(), null);
     }
 
     @After
@@ -85,9 +107,10 @@ public class MarketPostgresIntegrationTest {
         MarketInfrastructure infrastructure = JdbcMarketInfrastructureFactory.create(testContext.getSchemaJdbcUrl(),
             config.username, config.password);
 
-        StandardizedSpotMarketService service = new StandardizedSpotMarketService(infrastructure.getOrderBookRepository(),
-            infrastructure.getCustodyInventoryRepository(), infrastructure.getOperationLogRepository(),
-            infrastructure.getTradeRecordRepository(), infrastructure.getTransactionRunner(), null);
+        StandardizedSpotMarketService service = createService(infrastructure, infrastructure.getTransactionRunner(), null,
+            null);
+        service.depositInventory(new DepositMarketInventoryCommand("req-market-factory-deposit", "player-factory",
+            "test-server", "minecraft:stone:0", 8L, true));
         StandardizedSpotMarketService.CreateSellOrderResult result = service.createSellOrder(new CreateSellOrderCommand(
             "req-market-factory", "player-factory", "test-server", "minecraft:stone:0", 8L, true, 12L));
 
@@ -96,7 +119,46 @@ public class MarketPostgresIntegrationTest {
     }
 
     @Test
+    public void factoryRejectsOutdatedMarketSchemaAndGuidesOperatorToRunMigration() throws Exception {
+        try (Connection connection = testContext.getSchemaDataSource().getConnection();
+            Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO \"" + testContext.schemaName + "\", public");
+            statement.execute("ALTER TABLE market_order DROP COLUMN filled_quantity");
+            statement.execute("ALTER TABLE custom_market_trade_record DROP COLUMN delivery_status");
+        }
+
+        try {
+            JdbcMarketInfrastructureFactory.create(testContext.getSchemaJdbcUrl(), config.username, config.password);
+            fail("Expected outdated market schema to be rejected");
+        } catch (MarketOperationException exception) {
+            assertTrue(exception.getMessage().contains("market_order.filled_quantity"));
+            assertTrue(exception.getMessage().contains("custom_market_trade_record.delivery_status"));
+            assertTrue(exception.getMessage().contains("scripts/db-migrate.sh"));
+        }
+    }
+
+    @Test
+    public void depositInventoryPersistsAvailableCustodyAndOperationOnPostgres() {
+        StandardizedSpotMarketService.DepositInventoryResult result = marketService.depositInventory(
+            new DepositMarketInventoryCommand("req-market-deposit", "player-a", "test-server", "minecraft:stone:0",
+                12L, true));
+
+        Optional<MarketCustodyInventory> storedCustody = marketInfrastructure.getCustodyInventoryRepository()
+            .findById(result.getCustody().getCustodyId());
+        Optional<MarketOperationLog> storedOperation = marketInfrastructure.getOperationLogRepository()
+            .findByRequestId("req-market-deposit");
+
+        assertTrue(storedCustody.isPresent());
+        assertTrue(storedOperation.isPresent());
+        assertEquals(MarketCustodyStatus.AVAILABLE, storedCustody.get().getStatus());
+        assertEquals(MarketOperationType.INVENTORY_DEPOSIT, storedOperation.get().getOperationType());
+        assertEquals(MarketOperationStatus.COMPLETED, storedOperation.get().getStatus());
+    }
+
+    @Test
     public void createSellAndCancelPersistOnPostgres() {
+        marketService.depositInventory(new DepositMarketInventoryCommand("req-market-sell-deposit", "player-a",
+            "test-server", "minecraft:stone:0", 32L, true));
         StandardizedSpotMarketService.CreateSellOrderResult created = marketService.createSellOrder(
             new CreateSellOrderCommand("req-market-sell-create", "player-a", "test-server", "minecraft:stone:0",
                 32L, true, 15L));
@@ -108,18 +170,22 @@ public class MarketPostgresIntegrationTest {
         Optional<MarketCustodyInventory> storedCustody = marketInfrastructure.getCustodyInventoryRepository()
             .findById(cancelled.getCustody().getCustodyId());
         List<MarketCustodyInventory> claimables = marketService.listClaimableAssets("player-a");
+        List<MarketCustodyInventory> available = marketService.listAvailableAssets("player-a", "minecraft:stone:0");
 
         assertTrue(storedOrder.isPresent());
         assertTrue(storedCustody.isPresent());
         assertEquals(MarketOrderStatus.CANCELLED, storedOrder.get().getStatus());
-        assertEquals(MarketCustodyStatus.CLAIMABLE, storedCustody.get().getStatus());
+        assertEquals(MarketCustodyStatus.AVAILABLE, storedCustody.get().getStatus());
         assertEquals(MarketOperationStatus.COMPLETED, cancelled.getOperationLog().getStatus());
-        assertEquals(1, claimables.size());
-        assertEquals(cancelled.getCustody().getCustodyId(), claimables.get(0).getCustodyId());
+        assertTrue(claimables.isEmpty());
+        assertEquals(1, available.size());
+        assertEquals(cancelled.getCustody().getCustodyId(), available.get(0).getCustodyId());
     }
 
     @Test
     public void createSellRejectsRequestIdSemanticConflictOnPostgres() {
+        marketService.depositInventory(new DepositMarketInventoryCommand("req-market-conflict-deposit", "player-a",
+            "test-server", "minecraft:stone:0", 16L, true));
         marketService.createSellOrder(new CreateSellOrderCommand("req-market-conflict", "player-a", "test-server",
             "minecraft:stone:0", 16L, true, 10L));
 
@@ -134,6 +200,8 @@ public class MarketPostgresIntegrationTest {
 
     @Test
     public void recoveryRequiredScanFindsProcessingOperationOnPostgres() {
+        marketService.depositInventory(new DepositMarketInventoryCommand("req-market-recovery-create-deposit", "player-a",
+            "test-server", "minecraft:stone:0", 4L, true));
         StandardizedSpotMarketService.CreateSellOrderResult created = marketService.createSellOrder(
             new CreateSellOrderCommand("req-market-recovery-create", "player-a", "test-server", "minecraft:stone:0",
                 4L, true, 9L));
@@ -162,10 +230,8 @@ public class MarketPostgresIntegrationTest {
     public void buyRecoveryReleasesFrozenFundsOnPostgres() {
         RecordingSettlementFacade settlementFacade = new RecordingSettlementFacade();
         settlementFacade.registerPlayer("buyer");
-        StandardizedSpotMarketService recoveryServiceTarget = new StandardizedSpotMarketService(
-            marketInfrastructure.getOrderBookRepository(), marketInfrastructure.getCustodyInventoryRepository(),
-            marketInfrastructure.getOperationLogRepository(), marketInfrastructure.getTradeRecordRepository(),
-            new FailAfterCallbackTransactionRunner(marketInfrastructure.getTransactionRunner()), settlementFacade);
+        StandardizedSpotMarketService recoveryServiceTarget = createService(marketInfrastructure,
+            new FailAfterCallbackTransactionRunner(marketInfrastructure.getTransactionRunner()), settlementFacade, null);
 
         try {
             recoveryServiceTarget.createBuyOrder(new CreateBuyOrderCommand("req-market-buy-recovery", "buyer",
@@ -191,22 +257,27 @@ public class MarketPostgresIntegrationTest {
 
     @Test
     public void claimMarketAssetPersistsClaimedCustodyOnPostgres() {
-        StandardizedSpotMarketService.CreateSellOrderResult created = marketService.createSellOrder(
+        RecordingSettlementFacade settlementFacade = new RecordingSettlementFacade();
+        settlementFacade.registerPlayer("buyer");
+        settlementFacade.registerPlayer("player-claim");
+        StandardizedSpotMarketService matchingService = createService(marketInfrastructure,
+            marketInfrastructure.getTransactionRunner(), settlementFacade, null);
+
+        matchingService.depositInventory(new DepositMarketInventoryCommand("req-market-claim-sell-deposit",
+            "player-claim", "test-server", "minecraft:stone:0", 5L, true));
+        matchingService.createBuyOrder(new CreateBuyOrderCommand("req-market-claim-buy", "buyer", "test-server",
+            "minecraft:stone:0", 5L, true, 14L));
+        StandardizedSpotMarketService.CreateSellOrderResult created = matchingService.createSellOrder(
             new CreateSellOrderCommand("req-market-claim-sell", "player-claim", "test-server",
                 "minecraft:stone:0", 5L, true, 14L));
-        StandardizedSpotMarketService.CancelSellOrderResult cancelled = marketService.cancelSellOrder(
-            new CancelSellOrderCommand("req-market-claim-cancel", "player-claim", "test-server",
-                created.getOrder().getOrderId()));
 
         RecordingClaimDeliveryPort claimDeliveryPort = new RecordingClaimDeliveryPort();
-        StandardizedSpotMarketService claimService = new StandardizedSpotMarketService(
-            marketInfrastructure.getOrderBookRepository(), marketInfrastructure.getCustodyInventoryRepository(),
-            marketInfrastructure.getOperationLogRepository(), marketInfrastructure.getTradeRecordRepository(),
-            marketInfrastructure.getTransactionRunner(), null, new com.jsirgalaxybase.modules.core.market.application.StandardizedMarketProductParser(), claimDeliveryPort);
+        StandardizedSpotMarketService claimService = createService(marketInfrastructure,
+            marketInfrastructure.getTransactionRunner(), null, claimDeliveryPort);
 
         StandardizedSpotMarketService.ClaimMarketAssetResult claimed = claimService.claimMarketAsset(
-            new ClaimMarketAssetCommand("req-market-claim-asset", "player-claim", "test-server",
-                cancelled.getCustody().getCustodyId()));
+            new ClaimMarketAssetCommand("req-market-claim-asset", "buyer", "test-server",
+                created.getClaimableAssets().get(0).getCustodyId()));
 
         Optional<MarketCustodyInventory> storedCustody = marketInfrastructure.getCustodyInventoryRepository()
             .findById(claimed.getCustody().getCustodyId());
@@ -218,6 +289,179 @@ public class MarketPostgresIntegrationTest {
         assertEquals(MarketCustodyStatus.CLAIMED, storedCustody.get().getStatus());
         assertEquals(MarketOperationStatus.COMPLETED, storedOperation.get().getStatus());
         assertEquals(1, claimDeliveryPort.deliveries.size());
+    }
+
+    @Test
+    public void customPublishPersistsSnapshotAndAuditOnPostgres() {
+        CustomMarketService.PublishListingResult result = customMarketService.publishListing(
+            new PublishCustomMarketListingCommand("req-custom-market-pg-publish", "seller-a", "test-server",
+                1800L, "STARCOIN", namedCustomStack("Relic Stone", 1, "seller-a")));
+
+        assertTrue(marketInfrastructure.getCustomMarketListingRepository().findById(result.getListing().getListingId())
+            .isPresent());
+        assertTrue(marketInfrastructure.getCustomMarketItemSnapshotRepository().findByListingId(
+            result.getListing().getListingId()).isPresent());
+        assertTrue(marketInfrastructure.getCustomMarketAuditLogRepository().findByRequestId(
+            "req-custom-market-pg-publish").isPresent());
+        assertEquals(CustomMarketListingStatus.ACTIVE, result.getListing().getListingStatus());
+        assertEquals(CustomMarketDeliveryStatus.ESCROW_HELD, result.getListing().getDeliveryStatus());
+    }
+
+    @Test
+    public void customPublishRejectsStackedListingOnPostgres() {
+        try {
+            customMarketService.publishListing(new PublishCustomMarketListingCommand("req-custom-market-pg-stacked",
+                "seller-a", "test-server", 1800L, "STARCOIN", namedCustomStack("Relic Stone", 4, "seller-a")));
+            fail("Expected stacked custom listing to be rejected");
+        } catch (MarketOperationException exception) {
+            assertTrue(exception.getMessage().contains("exactly one item"));
+        }
+    }
+
+    @Test
+    public void customPurchasePersistsPendingClaimStateOnPostgres() {
+        RecordingSettlementFacade settlementFacade = new RecordingSettlementFacade();
+        settlementFacade.registerPlayer("seller-a");
+        settlementFacade.registerPlayer("buyer-b");
+        CustomMarketService purchasingService = new CustomMarketService(
+            marketInfrastructure.getCustomMarketListingRepository(),
+            marketInfrastructure.getCustomMarketItemSnapshotRepository(),
+            marketInfrastructure.getCustomMarketTradeRecordRepository(),
+            marketInfrastructure.getCustomMarketAuditLogRepository(), marketInfrastructure.getTransactionRunner(),
+            settlementFacade);
+
+        CustomMarketService.PublishListingResult publishResult = purchasingService.publishListing(
+            new PublishCustomMarketListingCommand("req-custom-market-pg-buy-publish", "seller-a", "test-server",
+                2200L, "STARCOIN", namedCustomStack("Ancient Gear", 1, "seller-a")));
+        CustomMarketService.PurchaseListingResult purchaseResult = purchasingService.purchaseListing(
+            new PurchaseCustomMarketListingCommand("req-custom-market-pg-buy", "buyer-b", "test-server",
+                publishResult.getListing().getListingId()));
+
+        assertEquals(CustomMarketListingStatus.SOLD, purchaseResult.getListing().getListingStatus());
+        assertEquals(CustomMarketDeliveryStatus.BUYER_PENDING_CLAIM,
+            purchaseResult.getListing().getDeliveryStatus());
+        assertEquals(1, settlementFacade.freezeCommands.size());
+        assertEquals(1, settlementFacade.settleCommands.size());
+        assertTrue(marketInfrastructure.getCustomMarketTradeRecordRepository().findByListingId(
+            publishResult.getListing().getListingId()).isPresent());
+        assertEquals(1, purchasingService.listBuyerPendingClaims("buyer-b").size());
+        assertEquals(1, purchasingService.listSellerPendingDeliveries("seller-a").size());
+    }
+
+    @Test
+    public void customClaimCompletesDeliveryAndClearsPendingViewsOnPostgres() {
+        RecordingSettlementFacade settlementFacade = new RecordingSettlementFacade();
+        settlementFacade.registerPlayer("seller-a");
+        settlementFacade.registerPlayer("buyer-b");
+        CustomMarketService purchasingService = new CustomMarketService(
+            marketInfrastructure.getCustomMarketListingRepository(),
+            marketInfrastructure.getCustomMarketItemSnapshotRepository(),
+            marketInfrastructure.getCustomMarketTradeRecordRepository(),
+            marketInfrastructure.getCustomMarketAuditLogRepository(), marketInfrastructure.getTransactionRunner(),
+            settlementFacade);
+
+        CustomMarketService.PublishListingResult publishResult = purchasingService.publishListing(
+            new PublishCustomMarketListingCommand("req-custom-market-pg-claim-publish", "seller-a", "test-server",
+                2200L, "STARCOIN", namedCustomStack("Ancient Gear", 1, "seller-a")));
+        purchasingService.purchaseListing(new PurchaseCustomMarketListingCommand("req-custom-market-pg-claim-buy",
+            "buyer-b", "test-server", publishResult.getListing().getListingId()));
+
+        CustomMarketService.ClaimListingResult claimResult = purchasingService.claimPurchasedListing(
+            new ClaimCustomMarketListingCommand("req-custom-market-pg-claim", "buyer-b", "test-server",
+                publishResult.getListing().getListingId()));
+
+        assertEquals(CustomMarketDeliveryStatus.COMPLETED, claimResult.getListing().getDeliveryStatus());
+        assertEquals(CustomMarketDeliveryStatus.COMPLETED, claimResult.getTradeRecord().getDeliveryStatus());
+        assertTrue(marketInfrastructure.getCustomMarketAuditLogRepository().findByRequestId(
+            "req-custom-market-pg-claim").isPresent());
+        assertEquals(0, purchasingService.listBuyerPendingClaims("buyer-b").size());
+        assertEquals(0, purchasingService.listSellerPendingDeliveries("seller-a").size());
+    }
+
+    @Test
+    public void depositRecoveryCompletesAvailableCustodyOnPostgres() {
+        StandardizedSpotMarketService recoveryServiceTarget = createService(marketInfrastructure,
+            new FailAfterCallbackTransactionRunner(marketInfrastructure.getTransactionRunner()), null, null);
+
+        try {
+            recoveryServiceTarget.depositInventory(new DepositMarketInventoryCommand("req-market-deposit-recovery",
+                "player-a", "test-server", "minecraft:stone:0", 7L, true));
+            fail("expected simulated failure");
+        } catch (RuntimeException expected) {
+            assertTrue(expected.getMessage().contains("post-commit"));
+        }
+
+        MarketOperationLog failedOperation = marketInfrastructure.getOperationLogRepository()
+            .findByRequestId("req-market-deposit-recovery").get();
+        assertEquals(MarketOperationStatus.RECOVERY_REQUIRED, failedOperation.getStatus());
+        assertEquals(MarketCustodyStatus.AVAILABLE,
+            marketInfrastructure.getCustodyInventoryRepository().findById(failedOperation.getRelatedCustodyId()).get()
+                .getStatus());
+
+        MarketRecoveryService recoveryService = new MarketRecoveryService(marketInfrastructure.getOrderBookRepository(),
+            marketInfrastructure.getCustodyInventoryRepository(), marketInfrastructure.getOperationLogRepository(),
+            marketInfrastructure.getTransactionRunner(), null);
+        List<MarketOperationLog> recovered = recoveryService.scanAndEscalateIncompleteOperations(10);
+
+        assertEquals(1, recovered.size());
+        assertEquals(MarketOperationStatus.COMPLETED, recovered.get(0).getStatus());
+        assertEquals(MarketCustodyStatus.AVAILABLE,
+            marketInfrastructure.getCustodyInventoryRepository().findById(failedOperation.getRelatedCustodyId()).get()
+                .getStatus());
+    }
+
+    private StandardizedSpotMarketService createService(MarketInfrastructure infrastructure,
+        MarketTransactionRunner transactionRunner, MarketSettlementFacade settlementFacade,
+        MarketClaimDeliveryPort claimDeliveryPort) {
+        return new StandardizedSpotMarketService(infrastructure.getOrderBookRepository(),
+            infrastructure.getCustodyInventoryRepository(), infrastructure.getOperationLogRepository(),
+            infrastructure.getTradeRecordRepository(), transactionRunner, settlementFacade,
+            new StandardizedMarketProductParser(), new PostgresTestProductCatalog(), claimDeliveryPort);
+    }
+
+    private static final class PostgresTestProductCatalog implements StandardizedMarketProductCatalog {
+
+        private final StandardizedMarketProductParser parser = new StandardizedMarketProductParser();
+
+        @Override
+        public StandardizedMarketCatalogVersion getCatalogVersion() {
+            return new StandardizedMarketCatalogVersion("postgres-test-catalog-v1", "Postgres 测试目录 v1");
+        }
+
+        @Override
+        public String getCatalogSourceKey() {
+            return "postgres-test-source";
+        }
+
+        @Override
+        public String getCatalogSourceDescription() {
+            return "Postgres Test Source";
+        }
+
+        @Override
+        public StandardizedMarketAdmissionDecision evaluateProduct(String productKey) {
+            StandardizedMarketProduct product = parser.parse(productKey);
+            return new StandardizedMarketAdmissionDecision(getCatalogVersion(),
+                new StandardizedMarketCatalogEntry(product, "postgres-test", "统一定义、统一计量、统一托管", "postgres"),
+                true, StandardizedMarketAdmissionReason.CATALOG_ADMITTED, "admitted", getCatalogSourceKey(),
+                getCatalogSourceDescription());
+        }
+
+        @Override
+        public StandardizedMarketAdmissionDecision evaluateStack(net.minecraft.item.ItemStack stack) {
+            return evaluateProduct(cpw.mods.fml.common.registry.GameRegistry.findUniqueIdentifierFor(stack.getItem()) + ":"
+                + stack.getItemDamage());
+        }
+
+        @Override
+        public StandardizedMarketProduct requireTradableProduct(String productKey) {
+            return evaluateProduct(productKey).requireProduct();
+        }
+
+        @Override
+        public StandardizedMarketProduct requireTradableStack(net.minecraft.item.ItemStack stack) {
+            return evaluateStack(stack).requireProduct();
+        }
     }
 
     private static final class PostgresTestContext {
@@ -304,6 +548,17 @@ public class MarketPostgresIntegrationTest {
         }
     }
 
+    private ItemStack namedCustomStack(String displayName, int stackSize, String owner) {
+        ItemStack stack = new ItemStack(Blocks.stone, stackSize, 0);
+        NBTTagCompound tag = new NBTTagCompound();
+        NBTTagCompound display = new NBTTagCompound();
+        display.setString("Name", displayName);
+        tag.setTag("display", display);
+        tag.setString("owner", owner);
+        stack.setTagCompound(tag);
+        return stack;
+    }
+
     private static final class FailAfterCallbackTransactionRunner implements MarketTransactionRunner {
 
         private final MarketTransactionRunner delegate;
@@ -329,7 +584,9 @@ public class MarketPostgresIntegrationTest {
 
         private final java.util.Map<String, BankAccount> playerAccounts = new java.util.HashMap<String, BankAccount>();
         private final BankAccount taxAccount = newAccount(999L, "tax");
+        private final List<FrozenBalanceCommand> freezeCommands = new ArrayList<FrozenBalanceCommand>();
         private final List<FrozenBalanceCommand> releaseCommands = new ArrayList<FrozenBalanceCommand>();
+        private final List<InternalTransferCommand> settleCommands = new ArrayList<InternalTransferCommand>();
         private long nextAccountId = 1L;
 
         private void registerPlayer(String playerRef) {
@@ -352,6 +609,7 @@ public class MarketPostgresIntegrationTest {
 
         @Override
         public BankPostingResult freezeBuyerFunds(FrozenBalanceCommand command) {
+            freezeCommands.add(command);
             return emptyPostingResult();
         }
 
@@ -363,6 +621,7 @@ public class MarketPostgresIntegrationTest {
 
         @Override
         public BankPostingResult settleFromFrozenFunds(InternalTransferCommand command) {
+            settleCommands.add(command);
             return emptyPostingResult();
         }
 

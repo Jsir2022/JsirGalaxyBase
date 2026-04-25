@@ -6,6 +6,7 @@ import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class TaskCoinExchangePlannerTest {
 
@@ -60,6 +61,22 @@ public class TaskCoinExchangePlannerTest {
         assertEquals(20000L, quote.getEffectiveExchangeValue());
         assertEquals(20000L, quote.getContributionValue());
         assertEquals(TaskCoinExchangePlanner.RULE_VERSION, quote.getExchangeRuleVersion());
+    }
+
+    @Test
+    public void quoteTracksFormalInputFieldsWithoutDiscount() {
+        TaskCoinExchangeQuote quote = planner.quote("dreamcraft:item.CoinSmith", 7).get();
+
+        assertEquals(7L, quote.getInputQuantity());
+        assertEquals(7L, quote.getInputTotalFaceValue());
+        assertEquals(0, quote.getDiscountBasisPoints());
+    }
+
+    @Test
+    public void helperRecognizesUnsupportedHigherTierTaskCoin() {
+        assertTrue(planner.isTaskCoinRegistryName("dreamcraft:item.CoinMinerV"));
+        assertTrue(planner.isUnsupportedTaskCoinTier("dreamcraft:item.CoinMinerV"));
+        assertFalse(planner.isUnsupportedTaskCoinTier("dreamcraft:item.CoinMinerIV"));
     }
 
     @Test

@@ -1,9 +1,17 @@
 package com.jsirgalaxybase.modules.core.banking.infrastructure.jdbc;
 
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import javax.sql.DataSource;
 
@@ -19,12 +27,16 @@ import com.jsirgalaxybase.modules.core.banking.repository.LedgerEntryRepository;
 
 public final class JdbcBankingInfrastructureFactory {
 
+    private static final String MIGRATION_COMMAND = "scripts/db-migrate.sh";
+
     private static final String[] REQUIRED_BANKING_TABLES = {
         "bank_account",
         "bank_transaction",
         "ledger_entry",
         "coin_exchange_record"
     };
+
+    private static final Map<String, String[]> REQUIRED_BANKING_COLUMNS = createRequiredColumns();
 
     private JdbcBankingInfrastructureFactory() {}
 
@@ -65,9 +77,74 @@ public final class JdbcBankingInfrastructureFactory {
             public Void doInConnection(Connection connection) throws SQLException {
                 validateSelectOne(connection);
                 validateRequiredTables(connection);
+                validateRequiredColumns(connection);
                 return null;
             }
         });
+    }
+
+    private static Map<String, String[]> createRequiredColumns() {
+        Map<String, String[]> columns = new LinkedHashMap<String, String[]>();
+        columns.put("bank_account", new String[] {
+            "account_id",
+            "account_no",
+            "account_type",
+            "owner_type",
+            "owner_ref",
+            "currency_code",
+            "available_balance",
+            "frozen_balance",
+            "status",
+            "version",
+            "display_name",
+            "metadata_json",
+            "created_at",
+            "updated_at"
+        });
+        columns.put("bank_transaction", new String[] {
+            "transaction_id",
+            "request_id",
+            "transaction_type",
+            "business_type",
+            "business_ref",
+            "source_server_id",
+            "operator_type",
+            "operator_ref",
+            "player_ref",
+            "comment",
+            "extra_json",
+            "created_at"
+        });
+        columns.put("ledger_entry", new String[] {
+            "entry_id",
+            "transaction_id",
+            "account_id",
+            "entry_side",
+            "amount",
+            "balance_before",
+            "balance_after",
+            "frozen_balance_before",
+            "frozen_balance_after",
+            "currency_code",
+            "sequence_in_tx",
+            "created_at"
+        });
+        columns.put("coin_exchange_record", new String[] {
+            "exchange_id",
+            "transaction_id",
+            "player_ref",
+            "coin_family",
+            "coin_tier",
+            "coin_face_value",
+            "coin_quantity",
+            "effective_exchange_value",
+            "contribution_value",
+            "exchange_rule_version",
+            "source_server_id",
+            "extra_json",
+            "created_at"
+        });
+        return columns;
     }
 
     private static void validateSelectOne(Connection connection) throws SQLException {
@@ -87,6 +164,7 @@ public final class JdbcBankingInfrastructureFactory {
     }
 
     private static void validateRequiredTables(Connection connection) throws SQLException {
+        List<String> missingTables = new ArrayList<String>();
         PreparedStatement statement = connection.prepareStatement(
             "SELECT EXISTS (" +
                 "SELECT 1 FROM pg_catalog.pg_class c " +
@@ -97,7 +175,7 @@ public final class JdbcBankingInfrastructureFactory {
                 ResultSet resultSet = statement.executeQuery();
                 try {
                     if (!resultSet.next() || !resultSet.getBoolean(1)) {
-                        throw new BankingException("Required banking table is missing: " + tableName);
+                        missingTables.add(tableName);
                     }
                 } finally {
                     resultSet.close();
@@ -106,5 +184,65 @@ public final class JdbcBankingInfrastructureFactory {
         } finally {
             statement.close();
         }
+
+        if (!missingTables.isEmpty()) {
+            throw schemaDrift("missing tables: " + joinValues(missingTables));
+        }
+    }
+
+    private static void validateRequiredColumns(Connection connection) throws SQLException {
+        List<String> missingColumns = new ArrayList<String>();
+        for (Map.Entry<String, String[]> entry : REQUIRED_BANKING_COLUMNS.entrySet()) {
+            Set<String> actualColumns = loadVisibleTableColumns(connection, entry.getKey());
+            for (String columnName : entry.getValue()) {
+                if (!actualColumns.contains(columnName)) {
+                    missingColumns.add(entry.getKey() + "." + columnName);
+                }
+            }
+        }
+
+        if (!missingColumns.isEmpty()) {
+            throw schemaDrift("missing columns: " + joinValues(missingColumns));
+        }
+    }
+
+    private static Set<String> loadVisibleTableColumns(Connection connection, String tableName) throws SQLException {
+        DatabaseMetaData metadata = connection.getMetaData();
+        String currentSchema = null;
+        try (Statement statement = connection.createStatement();
+            ResultSet schemas = statement.executeQuery("SELECT current_schema()")) {
+            if (schemas.next()) {
+                currentSchema = schemas.getString(1);
+            }
+        }
+
+        ResultSet columns = metadata.getColumns(null, currentSchema, tableName, null);
+        try {
+            Set<String> names = new LinkedHashSet<String>();
+            while (columns.next()) {
+                names.add(columns.getString("COLUMN_NAME"));
+            }
+            return names;
+        } finally {
+            columns.close();
+        }
+    }
+
+    private static BankingException schemaDrift(String details) {
+        return new BankingException(
+            "Banking PostgreSQL schema is outdated or drifted: " + details +
+                ". Run " + MIGRATION_COMMAND +
+                " against the target database before starting the dedicated server. Startup will not auto-mutate the schema.");
+    }
+
+    private static String joinValues(List<String> values) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < values.size(); i++) {
+            if (i > 0) {
+                builder.append(", ");
+            }
+            builder.append(values.get(i));
+        }
+        return builder.toString();
     }
 }

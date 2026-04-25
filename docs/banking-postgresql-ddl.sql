@@ -4,7 +4,8 @@
 -- 说明：
 -- 1. 这份 SQL 对应 docs/banking-schema-design.md 中的一期核心表设计。
 -- 2. 当前定位是“结构草案”，用于先固定字段、约束、索引和审计边界。
--- 3. 真正上线前，建议再补 migration 编号、权限策略和初始化账户脚本。
+-- 3. 实际数据库升级请优先走 ops/sql/migrations/ 下的版本化 migration，并通过 scripts/db-migrate.sh 执行。
+-- 4. 应用启动只负责 fail-fast 校验 schema 是否到位，不负责在启动时隐式修改数据库结构。
 
 BEGIN;
 

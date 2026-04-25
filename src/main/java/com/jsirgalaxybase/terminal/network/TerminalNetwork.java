@@ -18,6 +18,11 @@ public final class TerminalNetwork {
         }
 
         initialized = true;
-        CHANNEL.registerMessage(OpenTerminalMessage.Handler.class, OpenTerminalMessage.class, 0, Side.SERVER);
+        CHANNEL.registerMessage(OpenTerminalRequestMessage.Handler.class, OpenTerminalRequestMessage.class, 0,
+            Side.SERVER);
+        CHANNEL.registerMessage(OpenTerminalApprovedMessage.Handler.class, OpenTerminalApprovedMessage.class, 1,
+            Side.CLIENT);
+        CHANNEL.registerMessage(TerminalActionMessage.Handler.class, TerminalActionMessage.class, 2, Side.SERVER);
+        CHANNEL.registerMessage(TerminalSnapshotMessage.Handler.class, TerminalSnapshotMessage.class, 3, Side.CLIENT);
     }
 }

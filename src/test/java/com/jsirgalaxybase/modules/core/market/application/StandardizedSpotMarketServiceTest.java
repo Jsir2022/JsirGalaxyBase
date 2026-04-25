@@ -1,6 +1,7 @@
 package com.jsirgalaxybase.modules.core.market.application;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -27,6 +28,7 @@ import com.jsirgalaxybase.modules.core.market.application.command.CancelSellOrde
 import com.jsirgalaxybase.modules.core.market.application.command.ClaimMarketAssetCommand;
 import com.jsirgalaxybase.modules.core.market.application.command.CreateBuyOrderCommand;
 import com.jsirgalaxybase.modules.core.market.application.command.CreateSellOrderCommand;
+import com.jsirgalaxybase.modules.core.market.application.command.DepositMarketInventoryCommand;
 import com.jsirgalaxybase.modules.core.market.domain.MarketCustodyInventory;
 import com.jsirgalaxybase.modules.core.market.domain.MarketCustodyStatus;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOperationLog;
@@ -51,8 +53,10 @@ public class StandardizedSpotMarketServiceTest {
         FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
         FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
         FakeMarketOperationLogRepository operationLogRepository = new FakeMarketOperationLogRepository();
-        StandardizedSpotMarketService service = new StandardizedSpotMarketService(orderRepository, custodyRepository,
+        StandardizedSpotMarketService service = createService(orderRepository, custodyRepository,
             operationLogRepository);
+
+        depositInventory(service, "req-sell-create-deposit", "player-a", "minecraft:stone:0", 64L, true);
 
         StandardizedSpotMarketService.CreateSellOrderResult result = service.createSellOrder(new CreateSellOrderCommand(
             "req-sell-create", "player-a", "test-server", "minecraft:stone:0", 64L, true, 12L));
@@ -68,12 +72,14 @@ public class StandardizedSpotMarketServiceTest {
     }
 
     @Test
-    public void cancelSellOrderMovesEscrowIntoClaimableAndCancelsOrder() {
+    public void cancelSellOrderMovesEscrowIntoAvailableAndCancelsOrder() {
         FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
         FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
         FakeMarketOperationLogRepository operationLogRepository = new FakeMarketOperationLogRepository();
-        StandardizedSpotMarketService service = new StandardizedSpotMarketService(orderRepository, custodyRepository,
+        StandardizedSpotMarketService service = createService(orderRepository, custodyRepository,
             operationLogRepository);
+
+        depositInventory(service, "req-sell-create-cancel-deposit", "player-a", "minecraft:stone:0", 32L, true);
 
         StandardizedSpotMarketService.CreateSellOrderResult created = service.createSellOrder(new CreateSellOrderCommand(
             "req-sell-create-cancel", "player-a", "test-server", "minecraft:stone:0", 32L, true, 15L));
@@ -83,9 +89,61 @@ public class StandardizedSpotMarketServiceTest {
 
         assertEquals(MarketOrderStatus.CANCELLED, cancelled.getOrder().getStatus());
         assertEquals(0L, cancelled.getOrder().getOpenQuantity());
-        assertEquals(MarketCustodyStatus.CLAIMABLE, cancelled.getCustody().getStatus());
+        assertEquals(MarketCustodyStatus.AVAILABLE, cancelled.getCustody().getStatus());
         assertEquals(MarketOperationStatus.COMPLETED, cancelled.getOperationLog().getStatus());
         assertEquals(MarketOperationType.SELL_ORDER_CANCEL, cancelled.getOperationLog().getOperationType());
+    }
+
+    @Test
+    public void depositInventoryCreatesAvailableCustodyAndListsAvailableAssets() {
+        FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
+        FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
+        FakeMarketOperationLogRepository operationLogRepository = new FakeMarketOperationLogRepository();
+        StandardizedSpotMarketService service = createService(orderRepository, custodyRepository,
+            operationLogRepository);
+
+        StandardizedSpotMarketService.DepositInventoryResult result = depositInventory(service, "req-deposit", "player-a",
+            "minecraft:stone:0", 24L, true);
+
+        assertEquals(MarketCustodyStatus.AVAILABLE, result.getCustody().getStatus());
+        assertEquals(24L, result.getCustody().getQuantity());
+        assertEquals(24L, result.getTotalAvailableQuantity());
+        assertEquals(1, service.listAvailableAssets("player-a", "minecraft:stone:0").size());
+    }
+
+    @Test
+    public void createSellOrderRejectsWhenAvailableInventoryIsMissing() {
+        FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
+        FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
+        FakeMarketOperationLogRepository operationLogRepository = new FakeMarketOperationLogRepository();
+        StandardizedSpotMarketService service = createService(orderRepository, custodyRepository,
+            operationLogRepository);
+
+        try {
+            service.createSellOrder(new CreateSellOrderCommand(
+                "req-sell-without-available", "player-a", "test-server", "minecraft:stone:0", 8L, true, 12L));
+            fail("expected sell create to require AVAILABLE inventory");
+        } catch (MarketOperationException expected) {
+            assertTrue(expected.getMessage().toLowerCase().contains("available"));
+        }
+    }
+
+    @Test
+    public void depositInventoryRejectsProductOutsideCatalogBoundary() {
+        FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
+        FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
+        FakeMarketOperationLogRepository operationLogRepository = new FakeMarketOperationLogRepository();
+        StandardizedSpotMarketService service = new StandardizedSpotMarketService(orderRepository, custodyRepository,
+            operationLogRepository, new FakeMarketTradeRecordRepository(), new DirectMarketTransactionRunner(), null,
+            new StandardizedMarketProductParser(), new RejectingProductCatalog(), null);
+
+        try {
+            service.depositInventory(new DepositMarketInventoryCommand("req-reject-catalog", "player-a", "test-server",
+                "minecraft:stone:0", 8L, true));
+            fail("expected catalog boundary rejection");
+        } catch (MarketOperationException expected) {
+            assertTrue(expected.getMessage().contains("准入边界内"));
+        }
     }
 
     @Test
@@ -93,8 +151,12 @@ public class StandardizedSpotMarketServiceTest {
         FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
         FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
         FakeMarketOperationLogRepository operationLogRepository = new FakeMarketOperationLogRepository();
-        StandardizedSpotMarketService service = new StandardizedSpotMarketService(orderRepository, custodyRepository,
+        StandardizedSpotMarketService service = createService(orderRepository, custodyRepository,
             operationLogRepository);
+
+        depositInventory(service, "req-sell-sort-1-deposit", "player-a", "minecraft:stone:0", 16L, true);
+        depositInventory(service, "req-sell-sort-2-deposit", "player-b", "minecraft:stone:0", 16L, true);
+        depositInventory(service, "req-sell-sort-3-deposit", "player-c", "minecraft:stone:0", 16L, true);
 
         service.createSellOrder(new CreateSellOrderCommand(
             "req-sell-sort-1", "player-a", "test-server", "minecraft:stone:0", 16L, true, 20L));
@@ -118,8 +180,10 @@ public class StandardizedSpotMarketServiceTest {
         FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
         FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
         FakeMarketOperationLogRepository operationLogRepository = new FakeMarketOperationLogRepository();
-        StandardizedSpotMarketService service = new StandardizedSpotMarketService(orderRepository, custodyRepository,
+        StandardizedSpotMarketService service = createService(orderRepository, custodyRepository,
             operationLogRepository);
+
+        depositInventory(service, "req-conflict-deposit", "player-a", "minecraft:stone:0", 32L, true);
 
         service.createSellOrder(new CreateSellOrderCommand("req-conflict", "player-a", "test-server",
             "minecraft:stone:0", 16L, true, 10L));
@@ -138,8 +202,10 @@ public class StandardizedSpotMarketServiceTest {
         FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
         FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
         FakeMarketOperationLogRepository operationLogRepository = new FakeMarketOperationLogRepository();
-        StandardizedSpotMarketService service = new StandardizedSpotMarketService(orderRepository, custodyRepository,
+        StandardizedSpotMarketService service = createService(orderRepository, custodyRepository,
             operationLogRepository);
+
+        depositInventory(service, "req-sell-a-deposit", "player-a", "minecraft:stone:0", 32L, true);
 
         StandardizedSpotMarketService.CreateSellOrderResult first = service.createSellOrder(new CreateSellOrderCommand(
             "req-sell-a", "player-a", "test-server", "minecraft:stone:0", 16L, true, 10L));
@@ -166,7 +232,7 @@ public class StandardizedSpotMarketServiceTest {
         FakeMarketTradeRecordRepository tradeRecordRepository = new FakeMarketTradeRecordRepository();
         FakeMarketSettlementFacade settlementFacade = new FakeMarketSettlementFacade();
         settlementFacade.registerPlayer("buyer");
-        StandardizedSpotMarketService service = new StandardizedSpotMarketService(orderRepository, custodyRepository,
+        StandardizedSpotMarketService service = createService(orderRepository, custodyRepository,
             operationLogRepository, tradeRecordRepository, new DirectMarketTransactionRunner(), settlementFacade);
 
         StandardizedSpotMarketService.CreateBuyOrderResult created = service.createBuyOrder(new CreateBuyOrderCommand(
@@ -181,6 +247,7 @@ public class StandardizedSpotMarketServiceTest {
         assertEquals(created.getOrder().getReservedFunds(), settlementFacade.releaseCommands.get(0).getAmount());
         assertEquals(MarketOrderStatus.CANCELLED, cancelled.getOrder().getStatus());
         assertEquals(0L, cancelled.getOrder().getReservedFunds());
+        assertEquals(created.getOrder().getReservedFunds(), cancelled.getReleasedFunds());
     }
 
     @Test
@@ -192,8 +259,10 @@ public class StandardizedSpotMarketServiceTest {
         FakeMarketSettlementFacade settlementFacade = new FakeMarketSettlementFacade();
         settlementFacade.registerPlayer("buyer");
         settlementFacade.registerPlayer("seller");
-        StandardizedSpotMarketService service = new StandardizedSpotMarketService(orderRepository, custodyRepository,
+        StandardizedSpotMarketService service = createService(orderRepository, custodyRepository,
             operationLogRepository, tradeRecordRepository, new DirectMarketTransactionRunner(), settlementFacade);
+
+        depositInventory(service, "req-sell-match-deposit", "seller", "minecraft:stone:0", 10L, true);
 
         StandardizedSpotMarketService.CreateBuyOrderResult buyCreated = service.createBuyOrder(new CreateBuyOrderCommand(
             "req-buy-match", "buyer", "test-server", "minecraft:stone:0", 10L, true, 100L));
@@ -250,7 +319,7 @@ public class StandardizedSpotMarketServiceTest {
         FakeMarketTradeRecordRepository tradeRecordRepository = new FakeMarketTradeRecordRepository();
         FakeMarketSettlementFacade settlementFacade = new FakeMarketSettlementFacade();
         settlementFacade.registerPlayer("buyer");
-        StandardizedSpotMarketService service = new StandardizedSpotMarketService(orderRepository, custodyRepository,
+        StandardizedSpotMarketService service = createService(orderRepository, custodyRepository,
             operationLogRepository, tradeRecordRepository, new FailAfterCallbackTransactionRunner(),
             settlementFacade);
 
@@ -279,27 +348,87 @@ public class StandardizedSpotMarketServiceTest {
     }
 
     @Test
+    public void depositPostCommitFailureLeavesAvailableCustodyRecoverableAndCompletesOnScan() {
+        FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
+        FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
+        FakeMarketOperationLogRepository operationLogRepository = new FakeMarketOperationLogRepository();
+        StandardizedSpotMarketService service = new StandardizedSpotMarketService(orderRepository, custodyRepository,
+            operationLogRepository, new FakeMarketTradeRecordRepository(), new FailAfterCallbackTransactionRunner(), null,
+            new StandardizedMarketProductParser(), new PermissiveProductCatalog(), null);
+
+        try {
+            depositInventory(service, "req-deposit-recovery", "player-a", "minecraft:stone:0", 9L, true);
+            fail("expected simulated failure");
+        } catch (RuntimeException expected) {
+            assertTrue(expected.getMessage().contains("post-commit"));
+        }
+
+        MarketOperationLog failedOperation = operationLogRepository.findByRequestId("req-deposit-recovery").get();
+        assertEquals(MarketOperationStatus.RECOVERY_REQUIRED, failedOperation.getStatus());
+        assertTrue(failedOperation.getRelatedCustodyId() > 0L);
+
+        MarketCustodyInventory custodyBeforeRecovery = custodyRepository.findById(failedOperation.getRelatedCustodyId()).get();
+        assertEquals(MarketCustodyStatus.AVAILABLE, custodyBeforeRecovery.getStatus());
+
+        MarketRecoveryService recoveryService = new MarketRecoveryService(orderRepository, custodyRepository,
+            operationLogRepository);
+        List<MarketOperationLog> recovered = recoveryService.scanAndEscalateIncompleteOperations(10);
+
+        assertEquals(1, recovered.size());
+        assertEquals(MarketOperationStatus.COMPLETED, recovered.get(0).getStatus());
+        assertEquals(MarketCustodyStatus.AVAILABLE,
+            custodyRepository.findById(failedOperation.getRelatedCustodyId()).get().getStatus());
+    }
+
+    @Test
+    public void depositRecoveryMarksOperationFailedWhenNoCustodyWasPersisted() {
+        FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
+        FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
+        FakeMarketOperationLogRepository operationLogRepository = new FakeMarketOperationLogRepository();
+
+        operationLogRepository.save(new MarketOperationLog(0L, "req-deposit-missing-custody",
+            MarketOperationType.INVENTORY_DEPOSIT, MarketOperationStatus.RECOVERY_REQUIRED, "test-server", "player-a",
+            "playerRef=player-a|sourceServerId=test-server|productKey=minecraft:stone:0|quantity=9|stackable=true|unitPrice=~|orderId=~|custodyId=~",
+            MarketRecoveryMetadata.builder().put("mode", "inventory-deposit").putBoolean("safeRollbackIfMissingCustody", true)
+                .build().toKey(),
+            0L, 0L, 0L, "stuck deposit without custody", Instant.now(), Instant.now()));
+
+        MarketRecoveryService recoveryService = new MarketRecoveryService(orderRepository, custodyRepository,
+            operationLogRepository);
+        List<MarketOperationLog> recovered = recoveryService.scanAndEscalateIncompleteOperations(10);
+
+        assertEquals(1, recovered.size());
+        assertEquals(MarketOperationStatus.FAILED, recovered.get(0).getStatus());
+        assertFalse(operationLogRepository.findByRequestId("req-deposit-missing-custody").get().getMessage().isEmpty());
+    }
+
+    @Test
     public void claimMarketAssetMarksCustodyClaimedAndSupportsReplay() {
         FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
         FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
         FakeMarketOperationLogRepository operationLogRepository = new FakeMarketOperationLogRepository();
         FakeMarketTradeRecordRepository tradeRecordRepository = new FakeMarketTradeRecordRepository();
+        FakeMarketSettlementFacade settlementFacade = new FakeMarketSettlementFacade();
+        settlementFacade.registerPlayer("buyer");
+        settlementFacade.registerPlayer("seller");
         RecordingClaimDeliveryPort claimDeliveryPort = new RecordingClaimDeliveryPort();
-        StandardizedSpotMarketService service = new StandardizedSpotMarketService(orderRepository, custodyRepository,
-            operationLogRepository, tradeRecordRepository, new DirectMarketTransactionRunner(), null,
-            new StandardizedMarketProductParser(), claimDeliveryPort);
+        StandardizedSpotMarketService service = createService(orderRepository, custodyRepository,
+            operationLogRepository, tradeRecordRepository, new DirectMarketTransactionRunner(), settlementFacade,
+            claimDeliveryPort);
+
+        depositInventory(service, "req-claim-sell-deposit", "seller", "minecraft:stone:0", 8L, true);
+        service.createBuyOrder(new CreateBuyOrderCommand(
+            "req-claim-buy", "buyer", "test-server", "minecraft:stone:0", 8L, true, 20L));
 
         StandardizedSpotMarketService.CreateSellOrderResult created = service.createSellOrder(new CreateSellOrderCommand(
             "req-claim-sell", "seller", "test-server", "minecraft:stone:0", 8L, true, 20L));
-        StandardizedSpotMarketService.CancelSellOrderResult cancelled = service.cancelSellOrder(
-            new CancelSellOrderCommand("req-claim-cancel", "seller", "test-server", created.getOrder().getOrderId()));
 
         StandardizedSpotMarketService.ClaimMarketAssetResult claimed = service.claimMarketAsset(
-            new ClaimMarketAssetCommand("req-claim-asset", "seller", "test-server",
-                cancelled.getCustody().getCustodyId()));
+            new ClaimMarketAssetCommand("req-claim-asset", "buyer", "test-server", created.getClaimableAssets().get(0)
+                .getCustodyId()));
         StandardizedSpotMarketService.ClaimMarketAssetResult replayed = service.claimMarketAsset(
-            new ClaimMarketAssetCommand("req-claim-asset", "seller", "test-server",
-                cancelled.getCustody().getCustodyId()));
+            new ClaimMarketAssetCommand("req-claim-asset", "buyer", "test-server", created.getClaimableAssets().get(0)
+                .getCustodyId()));
 
         assertEquals(MarketCustodyStatus.CLAIMED, claimed.getCustody().getStatus());
         assertEquals(MarketOperationStatus.COMPLETED, claimed.getOperationLog().getStatus());
@@ -313,26 +442,30 @@ public class StandardizedSpotMarketServiceTest {
         FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
         FakeMarketOperationLogRepository operationLogRepository = new FakeMarketOperationLogRepository();
         FakeMarketTradeRecordRepository tradeRecordRepository = new FakeMarketTradeRecordRepository();
+        FakeMarketSettlementFacade settlementFacade = new FakeMarketSettlementFacade();
+        settlementFacade.registerPlayer("buyer");
+        settlementFacade.registerPlayer("seller");
         FailingClaimDeliveryPort claimDeliveryPort = new FailingClaimDeliveryPort(true);
-        StandardizedSpotMarketService service = new StandardizedSpotMarketService(orderRepository, custodyRepository,
-            operationLogRepository, tradeRecordRepository, new DirectMarketTransactionRunner(), null,
-            new StandardizedMarketProductParser(), claimDeliveryPort);
+        StandardizedSpotMarketService service = createService(orderRepository, custodyRepository,
+            operationLogRepository, tradeRecordRepository, new DirectMarketTransactionRunner(), settlementFacade,
+            claimDeliveryPort);
+
+        depositInventory(service, "req-claim-safe-sell-deposit", "seller", "minecraft:stone:0", 4L, true);
+        service.createBuyOrder(new CreateBuyOrderCommand(
+            "req-claim-safe-buy", "buyer", "test-server", "minecraft:stone:0", 4L, true, 15L));
 
         StandardizedSpotMarketService.CreateSellOrderResult created = service.createSellOrder(new CreateSellOrderCommand(
             "req-claim-safe-sell", "seller", "test-server", "minecraft:stone:0", 4L, true, 15L));
-        StandardizedSpotMarketService.CancelSellOrderResult cancelled = service.cancelSellOrder(
-            new CancelSellOrderCommand("req-claim-safe-cancel", "seller", "test-server",
-                created.getOrder().getOrderId()));
 
         try {
-            service.claimMarketAsset(new ClaimMarketAssetCommand("req-claim-safe", "seller", "test-server",
-                cancelled.getCustody().getCustodyId()));
+            service.claimMarketAsset(new ClaimMarketAssetCommand("req-claim-safe", "buyer", "test-server",
+                created.getClaimableAssets().get(0).getCustodyId()));
             fail("expected claim delivery failure");
         } catch (MarketClaimDeliveryException expected) {
             assertTrue(expected.getMessage().contains("claim delivery failed"));
         }
 
-        MarketCustodyInventory restored = custodyRepository.findById(cancelled.getCustody().getCustodyId()).get();
+        MarketCustodyInventory restored = custodyRepository.findById(created.getClaimableAssets().get(0).getCustodyId()).get();
         MarketOperationLog failedOperation = operationLogRepository.findByRequestId("req-claim-safe").get();
         assertEquals(MarketCustodyStatus.CLAIMABLE, restored.getStatus());
         assertEquals(MarketOperationStatus.FAILED, failedOperation.getStatus());
@@ -530,6 +663,20 @@ public class StandardizedSpotMarketServiceTest {
             List<MarketCustodyInventory> matches = new ArrayList<MarketCustodyInventory>();
             for (MarketCustodyInventory custody : custodyById.values()) {
                 if (ownerPlayerRef.equals(custody.getOwnerPlayerRef()) && custody.getStatus() == status) {
+                    matches.add(custody);
+                }
+            }
+            return matches;
+        }
+
+        @Override
+        public List<MarketCustodyInventory> findByOwnerProductKeyAndStatuses(String ownerPlayerRef, String productKey,
+            List<MarketCustodyStatus> statuses) {
+            List<MarketCustodyInventory> matches = new ArrayList<MarketCustodyInventory>();
+            for (MarketCustodyInventory custody : custodyById.values()) {
+                if (ownerPlayerRef.equals(custody.getOwnerPlayerRef())
+                    && productKey.equals(custody.getProduct().getProductKey())
+                    && statuses.contains(custody.getStatus())) {
                     matches.add(custody);
                 }
             }
@@ -737,5 +884,118 @@ public class StandardizedSpotMarketServiceTest {
     private static final class TestProducts {
 
         private static final StandardizedMarketProduct STONE = new StandardizedMarketProduct("minecraft:stone", 0);
+    }
+
+    private StandardizedSpotMarketService createService(FakeMarketOrderBookRepository orderRepository,
+        FakeMarketCustodyInventoryRepository custodyRepository,
+        FakeMarketOperationLogRepository operationLogRepository) {
+        return new StandardizedSpotMarketService(orderRepository, custodyRepository, operationLogRepository,
+            new FakeMarketTradeRecordRepository(), new DirectMarketTransactionRunner(), null,
+            new StandardizedMarketProductParser(), new PermissiveProductCatalog(), null);
+    }
+
+    private StandardizedSpotMarketService createService(FakeMarketOrderBookRepository orderRepository,
+        FakeMarketCustodyInventoryRepository custodyRepository,
+        FakeMarketOperationLogRepository operationLogRepository,
+        FakeMarketTradeRecordRepository tradeRecordRepository,
+        MarketTransactionRunner transactionRunner,
+        MarketSettlementFacade settlementFacade) {
+        return new StandardizedSpotMarketService(orderRepository, custodyRepository, operationLogRepository,
+            tradeRecordRepository, transactionRunner, settlementFacade, new StandardizedMarketProductParser(),
+            new PermissiveProductCatalog(), null);
+    }
+
+    private StandardizedSpotMarketService createService(FakeMarketOrderBookRepository orderRepository,
+        FakeMarketCustodyInventoryRepository custodyRepository,
+        FakeMarketOperationLogRepository operationLogRepository,
+        FakeMarketTradeRecordRepository tradeRecordRepository,
+        MarketTransactionRunner transactionRunner,
+        MarketSettlementFacade settlementFacade,
+        MarketClaimDeliveryPort claimDeliveryPort) {
+        return new StandardizedSpotMarketService(orderRepository, custodyRepository, operationLogRepository,
+            tradeRecordRepository, transactionRunner, settlementFacade, new StandardizedMarketProductParser(),
+            new PermissiveProductCatalog(), claimDeliveryPort);
+    }
+
+    private StandardizedSpotMarketService.DepositInventoryResult depositInventory(StandardizedSpotMarketService service,
+        String requestId, String playerRef, String productKey, long quantity, boolean stackable) {
+        return service.depositInventory(new DepositMarketInventoryCommand(requestId, playerRef, "test-server",
+            productKey, quantity, stackable));
+    }
+
+    private static final class PermissiveProductCatalog implements StandardizedMarketProductCatalog {
+
+        private final StandardizedMarketProductParser parser = new StandardizedMarketProductParser();
+
+        @Override
+        public StandardizedMarketCatalogVersion getCatalogVersion() {
+            return new StandardizedMarketCatalogVersion("test-catalog-v1", "测试目录 v1");
+        }
+
+        @Override
+        public String getCatalogSourceKey() {
+            return "test-source";
+        }
+
+        @Override
+        public String getCatalogSourceDescription() {
+            return "Test Source";
+        }
+
+        @Override
+        public StandardizedMarketAdmissionDecision evaluateProduct(String productKey) {
+            StandardizedMarketProduct product = parser.parse(productKey);
+            return new StandardizedMarketAdmissionDecision(getCatalogVersion(),
+                new StandardizedMarketCatalogEntry(product, "test-category", "统一定义、统一计量、统一托管", "test"),
+                true, StandardizedMarketAdmissionReason.CATALOG_ADMITTED, "admitted", getCatalogSourceKey(),
+                getCatalogSourceDescription());
+        }
+
+        @Override
+        public StandardizedMarketAdmissionDecision evaluateStack(net.minecraft.item.ItemStack stack) {
+            String registryName = cpw.mods.fml.common.registry.GameRegistry.findUniqueIdentifierFor(stack.getItem()).toString();
+            return evaluateProduct(registryName + ":" + stack.getItemDamage());
+        }
+
+        @Override
+        public StandardizedMarketProduct requireTradableProduct(String productKey) {
+            return evaluateProduct(productKey).requireProduct();
+        }
+
+        @Override
+        public StandardizedMarketProduct requireTradableStack(net.minecraft.item.ItemStack stack) {
+            return evaluateStack(stack).requireProduct();
+        }
+    }
+
+    private static final class RejectingProductCatalog implements StandardizedMarketProductCatalog {
+
+        @Override
+        public StandardizedMarketCatalogVersion getCatalogVersion() {
+            return new StandardizedMarketCatalogVersion("reject-catalog-v1", "拒绝目录 v1");
+        }
+
+        @Override
+        public String getCatalogSourceKey() {
+            return "reject-source";
+        }
+
+        @Override
+        public String getCatalogSourceDescription() {
+            return "Reject Source";
+        }
+
+        @Override
+        public StandardizedMarketAdmissionDecision evaluateProduct(String productKey) {
+            return new StandardizedMarketAdmissionDecision(getCatalogVersion(), null, false,
+                StandardizedMarketAdmissionReason.CATALOG_BOUNDARY_REJECTED,
+                "当前商品不在标准商品市场目录 reject-catalog-v1 的准入边界内；当前目录来源为 Reject Source。",
+                getCatalogSourceKey(), getCatalogSourceDescription());
+        }
+
+        @Override
+        public StandardizedMarketAdmissionDecision evaluateStack(net.minecraft.item.ItemStack stack) {
+            return evaluateProduct("stack");
+        }
     }
 }

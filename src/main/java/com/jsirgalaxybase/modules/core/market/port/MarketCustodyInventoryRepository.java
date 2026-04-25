@@ -1,5 +1,6 @@
 package com.jsirgalaxybase.modules.core.market.port;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -19,4 +20,13 @@ public interface MarketCustodyInventoryRepository {
 	Optional<MarketCustodyInventory> findEscrowSellByOrderId(long orderId);
 
 	List<MarketCustodyInventory> findByOwnerAndStatus(String ownerPlayerRef, MarketCustodyStatus status);
+
+	default List<MarketCustodyInventory> findByOwnerProductKeyAndStatuses(String ownerPlayerRef, String productKey,
+		List<MarketCustodyStatus> statuses) {
+		return Collections.emptyList();
+	}
+
+	default List<String> findDistinctProductKeysByOwner(String ownerPlayerRef, int limit) {
+		return Collections.emptyList();
+	}
 }

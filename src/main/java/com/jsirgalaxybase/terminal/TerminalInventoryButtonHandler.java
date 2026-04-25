@@ -8,7 +8,7 @@ import net.minecraft.client.gui.inventory.GuiContainerCreative;
 import net.minecraft.client.gui.inventory.GuiInventory;
 import net.minecraftforge.client.event.GuiScreenEvent;
 
-import com.jsirgalaxybase.terminal.network.OpenTerminalMessage;
+import com.jsirgalaxybase.terminal.network.OpenTerminalRequestMessage;
 import com.jsirgalaxybase.terminal.network.TerminalNetwork;
 
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
@@ -57,7 +57,7 @@ public class TerminalInventoryButtonHandler {
                 return false;
             }
 
-            TerminalNetwork.CHANNEL.sendToServer(new OpenTerminalMessage());
+            TerminalNetwork.CHANNEL.sendToServer(new OpenTerminalRequestMessage());
             return true;
         }
     }

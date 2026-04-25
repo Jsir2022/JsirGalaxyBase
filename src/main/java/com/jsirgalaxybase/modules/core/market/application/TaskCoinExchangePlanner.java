@@ -8,11 +8,28 @@ import com.jsirgalaxybase.modules.core.market.domain.TaskCoinExchangeQuote;
 public class TaskCoinExchangePlanner {
 
     public static final String RULE_VERSION = "market-phase1-source-blind-v1";
-    private static final String REGISTRY_PREFIX = "dreamcraft:item.Coin";
+    public static final String REGISTRY_PREFIX = "dreamcraft:item.Coin";
     private static final java.util.regex.Pattern SUPPORTED_SUFFIX = java.util.regex.Pattern
         .compile("^([A-Za-z][A-Za-z0-9_]*?)(IV|III|II|I)?$");
     private static final java.util.regex.Pattern UNSUPPORTED_ROMAN_SUFFIX = java.util.regex.Pattern
         .compile(".*(V|VI|VII|VIII|IX|X)$");
+
+    public boolean isTaskCoinRegistryName(String registryName) {
+        return registryName != null && registryName.trim().startsWith(REGISTRY_PREFIX);
+    }
+
+    public boolean isUnsupportedTaskCoinTier(String registryName) {
+        if (!isTaskCoinRegistryName(registryName)) {
+            return false;
+        }
+
+        String normalized = registryName.trim();
+        String suffix = normalized.substring(REGISTRY_PREFIX.length());
+        if (suffix.endsWith("IV") || suffix.endsWith("III") || suffix.endsWith("II") || suffix.endsWith("I")) {
+            return false;
+        }
+        return !suffix.isEmpty() && UNSUPPORTED_ROMAN_SUFFIX.matcher(suffix).matches();
+    }
 
     public Optional<TaskCoinDescriptor> resolveRegistryName(String registryName) {
         if (registryName == null) {

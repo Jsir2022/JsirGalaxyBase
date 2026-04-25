@@ -17,6 +17,7 @@ import com.jsirgalaxybase.modules.core.market.application.command.CancelBuyOrder
 import com.jsirgalaxybase.modules.core.market.application.command.CancelSellOrderCommand;
 import com.jsirgalaxybase.modules.core.market.application.command.ClaimMarketAssetCommand;
 import com.jsirgalaxybase.modules.core.market.application.command.CreateBuyOrderCommand;
+import com.jsirgalaxybase.modules.core.market.application.command.DepositMarketInventoryCommand;
 import com.jsirgalaxybase.modules.core.market.application.command.CreateSellOrderCommand;
 import com.jsirgalaxybase.modules.core.market.domain.MarketCustodyInventory;
 import com.jsirgalaxybase.modules.core.market.domain.MarketCustodyStatus;
@@ -46,13 +47,14 @@ public class StandardizedSpotMarketService {
     private final MarketTradeRecordRepository tradeRecordRepository;
     private final MarketTransactionRunner transactionRunner;
     private final MarketSettlementFacade settlementFacade;
-    private final StandardizedMarketProductParser productParser;
+    private final StandardizedMarketProductCatalog productCatalog;
     private final MarketClaimDeliveryPort claimDeliveryPort;
 
     public StandardizedSpotMarketService(MarketOrderBookRepository orderRepository,
         MarketCustodyInventoryRepository custodyRepository, MarketOperationLogRepository operationLogRepository) {
         this(orderRepository, custodyRepository, operationLogRepository, new NoOpMarketTradeRecordRepository(),
-            new DirectMarketTransactionRunner(), null, new StandardizedMarketProductParser(), null);
+            new DirectMarketTransactionRunner(), null, new StandardizedMarketProductParser(),
+            StandardizedMarketCatalogFactory.createDefaultCatalog(), null);
     }
 
     public StandardizedSpotMarketService(MarketOrderBookRepository orderRepository,
@@ -60,7 +62,7 @@ public class StandardizedSpotMarketService {
         MarketTradeRecordRepository tradeRecordRepository, MarketTransactionRunner transactionRunner,
         MarketSettlementFacade settlementFacade) {
         this(orderRepository, custodyRepository, operationLogRepository, tradeRecordRepository, transactionRunner,
-            settlementFacade, new StandardizedMarketProductParser(), null);
+            settlementFacade, new StandardizedMarketProductParser(), StandardizedMarketCatalogFactory.createDefaultCatalog(), null);
     }
 
     public StandardizedSpotMarketService(MarketOrderBookRepository orderRepository,
@@ -68,7 +70,7 @@ public class StandardizedSpotMarketService {
         MarketTradeRecordRepository tradeRecordRepository, MarketTransactionRunner transactionRunner,
         MarketSettlementFacade settlementFacade, StandardizedMarketProductParser productParser) {
         this(orderRepository, custodyRepository, operationLogRepository, tradeRecordRepository, transactionRunner,
-            settlementFacade, productParser, null);
+            settlementFacade, productParser, StandardizedMarketCatalogFactory.createDefaultCatalog(productParser), null);
     }
 
     public StandardizedSpotMarketService(MarketOrderBookRepository orderRepository,
@@ -76,14 +78,81 @@ public class StandardizedSpotMarketService {
         MarketTradeRecordRepository tradeRecordRepository, MarketTransactionRunner transactionRunner,
         MarketSettlementFacade settlementFacade, StandardizedMarketProductParser productParser,
         MarketClaimDeliveryPort claimDeliveryPort) {
+        this(orderRepository, custodyRepository, operationLogRepository, tradeRecordRepository, transactionRunner,
+            settlementFacade, productParser, StandardizedMarketCatalogFactory.createDefaultCatalog(productParser), claimDeliveryPort);
+    }
+
+    public StandardizedSpotMarketService(MarketOrderBookRepository orderRepository,
+        MarketCustodyInventoryRepository custodyRepository, MarketOperationLogRepository operationLogRepository,
+        MarketTradeRecordRepository tradeRecordRepository, MarketTransactionRunner transactionRunner,
+        MarketSettlementFacade settlementFacade, StandardizedMarketProductParser productParser,
+        StandardizedMarketProductCatalog productCatalog,
+        MarketClaimDeliveryPort claimDeliveryPort) {
         this.orderRepository = requireNonNull(orderRepository, "orderRepository");
         this.custodyRepository = requireNonNull(custodyRepository, "custodyRepository");
         this.operationLogRepository = requireNonNull(operationLogRepository, "operationLogRepository");
         this.tradeRecordRepository = requireNonNull(tradeRecordRepository, "tradeRecordRepository");
         this.transactionRunner = requireNonNull(transactionRunner, "transactionRunner");
         this.settlementFacade = settlementFacade;
-        this.productParser = requireNonNull(productParser, "productParser");
+        requireNonNull(productParser, "productParser");
+        this.productCatalog = requireNonNull(productCatalog, "productCatalog");
         this.claimDeliveryPort = claimDeliveryPort;
+    }
+
+    public DepositInventoryResult depositInventory(DepositMarketInventoryCommand command) {
+        requireNonNull(command, "command");
+        String requestId = requireText(command.getRequestId(), "requestId");
+        String playerRef = requireText(command.getPlayerRef(), "playerRef");
+        String sourceServerId = requireText(command.getSourceServerId(), "sourceServerId");
+        requirePositive(command.getQuantity(), "quantity");
+        ensureQuantityMatchesStackability(command.isStackable(), command.getQuantity());
+
+        StandardizedMarketAdmissionDecision admissionDecision = productCatalog.evaluateProduct(command.getProductKey());
+        StandardizedMarketProduct product = admissionDecision.requireProduct();
+        MarketRequestSemantics semantics = MarketRequestSemantics.forDeposit(playerRef, sourceServerId,
+            product.getProductKey(), command.getQuantity(), command.isStackable());
+        Optional<MarketOperationLog> existing = operationLogRepository.findByRequestId(requestId);
+        if (existing.isPresent()) {
+            ensureOperationReplayable(existing.get(), MarketOperationType.INVENTORY_DEPOSIT, semantics);
+            return replayDeposit(existing.get());
+        }
+
+        Instant now = Instant.now();
+        MarketOperationLog created = operationLogRepository.save(new MarketOperationLog(0L, requestId,
+            MarketOperationType.INVENTORY_DEPOSIT, MarketOperationStatus.CREATED, sourceServerId, playerRef,
+            semantics.toKey(), null, 0L, 0L, 0L, "warehouse deposit requested", now, now));
+        MarketOperationLog processing = operationLogRepository.update(created.withState(MarketOperationStatus.PROCESSING,
+            0L, 0L, 0L, "depositing standardized inventory into AVAILABLE", Instant.now()));
+
+        MutableRefs refs = new MutableRefs();
+        refs.recoveryMetadataKey = MarketRecoveryMetadata.builder()
+            .put("mode", "inventory-deposit")
+            .putBoolean("allowCompleteFromAvailable", true)
+            .putBoolean("safeRollbackIfMissingCustody", true)
+            .put("productKey", product.getProductKey())
+            .putLong("quantity", command.getQuantity())
+            .build().toKey();
+        try {
+            return transactionRunner.inTransaction(new Supplier<DepositInventoryResult>() {
+
+                @Override
+                public DepositInventoryResult get() {
+                    MarketCustodyInventory custody = custodyRepository.save(new MarketCustodyInventory(0L, playerRef,
+                        product, command.isStackable(), command.getQuantity(), MarketCustodyStatus.AVAILABLE, 0L,
+                        processing.getOperationId(), sourceServerId, Instant.now(), Instant.now()));
+                    refs.custodyId = custody.getCustodyId();
+                    long totalAvailableQuantity = sumCustodyQuantity(custodyRepository.findByOwnerProductKeyAndStatuses(
+                        playerRef, product.getProductKey(), Collections.singletonList(MarketCustodyStatus.AVAILABLE)));
+                    MarketOperationLog completed = operationLogRepository.update(processing.withState(
+                        MarketOperationStatus.COMPLETED, 0L, custody.getCustodyId(), 0L,
+                        "warehouse deposit completed and inventory is AVAILABLE", Instant.now()));
+                    return new DepositInventoryResult(custody, completed, totalAvailableQuantity);
+                }
+            });
+        } catch (RuntimeException exception) {
+            handleOperationFailure(processing, refs, exception);
+            throw exception;
+        }
     }
 
     public CreateSellOrderResult createSellOrder(CreateSellOrderCommand command) {
@@ -95,7 +164,8 @@ public class StandardizedSpotMarketService {
         requirePositive(command.getUnitPrice(), "unitPrice");
         ensureQuantityMatchesStackability(command.isStackable(), command.getQuantity());
 
-        StandardizedMarketProduct product = productParser.parse(command.getProductKey());
+        StandardizedMarketAdmissionDecision admissionDecision = productCatalog.evaluateProduct(command.getProductKey());
+        StandardizedMarketProduct product = admissionDecision.requireProduct();
         MarketRequestSemantics semantics = MarketRequestSemantics.forSellCreate(playerRef, sourceServerId,
             product.getProductKey(), command.getQuantity(), command.isStackable(), command.getUnitPrice());
         Optional<MarketOperationLog> existing = operationLogRepository.findByRequestId(requestId);
@@ -121,13 +191,15 @@ public class StandardizedSpotMarketService {
                         settlementFacade.requirePlayerAccount(playerRef);
                     }
 
+                    reserveAvailableInventory(playerRef, product.getProductKey(), command.getQuantity(),
+                        processing.getOperationId());
                     MarketCustodyInventory custody = custodyRepository.save(new MarketCustodyInventory(0L, playerRef,
                         product, command.isStackable(), command.getQuantity(), MarketCustodyStatus.ESCROW_SELL, 0L,
                         processing.getOperationId(), sourceServerId, Instant.now(), Instant.now()));
                     refs.custodyId = custody.getCustodyId();
                     MarketOperationLog escrowed = operationLogRepository.update(processing.withState(
                         MarketOperationStatus.PROCESSING, 0L, refs.custodyId, 0L,
-                        "sell inventory escrowed", Instant.now()));
+                        "sell inventory reserved from AVAILABLE", Instant.now()));
 
                     MarketOrder order = orderRepository.save(new MarketOrder(0L, MarketOrderSide.SELL,
                         MarketOrderStatus.OPEN, playerRef, product, command.isStackable(), command.getUnitPrice(),
@@ -203,13 +275,13 @@ public class StandardizedSpotMarketService {
 
                     MarketOrder cancelledOrder = orderRepository.update(order.withLifecycle(MarketOrderStatus.CANCELLED,
                         0L, order.getFilledQuantity(), order.getReservedFunds(), Instant.now()));
-                    MarketCustodyInventory claimableCustody = custodyRepository.update(custody.withStateAndQuantity(
-                        MarketCustodyStatus.CLAIMABLE, custody.getQuantity(), cancelledOrder.getOrderId(),
+                    MarketCustodyInventory availableCustody = custodyRepository.update(custody.withStateAndQuantity(
+                        MarketCustodyStatus.AVAILABLE, custody.getQuantity(), 0L,
                         Instant.now()));
                     MarketOperationLog completed = operationLogRepository.update(identified.withState(
-                        MarketOperationStatus.COMPLETED, cancelledOrder.getOrderId(), claimableCustody.getCustodyId(),
-                        0L, "sell order cancelled and inventory is claimable", Instant.now()));
-                    return new CancelSellOrderResult(cancelledOrder, claimableCustody, completed);
+                        MarketOperationStatus.COMPLETED, cancelledOrder.getOrderId(), availableCustody.getCustodyId(),
+                        0L, "sell order cancelled and inventory returned to AVAILABLE", Instant.now()));
+                    return new CancelSellOrderResult(cancelledOrder, availableCustody, completed);
                 }
             });
         } catch (RuntimeException exception) {
@@ -230,7 +302,8 @@ public class StandardizedSpotMarketService {
             throw new MarketOperationException("market settlement facade is required for buy orders");
         }
 
-        StandardizedMarketProduct product = productParser.parse(command.getProductKey());
+        StandardizedMarketAdmissionDecision admissionDecision = productCatalog.evaluateProduct(command.getProductKey());
+        StandardizedMarketProduct product = admissionDecision.requireProduct();
         MarketRequestSemantics semantics = MarketRequestSemantics.forBuyCreate(playerRef, sourceServerId,
             product.getProductKey(), command.getQuantity(), command.isStackable(), command.getUnitPrice());
         Optional<MarketOperationLog> existing = operationLogRepository.findByRequestId(requestId);
@@ -336,19 +409,20 @@ public class StandardizedSpotMarketService {
                     MarketOrder order = orderRepository.lockById(command.getOrderId());
                     ensureBuyOrderOwner(order, playerRef);
                     ensureCancellableOrder(order);
+                    long releasedFunds = order.getReservedFunds();
                     BankAccount buyerAccount = settlementFacade.requirePlayerAccount(playerRef);
-                    if (order.getReservedFunds() > 0L) {
+                    if (releasedFunds > 0L) {
                         settlementFacade.releaseBuyerFunds(new FrozenBalanceCommand(
                             releaseRequestId, BankTransactionType.MARKET_FUNDS_RELEASE,
                             BankBusinessType.MARKET_ORDER_CANCEL_RELEASE, buyerAccount.getAccountId(), sourceServerId,
-                            "market", "market", playerRef, order.getReservedFunds(),
+                            "market", "market", playerRef, releasedFunds,
                             "release frozen funds for cancelled buy order",
                             buildOrderBusinessRef("buy-release", String.valueOf(order.getOrderId())),
                             "{\"marketRequestId\":\"" + requestId + "\"}"));
                     }
                     refs.recoveryMetadataKey = MarketRecoveryMetadata.parse(processing.getRecoveryMetadataKey())
                         .toBuilder()
-                        .putLong("releasedFunds", order.getReservedFunds())
+                        .putLong("releasedFunds", releasedFunds)
                         .putBoolean("fundsReleased", true)
                         .build().toKey();
                     MarketOrder cancelledOrder = orderRepository.update(order.withLifecycle(MarketOrderStatus.CANCELLED,
@@ -357,7 +431,7 @@ public class StandardizedSpotMarketService {
                         MarketOperationStatus.COMPLETED, cancelledOrder.getOrderId(), 0L, 0L,
                         "buy order cancelled and remaining frozen funds released", refs.recoveryMetadataKey,
                         Instant.now()));
-                    return new CancelBuyOrderResult(cancelledOrder, completed);
+                    return new CancelBuyOrderResult(cancelledOrder, completed, releasedFunds);
                 }
             });
         } catch (RuntimeException exception) {
@@ -457,7 +531,7 @@ public class StandardizedSpotMarketService {
     }
 
     public List<MarketOrder> listOpenSellOrders(String productKey) {
-        StandardizedMarketProduct product = productParser.parse(productKey);
+        StandardizedMarketProduct product = productCatalog.evaluateProduct(productKey).requireProduct();
         List<MarketOrder> openOrders = new ArrayList<MarketOrder>(
             orderRepository.findOpenSellOrdersByProductKey(product.getProductKey()));
         Collections.sort(openOrders, new Comparator<MarketOrder>() {
@@ -480,6 +554,39 @@ public class StandardizedSpotMarketService {
 
     public List<MarketCustodyInventory> listClaimableAssets(String playerRef) {
         return custodyRepository.findByOwnerAndStatus(requireText(playerRef, "playerRef"), MarketCustodyStatus.CLAIMABLE);
+    }
+
+    public List<MarketCustodyInventory> listAvailableAssets(String playerRef, String productKey) {
+        StandardizedMarketProduct product = productCatalog.evaluateProduct(productKey).requireProduct();
+        return custodyRepository.findByOwnerProductKeyAndStatuses(requireText(playerRef, "playerRef"),
+            product.getProductKey(), Collections.singletonList(MarketCustodyStatus.AVAILABLE));
+    }
+
+    public StandardizedMarketAdmissionDecision inspectCatalogProduct(String productKey) {
+        return productCatalog.evaluateProduct(productKey);
+    }
+
+    public StandardizedMarketAdmissionDecision inspectCatalogStack(net.minecraft.item.ItemStack stack) {
+        return productCatalog.evaluateStack(stack);
+    }
+
+    public StandardizedMarketProductCatalog getProductCatalog() {
+        return productCatalog;
+    }
+
+    private DepositInventoryResult replayDeposit(MarketOperationLog existing) {
+        MarketCustodyInventory custody = custodyRepository.findById(existing.getRelatedCustodyId())
+            .orElseThrow(new java.util.function.Supplier<MarketOperationException>() {
+
+                @Override
+                public MarketOperationException get() {
+                    return new MarketOperationException("existing deposit request lost its custody record");
+                }
+            });
+        long totalAvailableQuantity = sumCustodyQuantity(custodyRepository.findByOwnerProductKeyAndStatuses(
+            custody.getOwnerPlayerRef(), custody.getProduct().getProductKey(),
+            Collections.singletonList(MarketCustodyStatus.AVAILABLE)));
+        return new DepositInventoryResult(custody, existing, totalAvailableQuantity);
     }
 
     private CreateSellOrderResult replaySellCreate(MarketOperationLog existing) {
@@ -545,7 +652,8 @@ public class StandardizedSpotMarketService {
                     return new MarketOperationException("existing buy cancel request lost its market order");
                 }
             });
-        return new CancelBuyOrderResult(order, existing);
+        long releasedFunds = MarketRecoveryMetadata.parse(existing.getRecoveryMetadataKey()).getLong("releasedFunds", 0L);
+        return new CancelBuyOrderResult(order, existing, releasedFunds);
     }
 
     private ClaimMarketAssetResult replayClaim(MarketOperationLog existing) {
@@ -558,6 +666,34 @@ public class StandardizedSpotMarketService {
                 }
             });
         return new ClaimMarketAssetResult(custody, existing);
+    }
+
+    private void reserveAvailableInventory(String playerRef, String productKey, long quantity, long operationId) {
+        List<MarketCustodyInventory> availableEntries = custodyRepository.findByOwnerProductKeyAndStatuses(playerRef,
+            productKey, Collections.singletonList(MarketCustodyStatus.AVAILABLE));
+        long totalAvailable = sumCustodyQuantity(availableEntries);
+        if (totalAvailable < quantity) {
+            throw new MarketOperationException("available inventory is insufficient, deposit inventory first");
+        }
+
+        long remaining = quantity;
+        for (MarketCustodyInventory entry : availableEntries) {
+            if (remaining <= 0L) {
+                break;
+            }
+            MarketCustodyInventory locked = custodyRepository.lockById(entry.getCustodyId());
+            if (locked.getStatus() != MarketCustodyStatus.AVAILABLE || locked.getQuantity() <= 0L) {
+                continue;
+            }
+            long reserved = Math.min(remaining, locked.getQuantity());
+            custodyRepository.update(locked.withStateAndLinks(MarketCustodyStatus.AVAILABLE,
+                locked.getQuantity() - reserved, 0L, operationId, Instant.now()));
+            remaining -= reserved;
+        }
+
+        if (remaining > 0L) {
+            throw new MarketOperationException("available inventory changed while reserving sell quantity");
+        }
     }
 
     private MatchExecutionSummary matchSellOrder(MarketOrder order, MarketCustodyInventory custody, String sellerPlayerRef,
@@ -751,6 +887,19 @@ public class StandardizedSpotMarketService {
         return custody.withStateAndQuantity(status, remainingQuantity, orderId, Instant.now());
     }
 
+    private long sumCustodyQuantity(List<MarketCustodyInventory> custodies) {
+        long total = 0L;
+        if (custodies == null) {
+            return 0L;
+        }
+        for (MarketCustodyInventory custody : custodies) {
+            if (custody != null && custody.getQuantity() > 0L) {
+                total += custody.getQuantity();
+            }
+        }
+        return total;
+    }
+
     private boolean isOrderMatchable(MarketOrder restingOrder, MarketOrder incomingOrder, boolean buyIsIncoming) {
         if (restingOrder.getOpenQuantity() <= 0L) {
             return false;
@@ -796,7 +945,9 @@ public class StandardizedSpotMarketService {
         }
         if (refs.custodyId > 0L) {
             Optional<MarketCustodyInventory> existingCustody = custodyRepository.findById(refs.custodyId);
-            if (existingCustody.isPresent() && existingCustody.get().getStatus() != MarketCustodyStatus.EXCEPTION
+            if (isRecoverableDepositCustody(operation, existingCustody)) {
+                // Leave AVAILABLE custody intact so recovery can close the operation cleanly.
+            } else if (existingCustody.isPresent() && existingCustody.get().getStatus() != MarketCustodyStatus.EXCEPTION
                 && existingCustody.get().getStatus() != MarketCustodyStatus.CLAIMABLE
                 && existingCustody.get().getStatus() != MarketCustodyStatus.CLAIMED) {
                 MarketCustodyInventory custody = existingCustody.get();
@@ -809,6 +960,12 @@ public class StandardizedSpotMarketService {
             : MarketOperationStatus.FAILED;
         operationLogRepository.update(operation.withState(failureStatus, refs.orderId, refs.custodyId, refs.tradeId,
             exception.getMessage(), refs.recoveryMetadataKey, Instant.now()));
+    }
+
+    private boolean isRecoverableDepositCustody(MarketOperationLog operation,
+        Optional<MarketCustodyInventory> existingCustody) {
+        return operation.getOperationType() == MarketOperationType.INVENTORY_DEPOSIT && existingCustody.isPresent()
+            && existingCustody.get().getStatus() == MarketCustodyStatus.AVAILABLE;
     }
 
     private void ensureClaimableCustodyOwner(MarketCustodyInventory custody, String playerRef) {
@@ -954,6 +1111,32 @@ public class StandardizedSpotMarketService {
         }
     }
 
+    public static final class DepositInventoryResult {
+
+        private final MarketCustodyInventory custody;
+        private final MarketOperationLog operationLog;
+        private final long totalAvailableQuantity;
+
+        public DepositInventoryResult(MarketCustodyInventory custody, MarketOperationLog operationLog,
+            long totalAvailableQuantity) {
+            this.custody = custody;
+            this.operationLog = operationLog;
+            this.totalAvailableQuantity = totalAvailableQuantity;
+        }
+
+        public MarketCustodyInventory getCustody() {
+            return custody;
+        }
+
+        public MarketOperationLog getOperationLog() {
+            return operationLog;
+        }
+
+        public long getTotalAvailableQuantity() {
+            return totalAvailableQuantity;
+        }
+    }
+
     public static final class CancelSellOrderResult {
 
         private final MarketOrder order;
@@ -1015,10 +1198,12 @@ public class StandardizedSpotMarketService {
 
         private final MarketOrder order;
         private final MarketOperationLog operationLog;
+        private final long releasedFunds;
 
-        public CancelBuyOrderResult(MarketOrder order, MarketOperationLog operationLog) {
+        public CancelBuyOrderResult(MarketOrder order, MarketOperationLog operationLog, long releasedFunds) {
             this.order = order;
             this.operationLog = operationLog;
+            this.releasedFunds = releasedFunds;
         }
 
         public MarketOrder getOrder() {
@@ -1027,6 +1212,10 @@ public class StandardizedSpotMarketService {
 
         public MarketOperationLog getOperationLog() {
             return operationLog;
+        }
+
+        public long getReleasedFunds() {
+            return releasedFunds;
         }
     }
 
@@ -1107,6 +1296,12 @@ public class StandardizedSpotMarketService {
             long quantity, boolean stackable, long unitPrice) {
             return new MarketRequestSemantics(playerRef, sourceServerId, productKey, Long.valueOf(quantity),
                 Boolean.valueOf(stackable), Long.valueOf(unitPrice), null, null);
+        }
+
+        private static MarketRequestSemantics forDeposit(String playerRef, String sourceServerId, String productKey,
+            long quantity, boolean stackable) {
+            return new MarketRequestSemantics(playerRef, sourceServerId, productKey, Long.valueOf(quantity),
+                Boolean.valueOf(stackable), null, null, null);
         }
 
         private static MarketRequestSemantics forSellCancel(String playerRef, String sourceServerId, long orderId) {

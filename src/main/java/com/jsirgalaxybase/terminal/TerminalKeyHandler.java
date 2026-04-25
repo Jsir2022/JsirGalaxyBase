@@ -4,7 +4,7 @@ import org.lwjgl.input.Keyboard;
 
 import net.minecraft.client.settings.KeyBinding;
 
-import com.jsirgalaxybase.terminal.network.OpenTerminalMessage;
+import com.jsirgalaxybase.terminal.network.OpenTerminalRequestMessage;
 import com.jsirgalaxybase.terminal.network.TerminalNetwork;
 
 import cpw.mods.fml.client.registry.ClientRegistry;
@@ -33,7 +33,7 @@ public class TerminalKeyHandler {
     @SubscribeEvent
     public void onKeyInput(InputEvent.KeyInputEvent event) {
         if (OPEN_TERMINAL_KEY.isPressed()) {
-            TerminalNetwork.CHANNEL.sendToServer(new OpenTerminalMessage());
+            TerminalNetwork.CHANNEL.sendToServer(new OpenTerminalRequestMessage());
         }
     }
 }

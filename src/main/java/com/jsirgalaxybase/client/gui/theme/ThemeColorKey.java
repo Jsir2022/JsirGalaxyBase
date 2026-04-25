@@ -1,0 +1,17 @@
+package com.jsirgalaxybase.client.gui.theme;
+
+public enum ThemeColorKey {
+    SCREEN_OVERLAY,
+    PANEL_FILL,
+    PANEL_ACCENT,
+    POPUP_FILL,
+    PANEL_BORDER,
+    TEXT_PRIMARY,
+    TEXT_SECONDARY,
+    BUTTON_TEXT,
+    BUTTON_TEXT_DISABLED,
+    BUTTON_FILL,
+    BUTTON_FILL_HOVER,
+    BUTTON_FILL_PRESSED,
+    BUTTON_FILL_DISABLED
+}

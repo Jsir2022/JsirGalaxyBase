@@ -67,7 +67,51 @@ public class MarketRecoveryService {
         if (candidate.getOperationType() == MarketOperationType.CLAIMABLE_ASSET_CLAIM) {
             return recoverClaimOperation(candidate);
         }
+        if (candidate.getOperationType() == MarketOperationType.INVENTORY_DEPOSIT) {
+            return recoverDepositOperation(candidate);
+        }
         return escalateGeneric(candidate);
+    }
+
+    private MarketOperationLog recoverDepositOperation(final MarketOperationLog candidate) {
+        return transactionRunner.inTransaction(new Supplier<MarketOperationLog>() {
+
+            @Override
+            public MarketOperationLog get() {
+                MarketRecoveryMetadata metadata = MarketRecoveryMetadata.parse(candidate.getRecoveryMetadataKey());
+                if (candidate.getRelatedCustodyId() <= 0L) {
+                    return operationLogRepository.update(candidate.withState(MarketOperationStatus.FAILED,
+                        0L, 0L, 0L,
+                        "deposit recovery found no persisted custody and treated it as safely rolled back",
+                        metadata.toKey(), Instant.now()));
+                }
+
+                Optional<MarketCustodyInventory> existingCustody = custodyRepository.findById(candidate.getRelatedCustodyId());
+                if (!existingCustody.isPresent()) {
+                    return operationLogRepository.update(candidate.withState(MarketOperationStatus.FAILED,
+                        0L, candidate.getRelatedCustodyId(), 0L,
+                        "deposit recovery found missing custody and treated it as safely rolled back",
+                        metadata.toKey(), Instant.now()));
+                }
+
+                MarketCustodyInventory custody = custodyRepository.lockById(candidate.getRelatedCustodyId());
+                if (custody.getStatus() == MarketCustodyStatus.EXCEPTION) {
+                    custody = custodyRepository.update(custody.withStateAndLinks(MarketCustodyStatus.AVAILABLE,
+                        custody.getQuantity(), 0L, candidate.getOperationId(), Instant.now()));
+                }
+                if (custody.getStatus() != MarketCustodyStatus.AVAILABLE) {
+                    return operationLogRepository.update(candidate.withState(MarketOperationStatus.RECOVERY_REQUIRED,
+                        0L, custody.getCustodyId(), 0L,
+                        "deposit recovery found custody in unexpected status: " + custody.getStatus().name(),
+                        metadata.toKey(), Instant.now()));
+                }
+
+                return operationLogRepository.update(candidate.withState(MarketOperationStatus.COMPLETED,
+                    0L, custody.getCustodyId(), 0L,
+                    "deposit recovery confirmed AVAILABLE custody and completed operation",
+                    metadata.toKey(), Instant.now()));
+            }
+        });
     }
 
     private MarketOperationLog recoverBuySideFunds(final MarketOperationLog candidate) {

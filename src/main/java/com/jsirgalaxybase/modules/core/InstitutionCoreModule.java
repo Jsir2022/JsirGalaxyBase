@@ -11,6 +11,10 @@ import com.jsirgalaxybase.modules.core.banking.infrastructure.jdbc.JdbcBankingIn
 import com.jsirgalaxybase.modules.core.market.application.MarketOperationException;
 import com.jsirgalaxybase.modules.core.market.application.MarketRecoveryService;
 import com.jsirgalaxybase.modules.core.market.application.MarketSettlementFacade;
+import com.jsirgalaxybase.modules.core.market.application.CustomMarketService;
+import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketAdmissionDecision;
+import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketCatalogFactory;
+import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketProductCatalog;
 import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketProductParser;
 import com.jsirgalaxybase.modules.core.market.application.StandardizedSpotMarketService;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOperationLog;
@@ -20,6 +24,7 @@ import com.jsirgalaxybase.modules.core.market.infrastructure.jdbc.JdbcMarketInfr
 
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 import cpw.mods.fml.common.event.FMLServerStartingEvent;
+import net.minecraft.item.ItemStack;
 import net.minecraft.server.MinecraftServer;
 
 public class InstitutionCoreModule extends ModModule {
@@ -29,6 +34,7 @@ public class InstitutionCoreModule extends ModModule {
     private BankingInfrastructure bankingInfrastructure;
     private MarketInfrastructure marketInfrastructure;
     private StandardizedSpotMarketService standardizedSpotMarketService;
+    private CustomMarketService customMarketService;
     private MarketRecoveryService marketRecoveryService;
     private String bankingSourceServerId;
     private boolean bankingRequested;
@@ -112,7 +118,8 @@ public class InstitutionCoreModule extends ModModule {
             sharedMarketInfrastructure.getCustodyInventoryRepository(),
             sharedMarketInfrastructure.getOperationLogRepository(),
             sharedMarketInfrastructure.getTradeRecordRepository(), sharedMarketInfrastructure.getTransactionRunner(),
-            settlementFacade, new StandardizedMarketProductParser(), new MinecraftMarketClaimDeliveryPort());
+            settlementFacade, new StandardizedMarketProductParser(),
+            StandardizedMarketCatalogFactory.createDefaultCatalog(), new MinecraftMarketClaimDeliveryPort());
     }
 
     protected MarketRecoveryService createMarketRecoveryService(BankingInfrastructure infrastructure,
@@ -121,6 +128,15 @@ public class InstitutionCoreModule extends ModModule {
             sharedMarketInfrastructure.getCustodyInventoryRepository(),
             sharedMarketInfrastructure.getOperationLogRepository(), sharedMarketInfrastructure.getTransactionRunner(),
             new MarketSettlementFacade(infrastructure));
+    }
+
+    protected CustomMarketService createCustomMarketService(BankingInfrastructure infrastructure,
+        MarketInfrastructure sharedMarketInfrastructure) {
+        return new CustomMarketService(sharedMarketInfrastructure.getCustomMarketListingRepository(),
+            sharedMarketInfrastructure.getCustomMarketItemSnapshotRepository(),
+            sharedMarketInfrastructure.getCustomMarketTradeRecordRepository(),
+            sharedMarketInfrastructure.getCustomMarketAuditLogRepository(),
+            sharedMarketInfrastructure.getTransactionRunner(), new MarketSettlementFacade(infrastructure));
     }
 
     protected void runStartupRecoveryScanIfNeeded() {
@@ -150,21 +166,24 @@ public class InstitutionCoreModule extends ModModule {
     }
 
     private void initializeMarketRuntimeIfNeeded() {
-        if (marketInfrastructure != null && standardizedSpotMarketService != null && marketRecoveryService != null) {
+        if (marketInfrastructure != null && standardizedSpotMarketService != null && customMarketService != null
+            && marketRecoveryService != null) {
             return;
         }
         try {
             marketInfrastructure = createMarketInfrastructure(bankingInfrastructure);
             standardizedSpotMarketService = createStandardizedSpotMarketService(bankingInfrastructure, marketInfrastructure);
+            customMarketService = createCustomMarketService(bankingInfrastructure, marketInfrastructure);
             marketRecoveryService = createMarketRecoveryService(bankingInfrastructure, marketInfrastructure);
             GalaxyBase.LOG.info(
-                "Standardized spot market runtime prepared for dedicated server {} using shared banking JDBC schema",
+                "Market runtime prepared for dedicated server {} using shared banking JDBC schema",
                 bankingSourceServerId);
         } catch (RuntimeException exception) {
             marketInfrastructure = null;
             standardizedSpotMarketService = null;
+            customMarketService = null;
             marketRecoveryService = null;
-            GalaxyBase.LOG.error("Failed to prepare standardized spot market runtime", exception);
+            GalaxyBase.LOG.error("Failed to prepare market runtime", exception);
         }
     }
 
@@ -178,6 +197,31 @@ public class InstitutionCoreModule extends ModModule {
 
     public StandardizedSpotMarketService getStandardizedSpotMarketService() {
         return standardizedSpotMarketService;
+    }
+
+    public CustomMarketService getCustomMarketService() {
+        return customMarketService;
+    }
+
+    public StandardizedMarketProductCatalog getStandardizedMarketProductCatalog() {
+        StandardizedSpotMarketService spotMarketService = getStandardizedSpotMarketService();
+        return spotMarketService == null ? null : spotMarketService.getProductCatalog();
+    }
+
+    public StandardizedMarketAdmissionDecision inspectStandardizedCatalogProduct(String productKey) {
+        StandardizedSpotMarketService spotMarketService = getStandardizedSpotMarketService();
+        if (spotMarketService == null) {
+            throw new MarketOperationException("standardized spot market runtime is not available");
+        }
+        return spotMarketService.inspectCatalogProduct(productKey);
+    }
+
+    public StandardizedMarketAdmissionDecision inspectStandardizedCatalogStack(ItemStack stack) {
+        StandardizedSpotMarketService spotMarketService = getStandardizedSpotMarketService();
+        if (spotMarketService == null) {
+            throw new MarketOperationException("standardized spot market runtime is not available");
+        }
+        return spotMarketService.inspectCatalogStack(stack);
     }
 
     public MarketRecoveryService getMarketRecoveryService() {
