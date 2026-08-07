@@ -1,5 +1,11 @@
 package com.jsirgalaxybase.terminal.ui;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketCatalogPage;
+
 final class TerminalMarketSnapshot {
 
     final String serviceState;
@@ -55,6 +61,8 @@ final class TerminalMarketSnapshot {
     final String exchangeRateDisplay;
     final String exchangeExecutionHint;
     final String exchangeExecutableFlag;
+    StandardizedMarketCatalogPage catalogPage;
+    Map<String, CatalogMarketSummary> catalogMarketSummaries;
 
     TerminalMarketSnapshot(String serviceState, String browserHint, String[] productKeys, String[] productLabels,
         String selectedProductKey, String selectedProductName, String selectedProductUnit, String latestTradePrice,
@@ -124,5 +132,53 @@ final class TerminalMarketSnapshot {
         this.exchangeRateDisplay = exchangeRateDisplay;
         this.exchangeExecutionHint = exchangeExecutionHint;
         this.exchangeExecutableFlag = exchangeExecutableFlag;
+        this.catalogPage = new StandardizedMarketCatalogPage("", 0, 1, 0, Collections.emptyList());
+        this.catalogMarketSummaries = Collections.emptyMap();
+    }
+
+    TerminalMarketSnapshot withCatalogPage(StandardizedMarketCatalogPage catalogPage) {
+        if (catalogPage != null) {
+            this.catalogPage = catalogPage;
+        }
+        return this;
+    }
+
+    TerminalMarketSnapshot withCatalogMarketSummaries(Map<String, CatalogMarketSummary> summaries) {
+        this.catalogMarketSummaries = summaries == null || summaries.isEmpty()
+            ? Collections.<String, CatalogMarketSummary>emptyMap()
+            : Collections.unmodifiableMap(new LinkedHashMap<String, CatalogMarketSummary>(summaries));
+        return this;
+    }
+
+    static final class CatalogMarketSummary {
+        final String latestTrade;
+        final String bestBid;
+        final String bestAsk;
+        final String volume24h;
+        final String available;
+        final String escrow;
+        final String claimable;
+        final String dayChange;
+        final java.util.List<MarketPricePoint> pricePoints;
+        CatalogMarketSummary(String latestTrade, String bestBid, String bestAsk, String volume24h,
+            String available, String escrow, String claimable, java.util.List<MarketPricePoint> pricePoints) {
+            this(latestTrade, bestBid, bestAsk, volume24h, available, escrow, claimable, "--", pricePoints);
+        }
+        CatalogMarketSummary(String latestTrade, String bestBid, String bestAsk, String volume24h,
+            String available, String escrow, String claimable, String dayChange,
+            java.util.List<MarketPricePoint> pricePoints) {
+            this.latestTrade = latestTrade; this.bestBid = bestBid; this.bestAsk = bestAsk; this.volume24h = volume24h;
+            this.available = available; this.escrow = escrow; this.claimable = claimable;
+            this.dayChange = dayChange;
+            this.pricePoints = pricePoints == null ? Collections.<MarketPricePoint>emptyList()
+                : Collections.unmodifiableList(new java.util.ArrayList<MarketPricePoint>(pricePoints));
+        }
+    }
+
+    static final class MarketPricePoint {
+        final long price; final long quantity; final long epochSeconds;
+        MarketPricePoint(long price, long quantity, long epochSeconds) {
+            this.price = price; this.quantity = quantity; this.epochSeconds = epochSeconds;
+        }
     }
 }

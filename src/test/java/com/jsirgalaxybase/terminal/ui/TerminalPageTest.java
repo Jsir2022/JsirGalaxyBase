@@ -15,6 +15,7 @@ public class TerminalPageTest {
         assertTrue(TerminalPage.MARKET_CUSTOM.isMarketPage());
         assertTrue(TerminalPage.MARKET_EXCHANGE.isMarketPage());
         assertFalse(TerminalPage.BANK.isMarketPage());
+        assertFalse(TerminalPage.SERVER_TOOLS.isMarketPage());
         assertFalse(TerminalPage.HOME.isMarketPage());
     }
 
@@ -24,6 +25,7 @@ public class TerminalPageTest {
         assertEquals("标准商品市场", TerminalPage.MARKET_STANDARDIZED.title);
         assertEquals("定制商品市场", TerminalPage.MARKET_CUSTOM.title);
         assertEquals("汇率市场", TerminalPage.MARKET_EXCHANGE.title);
+        assertEquals("群组服传送", TerminalPage.SERVER_TOOLS.title);
         assertEquals(TerminalPage.MARKET_EXCHANGE, TerminalPage.byIndex(TerminalPage.MARKET_EXCHANGE.index));
     }
 
@@ -33,5 +35,13 @@ public class TerminalPageTest {
         assertEquals("market", TerminalPage.MARKET_STANDARDIZED.toTopLevelPageId());
         assertEquals("market", TerminalPage.MARKET_CUSTOM.toTopLevelPageId());
         assertEquals("market", TerminalPage.MARKET_EXCHANGE.toTopLevelPageId());
+    }
+
+    @Test
+    public void serverToolsRouteIsTopLevelAndNotBankOrMarket() {
+        assertFalse(TerminalPage.SERVER_TOOLS.isMarketPage());
+        assertFalse(TerminalPage.SERVER_TOOLS.isBankPage());
+        assertTrue(TerminalPage.SERVER_TOOLS.isServerToolsPage());
+        assertEquals("server_tools", TerminalPage.SERVER_TOOLS.toTopLevelPageId());
     }
 }

@@ -13,14 +13,19 @@ import com.jsirgalaxybase.modules.core.market.application.MarketRecoveryService;
 import com.jsirgalaxybase.modules.core.market.application.MarketSettlementFacade;
 import com.jsirgalaxybase.modules.core.market.application.CustomMarketService;
 import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketAdmissionDecision;
-import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketCatalogFactory;
+import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketCatalogService;
+import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketCatalogVersion;
 import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketProductCatalog;
 import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketProductParser;
 import com.jsirgalaxybase.modules.core.market.application.StandardizedSpotMarketService;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOperationLog;
 import com.jsirgalaxybase.modules.core.market.infrastructure.MarketInfrastructure;
-import com.jsirgalaxybase.modules.core.market.infrastructure.MinecraftMarketClaimDeliveryPort;
 import com.jsirgalaxybase.modules.core.market.infrastructure.jdbc.JdbcMarketInfrastructureFactory;
+import com.jsirgalaxybase.modules.core.market.infrastructure.jdbc.JdbcStandardizedMarketCatalogSource;
+import com.jsirgalaxybase.modules.core.vault.application.BaseVaultService;
+import com.jsirgalaxybase.modules.core.vault.infrastructure.VaultMarketClaimDeliveryPort;
+import com.jsirgalaxybase.modules.core.vault.infrastructure.BaseVaultAccountInventoryResolver;
+import com.jsirgalaxybase.modules.core.vault.infrastructure.jdbc.JdbcBaseVaultRepository;
 
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 import cpw.mods.fml.common.event.FMLServerStartingEvent;
@@ -30,12 +35,15 @@ import net.minecraft.server.MinecraftServer;
 public class InstitutionCoreModule extends ModModule {
 
     private static final int STARTUP_MARKET_RECOVERY_LIMIT = 25;
+    private static final int STARTUP_MARKET_SMOKE_LIMIT = 12;
 
     private BankingInfrastructure bankingInfrastructure;
     private MarketInfrastructure marketInfrastructure;
     private StandardizedSpotMarketService standardizedSpotMarketService;
     private CustomMarketService customMarketService;
     private MarketRecoveryService marketRecoveryService;
+    private BaseVaultService baseVaultService;
+    private BaseVaultAccountInventoryResolver accountInventoryResolver;
     private String bankingSourceServerId;
     private boolean bankingRequested;
 
@@ -119,7 +127,10 @@ public class InstitutionCoreModule extends ModModule {
             sharedMarketInfrastructure.getOperationLogRepository(),
             sharedMarketInfrastructure.getTradeRecordRepository(), sharedMarketInfrastructure.getTransactionRunner(),
             settlementFacade, new StandardizedMarketProductParser(),
-            StandardizedMarketCatalogFactory.createDefaultCatalog(), new MinecraftMarketClaimDeliveryPort());
+            new StandardizedMarketCatalogService(
+                new StandardizedMarketCatalogVersion("standardized-market-catalog-db-v1", "标准商品正式目录 v1"),
+                new JdbcStandardizedMarketCatalogSource(infrastructure.getSharedConnectionManager())),
+            new VaultMarketClaimDeliveryPort(baseVaultService));
     }
 
     protected MarketRecoveryService createMarketRecoveryService(BankingInfrastructure infrastructure,
@@ -167,24 +178,95 @@ public class InstitutionCoreModule extends ModModule {
 
     private void initializeMarketRuntimeIfNeeded() {
         if (marketInfrastructure != null && standardizedSpotMarketService != null && customMarketService != null
-            && marketRecoveryService != null) {
+            && marketRecoveryService != null && baseVaultService != null) {
             return;
         }
         try {
             marketInfrastructure = createMarketInfrastructure(bankingInfrastructure);
+            if (bankingInfrastructure.getSharedConnectionManager() != null) {
+                JdbcBaseVaultRepository.validateSchema(bankingInfrastructure.getSharedConnectionManager());
+            }
+            baseVaultService = new BaseVaultService(
+                new JdbcBaseVaultRepository(bankingInfrastructure.getSharedConnectionManager()),
+                marketInfrastructure.getTransactionRunner());
+            accountInventoryResolver = new BaseVaultAccountInventoryResolver(baseVaultService);
             standardizedSpotMarketService = createStandardizedSpotMarketService(bankingInfrastructure, marketInfrastructure);
             customMarketService = createCustomMarketService(bankingInfrastructure, marketInfrastructure);
             marketRecoveryService = createMarketRecoveryService(bankingInfrastructure, marketInfrastructure);
             GalaxyBase.LOG.info(
                 "Market runtime prepared for dedicated server {} using shared banking JDBC schema",
                 bankingSourceServerId);
+            runStartupMarketCatalogSmokeIfNeeded();
         } catch (RuntimeException exception) {
             marketInfrastructure = null;
             standardizedSpotMarketService = null;
             customMarketService = null;
             marketRecoveryService = null;
+            baseVaultService = null;
+            accountInventoryResolver = null;
             GalaxyBase.LOG.error("Failed to prepare market runtime", exception);
         }
+    }
+
+    protected void runStartupMarketCatalogSmokeIfNeeded() {
+        if (marketInfrastructure == null || standardizedSpotMarketService == null) {
+            return;
+        }
+        try {
+            java.util.LinkedHashSet<String> candidateKeys = new java.util.LinkedHashSet<String>();
+            candidateKeys.addAll(marketInfrastructure.getOrderBookRepository()
+                .findActiveProductKeys(STARTUP_MARKET_SMOKE_LIMIT));
+            if (candidateKeys.size() < STARTUP_MARKET_SMOKE_LIMIT) {
+                candidateKeys.addAll(marketInfrastructure.getTradeRecordRepository()
+                    .findDistinctProductKeys(STARTUP_MARKET_SMOKE_LIMIT - candidateKeys.size()));
+            }
+            if (candidateKeys.isEmpty()) {
+                GalaxyBase.LOG.info("[market-smoke] Standardized market startup smoke found no DB product keys.");
+                return;
+            }
+
+            java.util.List<String> admitted = new java.util.ArrayList<String>();
+            java.util.List<String> rejected = new java.util.ArrayList<String>();
+            for (String productKey : candidateKeys) {
+                if (productKey == null || productKey.trim().isEmpty()) {
+                    continue;
+                }
+                try {
+                    StandardizedMarketAdmissionDecision decision = standardizedSpotMarketService
+                        .inspectCatalogProduct(productKey);
+                    if (decision.isAdmitted()) {
+                        admitted.add(productKey);
+                    } else {
+                        rejected.add(formatStartupCatalogRejection(productKey, decision.getDetailMessage()));
+                    }
+                } catch (RuntimeException exception) {
+                    rejected.add(formatStartupCatalogRejection(productKey, exception.getMessage()));
+                }
+            }
+
+            if (admitted.isEmpty()) {
+                GalaxyBase.LOG.warn(
+                    "[market-smoke] Standardized market startup smoke rejected all {} DB product keys. First rejected: {}",
+                    candidateKeys.size(),
+                    rejected);
+                return;
+            }
+            GalaxyBase.LOG.info(
+                "[market-smoke] Standardized market startup smoke admitted {}/{} DB product keys. First admitted: {}. First rejected: {}",
+                admitted.size(),
+                candidateKeys.size(),
+                admitted.subList(0, Math.min(admitted.size(), STARTUP_MARKET_SMOKE_LIMIT)),
+                rejected.subList(0, Math.min(rejected.size(), STARTUP_MARKET_SMOKE_LIMIT)));
+        } catch (RuntimeException exception) {
+            GalaxyBase.LOG.warn("[market-smoke] Standardized market startup smoke failed", exception);
+        }
+    }
+
+    private String formatStartupCatalogRejection(String productKey, String detailMessage) {
+        if (detailMessage == null || detailMessage.trim().isEmpty()) {
+            return productKey + " -> rejected without detail";
+        }
+        return productKey + " -> " + detailMessage;
     }
 
     public BankingInfrastructure getBankingInfrastructure() {
@@ -201,6 +283,14 @@ public class InstitutionCoreModule extends ModModule {
 
     public CustomMarketService getCustomMarketService() {
         return customMarketService;
+    }
+
+    public BaseVaultService getBaseVaultService() {
+        return baseVaultService;
+    }
+
+    public BaseVaultAccountInventoryResolver getAccountInventoryResolver() {
+        return accountInventoryResolver;
     }
 
     public StandardizedMarketProductCatalog getStandardizedMarketProductCatalog() {

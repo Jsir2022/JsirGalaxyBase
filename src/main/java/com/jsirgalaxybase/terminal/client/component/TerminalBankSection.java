@@ -200,17 +200,34 @@ public final class TerminalBankSection extends PanelContainer {
     @Override
     public void setBounds(GuiRect bounds) {
         super.setBounds(bounds);
-        int leftWidth = Math.max(200, (bounds.getWidth() * 58) / 100);
-        int rightWidth = bounds.getWidth() - leftWidth - 10;
+        int gap = 10;
         int topY = bounds.getY();
         titleLabel.setBounds(new GuiRect(bounds.getX(), topY, bounds.getWidth(), 12));
-        leadLabel.setBounds(new GuiRect(bounds.getX(), topY + 14, bounds.getWidth(), 20));
+        leadLabel.setBounds(new GuiRect(bounds.getX(), topY + 14, bounds.getWidth(), 24));
+
+        if (bounds.getWidth() < 500) {
+            int cardWidth = bounds.getWidth();
+            accountCard.setBounds(new GuiRect(bounds.getX(), topY + 44, cardWidth, 86));
+            summaryCard.setBounds(new GuiRect(bounds.getX(), accountCard.getBounds().getBottom() + gap, cardWidth, 86));
+            transferCard.setBounds(new GuiRect(bounds.getX(), summaryCard.getBounds().getBottom() + gap, cardWidth, 138));
+            feedbackCard.setBounds(new GuiRect(bounds.getX(), transferCard.getBounds().getBottom() + gap, cardWidth, 70));
+            ledgerCard.setBounds(new GuiRect(bounds.getX(), feedbackCard.getBounds().getBottom() + gap, cardWidth, 66));
+            layoutAccountCard(accountCard.getBounds());
+            layoutSummaryCard(summaryCard.getBounds());
+            layoutTransferCard(transferCard.getBounds());
+            layoutFeedbackCard(feedbackCard.getBounds());
+            layoutLedgerCard(ledgerCard.getBounds());
+            return;
+        }
+
+        int leftWidth = Math.max(220, (bounds.getWidth() * 58) / 100);
+        int rightWidth = Math.max(120, bounds.getWidth() - leftWidth - gap);
 
         accountCard.setBounds(new GuiRect(bounds.getX(), topY + 40, leftWidth, 82));
         transferCard.setBounds(new GuiRect(bounds.getX(), topY + 128, leftWidth, 132));
-        summaryCard.setBounds(new GuiRect(bounds.getX() + leftWidth + 10, topY + 40, rightWidth, 82));
-        feedbackCard.setBounds(new GuiRect(bounds.getX() + leftWidth + 10, topY + 128, rightWidth, 64));
-        ledgerCard.setBounds(new GuiRect(bounds.getX() + leftWidth + 10, topY + 198, rightWidth, 62));
+        summaryCard.setBounds(new GuiRect(bounds.getX() + leftWidth + gap, topY + 40, rightWidth, 82));
+        feedbackCard.setBounds(new GuiRect(bounds.getX() + leftWidth + gap, topY + 128, rightWidth, 64));
+        ledgerCard.setBounds(new GuiRect(bounds.getX() + leftWidth + gap, topY + 198, rightWidth, 62));
 
         layoutAccountCard(accountCard.getBounds());
         layoutSummaryCard(summaryCard.getBounds());

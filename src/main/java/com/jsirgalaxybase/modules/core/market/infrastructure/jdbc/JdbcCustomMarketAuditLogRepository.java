@@ -69,6 +69,30 @@ public class JdbcCustomMarketAuditLogRepository extends AbstractJdbcRepository
     }
 
     @Override
+    public CustomMarketAuditLog update(final CustomMarketAuditLog auditLog) {
+        return connectionManager.withConnection(new JdbcConnectionCallback<CustomMarketAuditLog>() {
+
+            @Override
+            public CustomMarketAuditLog doInConnection(java.sql.Connection connection) throws SQLException {
+                PreparedStatement statement = connection.prepareStatement(
+                    "UPDATE custom_market_audit_log SET message = ?, updated_at = ? WHERE audit_id = ?");
+                try {
+                    setNullableText(statement, 1, auditLog.getMessage());
+                    statement.setTimestamp(2, java.sql.Timestamp.from(auditLog.getUpdatedAt()));
+                    statement.setLong(3, auditLog.getAuditId());
+                    if (statement.executeUpdate() != 1) {
+                        throw new MarketOperationException("custom_market_audit_log update failed for auditId="
+                            + auditLog.getAuditId());
+                    }
+                    return auditLog;
+                } finally {
+                    statement.close();
+                }
+            }
+        });
+    }
+
+    @Override
     public Optional<CustomMarketAuditLog> findByRequestId(final String requestId) {
         return connectionManager.withConnection(new JdbcConnectionCallback<Optional<CustomMarketAuditLog>>() {
 

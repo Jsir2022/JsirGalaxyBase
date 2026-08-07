@@ -8,12 +8,14 @@ import com.jsirgalaxybase.terminal.TerminalCustomMarketSectionSnapshot;
 import com.jsirgalaxybase.terminal.TerminalExchangeMarketSectionSnapshot;
 import com.jsirgalaxybase.terminal.TerminalMarketSectionSnapshot;
 import com.jsirgalaxybase.terminal.TerminalOpenApproval;
+import com.jsirgalaxybase.terminal.TerminalServerToolsSectionSnapshot;
 import com.jsirgalaxybase.terminal.client.TerminalClientScreenController;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalBankSectionModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalCustomMarketSectionModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalExchangeMarketSectionModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalHomeScreenModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel;
+import com.jsirgalaxybase.terminal.client.viewmodel.TerminalServerToolsSectionModel;
 
 import cpw.mods.fml.common.network.ByteBufUtils;
 import cpw.mods.fml.common.network.simpleimpl.IMessage;
@@ -135,6 +137,7 @@ public class OpenTerminalApprovedMessage implements IMessage {
             writeMarketSection(buf, snapshot.getMarketSectionModel());
             writeCustomMarketSection(buf, snapshot.getCustomMarketSectionModel());
             writeExchangeMarketSection(buf, snapshot.getExchangeMarketSectionModel());
+            writeServerToolsSection(buf, snapshot.getServerToolsSectionModel());
         }
     }
 
@@ -150,9 +153,73 @@ public class OpenTerminalApprovedMessage implements IMessage {
                 readBankSection(buf),
                 readMarketSection(buf),
                 readCustomMarketSection(buf),
-                readExchangeMarketSection(buf)));
+                readExchangeMarketSection(buf),
+                readServerToolsSection(buf)));
         }
         return items;
+    }
+
+    static void writeServerToolsSection(ByteBuf buf, TerminalServerToolsSectionModel model) {
+        buf.writeBoolean(model != null);
+        if (model == null) {
+            return;
+        }
+        ByteBufUtils.writeUTF8String(buf, safe(model.getServiceState()));
+        ByteBufUtils.writeUTF8String(buf, safe(model.getCurrentServerId()));
+        writeStringList(buf, model.getServerLines());
+        writeStringList(buf, model.getServerIds());
+        writeStringList(buf, model.getWarpLines());
+        writeStringList(buf, model.getWarpNames());
+        writeStringList(buf, model.getWarpSubtitles());
+        writeStringList(buf, model.getWarpStateLabels());
+        writeStringList(buf, model.getRecentTransferLines());
+        ByteBufUtils.writeUTF8String(buf, safe(model.getSelectedWarpName()));
+        ByteBufUtils.writeUTF8String(buf, safe(model.getSelectedWarpTitle()));
+        ByteBufUtils.writeUTF8String(buf, safe(model.getSelectedWarpDetail()));
+        ByteBufUtils.writeUTF8String(buf, safe(model.getSelectedTargetServerId()));
+        ByteBufUtils.writeUTF8String(buf, safe(model.getSelectedTargetLocation()));
+        ByteBufUtils.writeUTF8String(buf, safe(model.getSelectedWarpDescription()));
+        buf.writeBoolean(model.isSelectedWarpEnabled());
+        ByteBufUtils.writeUTF8String(buf, safe(model.getRecentSourceServerId()));
+        ByteBufUtils.writeUTF8String(buf, safe(model.getRecentTargetServerId()));
+        ByteBufUtils.writeUTF8String(buf, safe(model.getRecentTransferStatus()));
+        ByteBufUtils.writeUTF8String(buf, safe(model.getRecentTransferTime()));
+        ByteBufUtils.writeUTF8String(buf, safe(model.getRecentTransferSummary()));
+        ByteBufUtils.writeUTF8String(buf, safe(model.getActionFeedback().getTitle()));
+        ByteBufUtils.writeUTF8String(buf, safe(model.getActionFeedback().getBody()));
+        ByteBufUtils.writeUTF8String(buf, safe(model.getActionFeedback().getSeverityName()));
+    }
+
+    static TerminalServerToolsSectionModel readServerToolsSection(ByteBuf buf) {
+        if (!buf.readBoolean()) {
+            return null;
+        }
+        return new TerminalServerToolsSectionModel(
+            ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
+            readStringList(buf),
+            readStringList(buf),
+            readStringList(buf),
+            readStringList(buf),
+            readStringList(buf),
+            readStringList(buf),
+            readStringList(buf),
+            ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
+            buf.readBoolean(),
+            ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
+            new TerminalServerToolsSectionModel.ActionFeedbackModel(
+                ByteBufUtils.readUTF8String(buf),
+                ByteBufUtils.readUTF8String(buf),
+                ByteBufUtils.readUTF8String(buf)));
     }
 
     static void writeCustomMarketSection(ByteBuf buf, TerminalCustomMarketSectionModel model) {
@@ -165,10 +232,13 @@ public class OpenTerminalApprovedMessage implements IMessage {
         ByteBufUtils.writeUTF8String(buf, safe(model.getScopeLabel()));
         writeStringList(buf, model.getActiveListingLines());
         writeStringList(buf, model.getActiveListingIds());
+        writeStringList(buf, model.getActiveListingIconRefs());
         writeStringList(buf, model.getSellingListingLines());
         writeStringList(buf, model.getSellingListingIds());
+        writeStringList(buf, model.getSellingListingIconRefs());
         writeStringList(buf, model.getPendingListingLines());
         writeStringList(buf, model.getPendingListingIds());
+        writeStringList(buf, model.getPendingListingIconRefs());
         ByteBufUtils.writeUTF8String(buf, safe(model.getSelectedListingId()));
         ByteBufUtils.writeUTF8String(buf, safe(model.getSelectedTitle()));
         ByteBufUtils.writeUTF8String(buf, safe(model.getSelectedPrice()));
@@ -193,6 +263,9 @@ public class OpenTerminalApprovedMessage implements IMessage {
             ByteBufUtils.readUTF8String(buf),
             ByteBufUtils.readUTF8String(buf),
             ByteBufUtils.readUTF8String(buf),
+            readStringList(buf),
+            readStringList(buf),
+            readStringList(buf),
             readStringList(buf),
             readStringList(buf),
             readStringList(buf),
@@ -302,6 +375,8 @@ public class OpenTerminalApprovedMessage implements IMessage {
         ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getLatestTradePrice()));
         ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getHighestBid()));
         ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getLowestAsk()));
+        ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getBestBidQuantity()));
+        ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getBestAskQuantity()));
         ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getVolume24h()));
         ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getTurnover24h()));
         ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getSourceAvailable()));
@@ -309,19 +384,46 @@ public class OpenTerminalApprovedMessage implements IMessage {
         ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getClaimableQuantity()));
         ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getFrozenFunds()));
         ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getSummaryNotice()));
+        ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getSourceMode()));
+        ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getWarehouseNotice()));
+        ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getLimitBuyPreview()));
+        ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getLimitSellPreview()));
+        ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getInstantBuyPreview()));
+        ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getInstantSellPreview()));
         writeStringList(buf, marketSectionModel.getAskLines());
         writeStringList(buf, marketSectionModel.getBidLines());
         writeStringList(buf, marketSectionModel.getMyOrderLines());
+        writeStringList(buf, marketSectionModel.getMyOrderIds());
+        writeStringList(buf, marketSectionModel.getMyOrderCancelableFlags());
         writeStringList(buf, marketSectionModel.getClaimLines());
         writeStringList(buf, marketSectionModel.getClaimIds());
         writeStringList(buf, marketSectionModel.getRuleLines());
+        buf.writeBoolean(marketSectionModel.isDepositEnabled());
         ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getLimitBuyDraft().getSelectedProductKey()));
         ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getLimitBuyDraft().getPriceText()));
         ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getLimitBuyDraft().getQuantityText()));
         buf.writeBoolean(marketSectionModel.getLimitBuyDraft().isSubmitEnabled());
+        ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getLimitSellDraft().getSelectedProductKey()));
+        ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getLimitSellDraft().getPriceText()));
+        ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getLimitSellDraft().getQuantityText()));
+        buf.writeBoolean(marketSectionModel.getLimitSellDraft().isSubmitEnabled());
+        ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getInstantBuyDraft().getSelectedProductKey()));
+        ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getInstantBuyDraft().getQuantityText()));
+        buf.writeBoolean(marketSectionModel.getInstantBuyDraft().isSubmitEnabled());
+        ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getInstantSellDraft().getSelectedProductKey()));
+        ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getInstantSellDraft().getQuantityText()));
+        buf.writeBoolean(marketSectionModel.getInstantSellDraft().isSubmitEnabled());
         ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getActionFeedback().getTitle()));
         ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getActionFeedback().getBody()));
         ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getActionFeedback().getSeverityName()));
+        writeCatalogProducts(buf, marketSectionModel.getCatalogProducts());
+        ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getCatalogQuery()));
+        buf.writeInt(marketSectionModel.getCatalogPageIndex());
+        buf.writeInt(marketSectionModel.getCatalogPageSize());
+        buf.writeInt(marketSectionModel.getCatalogTotalEntries());
+        buf.writeBoolean(marketSectionModel.hasCatalogPreviousPage());
+        buf.writeBoolean(marketSectionModel.hasCatalogNextPage());
+        writeVaultAssets(buf, marketSectionModel.getVaultAssets());
     }
 
     static TerminalMarketSectionModel readMarketSection(ByteBuf buf) {
@@ -347,21 +449,164 @@ public class OpenTerminalApprovedMessage implements IMessage {
             ByteBufUtils.readUTF8String(buf),
             ByteBufUtils.readUTF8String(buf),
             ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
             readStringList(buf),
             readStringList(buf),
             readStringList(buf),
             readStringList(buf),
             readStringList(buf),
             readStringList(buf),
+            readStringList(buf),
+            readStringList(buf),
+            buf.readBoolean(),
             new TerminalMarketSectionModel.LimitBuyDraftModel(
                 ByteBufUtils.readUTF8String(buf),
+                ByteBufUtils.readUTF8String(buf),
+                ByteBufUtils.readUTF8String(buf),
+                buf.readBoolean()),
+            new TerminalMarketSectionModel.LimitSellDraftModel(
+                ByteBufUtils.readUTF8String(buf),
+                ByteBufUtils.readUTF8String(buf),
+                ByteBufUtils.readUTF8String(buf),
+                buf.readBoolean()),
+            new TerminalMarketSectionModel.InstantDraftModel(
+                ByteBufUtils.readUTF8String(buf),
+                ByteBufUtils.readUTF8String(buf),
+                buf.readBoolean()),
+            new TerminalMarketSectionModel.InstantDraftModel(
                 ByteBufUtils.readUTF8String(buf),
                 ByteBufUtils.readUTF8String(buf),
                 buf.readBoolean()),
             new TerminalMarketSectionModel.ActionFeedbackModel(
                 ByteBufUtils.readUTF8String(buf),
                 ByteBufUtils.readUTF8String(buf),
-                ByteBufUtils.readUTF8String(buf)));
+                ByteBufUtils.readUTF8String(buf))).withCatalogPage(
+                    readCatalogProducts(buf),
+                    ByteBufUtils.readUTF8String(buf),
+                    buf.readInt(),
+                    buf.readInt(),
+                    buf.readInt(),
+                    buf.readBoolean(),
+                    buf.readBoolean())
+                .withVaultAssets(readVaultAssets(buf));
+    }
+
+    private static void writeCatalogProducts(ByteBuf buf,
+        List<TerminalMarketSectionModel.CatalogProductModel> products) {
+        int count = products == null ? 0 : Math.min(64, products.size());
+        buf.writeInt(count);
+        if (products == null) {
+            return;
+        }
+        for (int index = 0; index < count; index++) {
+            TerminalMarketSectionModel.CatalogProductModel product = products.get(index);
+            ByteBufUtils.writeUTF8String(buf, safe(product.getProductKey()));
+            ByteBufUtils.writeUTF8String(buf, safe(product.getRegistryName()));
+            buf.writeInt(product.getMeta());
+            ByteBufUtils.writeUTF8String(buf, safe(product.getDisplayName()));
+            ByteBufUtils.writeUTF8String(buf, safe(product.getUnitLabel()));
+            buf.writeInt(product.getSortOrder());
+            buf.writeBoolean(product.isEnabled());
+            buf.writeLong(product.getReferencePrice());
+            ByteBufUtils.writeUTF8String(buf, safe(product.getTradability()));
+            writeCatalogMarketSummary(buf, product.getMarketSummary());
+        }
+    }
+
+    private static List<TerminalMarketSectionModel.CatalogProductModel> readCatalogProducts(ByteBuf buf) {
+        int count = Math.max(0, Math.min(64, buf.readInt()));
+        List<TerminalMarketSectionModel.CatalogProductModel> products =
+            new ArrayList<TerminalMarketSectionModel.CatalogProductModel>(count);
+        for (int index = 0; index < count; index++) {
+            products.add(new TerminalMarketSectionModel.CatalogProductModel(
+                ByteBufUtils.readUTF8String(buf),
+                ByteBufUtils.readUTF8String(buf),
+                buf.readInt(),
+                ByteBufUtils.readUTF8String(buf),
+                ByteBufUtils.readUTF8String(buf),
+                buf.readInt(),
+                buf.readBoolean(),
+                buf.readLong(),
+                ByteBufUtils.readUTF8String(buf),
+                readCatalogMarketSummary(buf)));
+        }
+        return products;
+    }
+
+    private static void writeVaultAssets(ByteBuf buf, List<TerminalMarketSectionModel.VaultAssetModel> assets) {
+        int count = assets == null ? 0 : Math.min(54, assets.size());
+        buf.writeInt(count);
+        for (int index = 0; index < count; index++) {
+            TerminalMarketSectionModel.VaultAssetModel asset = assets.get(index);
+            buf.writeInt(asset.getSlotIndex());
+            ByteBufUtils.writeUTF8String(buf, safe(asset.getRegistryName()));
+            buf.writeInt(asset.getMeta());
+            ByteBufUtils.writeUTF8String(buf, safe(asset.getDisplayName()));
+            buf.writeInt(asset.getQuantity());
+            ByteBufUtils.writeUTF8String(buf, safe(asset.getStandardizedProductKey()));
+            buf.writeBoolean(asset.isStandardizedEligible());
+            ByteBufUtils.writeUTF8String(buf, safe(asset.getStandardizedReason()));
+        }
+    }
+
+    private static List<TerminalMarketSectionModel.VaultAssetModel> readVaultAssets(ByteBuf buf) {
+        int count = Math.max(0, Math.min(54, buf.readInt()));
+        List<TerminalMarketSectionModel.VaultAssetModel> assets =
+            new ArrayList<TerminalMarketSectionModel.VaultAssetModel>(count);
+        for (int index = 0; index < count; index++) {
+            assets.add(new TerminalMarketSectionModel.VaultAssetModel(buf.readInt(), ByteBufUtils.readUTF8String(buf),
+                buf.readInt(), ByteBufUtils.readUTF8String(buf), buf.readInt(), ByteBufUtils.readUTF8String(buf),
+                buf.readBoolean(), ByteBufUtils.readUTF8String(buf)));
+        }
+        return assets;
+    }
+
+    private static void writeCatalogMarketSummary(ByteBuf buf,
+        TerminalMarketSectionModel.CatalogMarketSummaryModel summary) {
+        TerminalMarketSectionModel.CatalogMarketSummaryModel value = summary == null
+            ? TerminalMarketSectionModel.CatalogMarketSummaryModel.empty() : summary;
+        ByteBufUtils.writeUTF8String(buf, safe(value.getLatestTrade()));
+        ByteBufUtils.writeUTF8String(buf, safe(value.getBestBid()));
+        ByteBufUtils.writeUTF8String(buf, safe(value.getBestAsk()));
+        ByteBufUtils.writeUTF8String(buf, safe(value.getVolume24h()));
+        ByteBufUtils.writeUTF8String(buf, safe(value.getAvailable()));
+        ByteBufUtils.writeUTF8String(buf, safe(value.getEscrow()));
+        ByteBufUtils.writeUTF8String(buf, safe(value.getClaimable()));
+        ByteBufUtils.writeUTF8String(buf, safe(value.getDayChange()));
+        int count = Math.min(12, value.getPricePoints().size());
+        buf.writeInt(count);
+        for (int index = 0; index < count; index++) {
+            TerminalMarketSectionModel.PricePointModel point = value.getPricePoints().get(index);
+            buf.writeLong(point.getPrice());
+            buf.writeLong(point.getQuantity());
+            buf.writeLong(point.getCreatedAtEpochSeconds());
+        }
+    }
+
+    private static TerminalMarketSectionModel.CatalogMarketSummaryModel readCatalogMarketSummary(ByteBuf buf) {
+        String latest = ByteBufUtils.readUTF8String(buf);
+        String bid = ByteBufUtils.readUTF8String(buf);
+        String ask = ByteBufUtils.readUTF8String(buf);
+        String volume = ByteBufUtils.readUTF8String(buf);
+        String available = ByteBufUtils.readUTF8String(buf);
+        String escrow = ByteBufUtils.readUTF8String(buf);
+        String claimable = ByteBufUtils.readUTF8String(buf);
+        String dayChange = ByteBufUtils.readUTF8String(buf);
+        int count = Math.max(0, Math.min(12, buf.readInt()));
+        List<TerminalMarketSectionModel.PricePointModel> points =
+            new ArrayList<TerminalMarketSectionModel.PricePointModel>(count);
+        for (int index = 0; index < count; index++) {
+            points.add(new TerminalMarketSectionModel.PricePointModel(buf.readLong(), buf.readLong(), buf.readLong()));
+        }
+        return new TerminalMarketSectionModel.CatalogMarketSummaryModel(latest, bid, ask, volume, available,
+            escrow, claimable, dayChange, points);
     }
 
     static void writeBankSection(ByteBuf buf, TerminalBankSectionModel bankSectionModel) {
@@ -566,9 +811,42 @@ public class OpenTerminalApprovedMessage implements IMessage {
                 toBankSectionModel(snapshot.getBankSectionSnapshot()),
                 toMarketSectionModel(snapshot.getMarketSectionSnapshot()),
                 toCustomMarketSectionModel(snapshot.getCustomMarketSectionSnapshot()),
-                toExchangeMarketSectionModel(snapshot.getExchangeMarketSectionSnapshot())));
+                toExchangeMarketSectionModel(snapshot.getExchangeMarketSectionSnapshot()),
+                toServerToolsSectionModel(snapshot.getServerToolsSectionSnapshot())));
         }
         return models;
+    }
+
+    private static TerminalServerToolsSectionModel toServerToolsSectionModel(TerminalServerToolsSectionSnapshot snapshot) {
+        if (snapshot == null) {
+            return null;
+        }
+        return new TerminalServerToolsSectionModel(
+            snapshot.getServiceState(),
+            snapshot.getCurrentServerId(),
+            snapshot.getServerLines(),
+            snapshot.getServerIds(),
+            snapshot.getWarpLines(),
+            snapshot.getWarpNames(),
+            snapshot.getWarpSubtitles(),
+            snapshot.getWarpStateLabels(),
+            snapshot.getRecentTransferLines(),
+            snapshot.getSelectedWarpName(),
+            snapshot.getSelectedWarpTitle(),
+            snapshot.getSelectedWarpDetail(),
+            snapshot.getSelectedTargetServerId(),
+            snapshot.getSelectedTargetLocation(),
+            snapshot.getSelectedWarpDescription(),
+            snapshot.isSelectedWarpEnabled(),
+            snapshot.getRecentSourceServerId(),
+            snapshot.getRecentTargetServerId(),
+            snapshot.getRecentTransferStatus(),
+            snapshot.getRecentTransferTime(),
+            snapshot.getRecentTransferSummary(),
+            new TerminalServerToolsSectionModel.ActionFeedbackModel(
+                snapshot.getActionFeedback().getTitle(),
+                snapshot.getActionFeedback().getBody(),
+                snapshot.getActionFeedback().getSeverityName()));
     }
 
     private static TerminalCustomMarketSectionModel toCustomMarketSectionModel(
@@ -582,10 +860,13 @@ public class OpenTerminalApprovedMessage implements IMessage {
             snapshot.getScopeLabel(),
             snapshot.getActiveListingLines(),
             snapshot.getActiveListingIds(),
+            snapshot.getActiveListingIconRefs(),
             snapshot.getSellingListingLines(),
             snapshot.getSellingListingIds(),
+            snapshot.getSellingListingIconRefs(),
             snapshot.getPendingListingLines(),
             snapshot.getPendingListingIds(),
+            snapshot.getPendingListingIconRefs(),
             snapshot.getSelectedListingId(),
             snapshot.getSelectedTitle(),
             snapshot.getSelectedPrice(),
@@ -686,6 +967,8 @@ public class OpenTerminalApprovedMessage implements IMessage {
             snapshot.getLatestTradePrice(),
             snapshot.getHighestBid(),
             snapshot.getLowestAsk(),
+            snapshot.getBestBidQuantity(),
+            snapshot.getBestAskQuantity(),
             snapshot.getVolume24h(),
             snapshot.getTurnover24h(),
             snapshot.getSourceAvailable(),
@@ -693,21 +976,90 @@ public class OpenTerminalApprovedMessage implements IMessage {
             snapshot.getClaimableQuantity(),
             snapshot.getFrozenFunds(),
             snapshot.getSummaryNotice(),
+            snapshot.getSourceMode(),
+            snapshot.getWarehouseNotice(),
+            snapshot.getLimitBuyPreview(),
+            snapshot.getLimitSellPreview(),
+            snapshot.getInstantBuyPreview(),
+            snapshot.getInstantSellPreview(),
             snapshot.getAskLines(),
             snapshot.getBidLines(),
             snapshot.getMyOrderLines(),
+            snapshot.getMyOrderIds(),
+            snapshot.getMyOrderCancelableFlags(),
             snapshot.getClaimLines(),
             snapshot.getClaimIds(),
             snapshot.getRuleLines(),
+            snapshot.isDepositEnabled(),
             new TerminalMarketSectionModel.LimitBuyDraftModel(
                 snapshot.getLimitBuyDraft().getSelectedProductKey(),
                 snapshot.getLimitBuyDraft().getPriceText(),
                 snapshot.getLimitBuyDraft().getQuantityText(),
                 snapshot.getLimitBuyDraft().isSubmitEnabled()),
+            new TerminalMarketSectionModel.LimitSellDraftModel(
+                snapshot.getLimitSellDraft().getSelectedProductKey(),
+                snapshot.getLimitSellDraft().getPriceText(),
+                snapshot.getLimitSellDraft().getQuantityText(),
+                snapshot.getLimitSellDraft().isSubmitEnabled()),
+            new TerminalMarketSectionModel.InstantDraftModel(
+                snapshot.getInstantBuyDraft().getSelectedProductKey(),
+                snapshot.getInstantBuyDraft().getQuantityText(),
+                snapshot.getInstantBuyDraft().isSubmitEnabled()),
+            new TerminalMarketSectionModel.InstantDraftModel(
+                snapshot.getInstantSellDraft().getSelectedProductKey(),
+                snapshot.getInstantSellDraft().getQuantityText(),
+                snapshot.getInstantSellDraft().isSubmitEnabled()),
             new TerminalMarketSectionModel.ActionFeedbackModel(
                 snapshot.getActionFeedback().getTitle(),
                 snapshot.getActionFeedback().getBody(),
-                snapshot.getActionFeedback().getSeverityName()));
+                snapshot.getActionFeedback().getSeverityName())).withCatalogPage(
+                    toCatalogProducts(snapshot),
+                    snapshot.getCatalogQuery(),
+                    snapshot.getCatalogPageIndex(),
+                    snapshot.getCatalogPageSize(),
+                    snapshot.getCatalogTotalEntries(),
+                    snapshot.hasCatalogPreviousPage(),
+                    snapshot.hasCatalogNextPage())
+                .withVaultAssets(toVaultAssets(snapshot));
+    }
+
+    private static List<TerminalMarketSectionModel.CatalogProductModel> toCatalogProducts(
+        TerminalMarketSectionSnapshot snapshot) {
+        List<TerminalMarketSectionModel.CatalogProductModel> models =
+            new ArrayList<TerminalMarketSectionModel.CatalogProductModel>();
+        for (TerminalMarketSectionSnapshot.CatalogProduct product : snapshot.getCatalogProducts()) {
+            models.add(new TerminalMarketSectionModel.CatalogProductModel(
+                product.getProductKey(), product.getRegistryName(), product.getMeta(), product.getDisplayName(),
+                product.getUnitLabel(), product.getSortOrder(), product.isEnabled(), product.getReferencePrice(),
+                product.getTradability(), toCatalogSummary(product.getMarketSummary())));
+        }
+        return models;
+    }
+
+    private static TerminalMarketSectionModel.CatalogMarketSummaryModel toCatalogSummary(
+        TerminalMarketSectionSnapshot.CatalogMarketSummary summary) {
+        List<TerminalMarketSectionModel.PricePointModel> points = new ArrayList<TerminalMarketSectionModel.PricePointModel>();
+        if (summary != null) {
+            for (TerminalMarketSectionSnapshot.PricePoint point : summary.getPricePoints()) {
+                points.add(new TerminalMarketSectionModel.PricePointModel(point.getPrice(), point.getQuantity(), point.getCreatedAtEpochSeconds()));
+            }
+            return new TerminalMarketSectionModel.CatalogMarketSummaryModel(summary.getLatestTrade(), summary.getBestBid(),
+                summary.getBestAsk(), summary.getVolume24h(), summary.getAvailable(), summary.getEscrow(),
+                summary.getClaimable(), summary.getDayChange(), points);
+        }
+        return TerminalMarketSectionModel.CatalogMarketSummaryModel.empty();
+    }
+
+    private static List<TerminalMarketSectionModel.VaultAssetModel> toVaultAssets(
+        TerminalMarketSectionSnapshot snapshot) {
+        List<TerminalMarketSectionModel.VaultAssetModel> models =
+            new ArrayList<TerminalMarketSectionModel.VaultAssetModel>();
+        for (TerminalMarketSectionSnapshot.VaultAsset asset : snapshot.getVaultAssets()) {
+            models.add(new TerminalMarketSectionModel.VaultAssetModel(asset.getSlotIndex(), asset.getRegistryName(),
+                asset.getMeta(), asset.getDisplayName(), asset.getQuantity(), asset.getStandardizedProductKey(),
+                asset.isStandardizedEligible(), asset.getStandardizedReason()));
+        }
+        return models;
     }
 
     private static List<TerminalHomeScreenModel.SectionModel> toSectionModels(List<TerminalOpenApproval.Section> sections) {

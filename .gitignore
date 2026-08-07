@@ -3,6 +3,10 @@
 /.idea/
 /.vscode/
 
+# Local analysis and temporary artifacts
+/.codegraph/
+/tmp/
+
 # Build outputs
 /build/
 /bin/

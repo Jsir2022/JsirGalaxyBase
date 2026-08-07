@@ -12,6 +12,7 @@ import com.jsirgalaxybase.client.gui.framework.GuiRect;
 import com.jsirgalaxybase.client.gui.framework.GuiScene;
 import com.jsirgalaxybase.client.gui.framework.LabelPanel;
 import com.jsirgalaxybase.client.gui.framework.PanelContainer;
+import com.jsirgalaxybase.client.gui.framework.RoundedRectPainter;
 import com.jsirgalaxybase.client.gui.framework.TexturedCanvasPanel;
 import com.jsirgalaxybase.client.gui.framework.VerticalScrollPanel;
 import com.jsirgalaxybase.client.gui.theme.ThemeColorKey;
@@ -20,6 +21,9 @@ import com.jsirgalaxybase.terminal.client.viewmodel.TerminalHomeScreenModel;
 import com.jsirgalaxybase.terminal.ui.TerminalNotificationSeverity;
 
 public final class TerminalPanelFactory {
+
+    private static final float TERMINAL_TEXT_SCALE = 0.78F;
+    private static final float TERMINAL_BUTTON_TEXT_SCALE = 0.82F;
 
     public TexturedCanvasPanel createSurface(GuiRect bounds, ThemeColorKey fillColorKey) {
         TexturedCanvasPanel panel = new TexturedCanvasPanel(
@@ -32,14 +36,14 @@ public final class TerminalPanelFactory {
 
     public LabelPanel createLabel(GuiRect bounds, Supplier<String> textSupplier, ThemeColorKey colorKey,
         boolean centered) {
-        LabelPanel label = new LabelPanel(textSupplier, colorKey, centered);
+        LabelPanel label = new LabelPanel(textSupplier, colorKey, centered, TERMINAL_TEXT_SCALE);
         label.setBounds(bounds);
         return label;
     }
 
     public ButtonPanel createButton(GuiRect bounds, Supplier<String> labelSupplier, Runnable onClick,
         Supplier<Boolean> enabledSupplier) {
-        ButtonPanel button = new ButtonPanel(labelSupplier, onClick, enabledSupplier);
+        ButtonPanel button = new ButtonPanel(labelSupplier, onClick, enabledSupplier, TERMINAL_BUTTON_TEXT_SCALE);
         button.setBounds(bounds);
         return button;
     }
@@ -85,53 +89,51 @@ public final class TerminalPanelFactory {
         private final TerminalHomeScreenModel.NavItemModel model;
         private final Runnable onClick;
         private final LabelPanel titleLabel;
-        private final LabelPanel subtitleLabel;
+        private final TerminalIconKind iconKind;
         private boolean pressed;
 
         private NavigationItemPanel(TerminalHomeScreenModel.NavItemModel model, Runnable onClick) {
             this.model = model == null ? TerminalHomeScreenModel.NavItemModel.placeholder("home", "首页", "总览", true) : model;
             this.onClick = onClick;
+            this.iconKind = TerminalIconPainter.navIconFor(this.model.getPageId(), this.model.getLabel());
             this.titleLabel = new LabelPanel(new Supplier<String>() {
                 @Override
                 public String get() {
                     return NavigationItemPanel.this.model.getLabel();
                 }
-            }, ThemeColorKey.TEXT_PRIMARY, false);
-            this.subtitleLabel = new LabelPanel(new Supplier<String>() {
-                @Override
-                public String get() {
-                    return NavigationItemPanel.this.model.getSubtitle();
-                }
-            }, ThemeColorKey.TEXT_SECONDARY, false);
+            }, ThemeColorKey.TEXT_PRIMARY, false, 0.74F);
             addChild(titleLabel);
-            addChild(subtitleLabel);
         }
 
         @Override
         public void setBounds(GuiRect bounds) {
             super.setBounds(bounds);
             GuiRect itemBounds = getBounds();
-            int innerX = itemBounds.getX() + 8;
-            int innerWidth = Math.max(24, itemBounds.getWidth() - 16);
-            titleLabel.setBounds(new GuiRect(innerX, itemBounds.getY() + 5, innerWidth, 10));
-            subtitleLabel.setBounds(new GuiRect(innerX, itemBounds.getY() + 15, innerWidth, itemBounds.getHeight() - 18));
+            int innerX = itemBounds.getX() + 27;
+            int innerWidth = Math.max(24, itemBounds.getWidth() - 31);
+            int textHeight = Math.min(10, Math.max(8, itemBounds.getHeight() - 6));
+            titleLabel.setBounds(new GuiRect(innerX, itemBounds.getY() + Math.max(2, (itemBounds.getHeight() - textHeight) / 2), innerWidth, textHeight));
         }
 
         @Override
         protected void drawSelf(GuiScene scene, int mouseX, int mouseY, float partialTicks) {
             GuiRect bounds = getBounds();
             boolean hovered = contains(mouseX, mouseY) && model.isEnabled();
-            ThemeColorKey fillKey = model.isSelected() ? ThemeColorKey.PANEL_ACCENT
-                : hovered ? ThemeColorKey.BUTTON_FILL_HOVER : ThemeColorKey.PANEL_FILL;
-            Gui.drawRect(bounds.getX(), bounds.getY(), bounds.getRight(), bounds.getBottom(),
-                scene.getTheme().color(ThemeColorKey.PANEL_BORDER));
-            scene.getTheme().texture(ThemeTextureKey.PANEL_BACKGROUND)
-                .draw(bounds.getX() + 1, bounds.getY() + 1, bounds.getWidth() - 2, bounds.getHeight() - 2,
-                    scene.getTheme().color(fillKey));
+            int border = scene.getTheme().color(ThemeColorKey.PANEL_BORDER);
+            int fill = model.isSelected() ? 0xFF20394D : hovered ? 0xFF1B3041 : 0xFF101923;
+            RoundedRectPainter.draw(bounds, 0xFF243240, fill);
             if (model.isSelected()) {
-                Gui.drawRect(bounds.getX() + 1, bounds.getY() + 1, bounds.getX() + 4, bounds.getBottom() - 1,
+                Gui.drawRect(bounds.getX(), bounds.getY() + 2, bounds.getX() + 3, bounds.getBottom() - 2,
                     scene.getTheme().color(ThemeColorKey.BUTTON_FILL_HOVER));
+            } else if (hovered) {
+                Gui.drawRect(bounds.getX() + 2, bounds.getY() + 1, bounds.getRight() - 2, bounds.getY() + 2, border);
             }
+            int iconColor = model.isEnabled()
+                ? model.isSelected() ? TerminalIconPainter.ICON_PRIMARY : TerminalIconPainter.ICON_SECONDARY
+                : TerminalIconPainter.ICON_MUTED;
+            int iconSize = Math.min(14, Math.max(11, bounds.getHeight() - 8));
+            TerminalIconPainter.draw(iconKind, bounds.getX() + 7, bounds.getY() + Math.max(3, (bounds.getHeight() - iconSize) / 2),
+                iconSize, iconColor);
         }
 
         @Override

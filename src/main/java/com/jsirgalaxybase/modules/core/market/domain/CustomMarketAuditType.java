@@ -4,5 +4,6 @@ public enum CustomMarketAuditType {
     LISTING_PUBLISH,
     LISTING_PURCHASE,
     LISTING_CANCEL,
-    LISTING_CLAIM
+    LISTING_CLAIM,
+    LISTING_DELIVERY
 }

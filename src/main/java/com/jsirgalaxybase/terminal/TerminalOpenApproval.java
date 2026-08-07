@@ -166,6 +166,7 @@ public class TerminalOpenApproval {
         private final TerminalMarketSectionSnapshot marketSectionSnapshot;
         private final TerminalCustomMarketSectionSnapshot customMarketSectionSnapshot;
         private final TerminalExchangeMarketSectionSnapshot exchangeMarketSectionSnapshot;
+        private final TerminalServerToolsSectionSnapshot serverToolsSectionSnapshot;
 
         public PageSnapshot(String pageId, String title, String lead, List<Section> sections) {
             this(pageId, title, lead, sections, null, null);
@@ -185,6 +186,15 @@ public class TerminalOpenApproval {
             TerminalBankSectionSnapshot bankSectionSnapshot, TerminalMarketSectionSnapshot marketSectionSnapshot,
             TerminalCustomMarketSectionSnapshot customMarketSectionSnapshot,
             TerminalExchangeMarketSectionSnapshot exchangeMarketSectionSnapshot) {
+            this(pageId, title, lead, sections, bankSectionSnapshot, marketSectionSnapshot,
+                customMarketSectionSnapshot, exchangeMarketSectionSnapshot, null);
+        }
+
+        public PageSnapshot(String pageId, String title, String lead, List<Section> sections,
+            TerminalBankSectionSnapshot bankSectionSnapshot, TerminalMarketSectionSnapshot marketSectionSnapshot,
+            TerminalCustomMarketSectionSnapshot customMarketSectionSnapshot,
+            TerminalExchangeMarketSectionSnapshot exchangeMarketSectionSnapshot,
+            TerminalServerToolsSectionSnapshot serverToolsSectionSnapshot) {
             this.pageId = normalize(pageId, "home");
             this.title = normalize(title, "制度总览");
             this.lead = normalize(lead, "当前玩家制度摘要");
@@ -197,6 +207,9 @@ public class TerminalOpenApproval {
                 : marketSectionSnapshot;
             this.customMarketSectionSnapshot = customMarketSectionSnapshot;
             this.exchangeMarketSectionSnapshot = exchangeMarketSectionSnapshot;
+            this.serverToolsSectionSnapshot = "server_tools".equalsIgnoreCase(this.pageId)
+                ? (serverToolsSectionSnapshot == null ? TerminalServerToolsSectionSnapshot.placeholder() : serverToolsSectionSnapshot)
+                : serverToolsSectionSnapshot;
         }
 
         public static PageSnapshot placeholder(String pageId, String title, String lead) {
@@ -208,7 +221,8 @@ public class TerminalOpenApproval {
                 "bank".equalsIgnoreCase(normalize(pageId, "home")) ? TerminalBankSectionSnapshot.placeholder() : null,
                 "market".equalsIgnoreCase(normalize(pageId, "home")) ? TerminalMarketSectionSnapshot.placeholder("market") : null,
                 null,
-                null);
+                null,
+                "server_tools".equalsIgnoreCase(normalize(pageId, "home")) ? TerminalServerToolsSectionSnapshot.placeholder() : null);
         }
 
         public String getPageId() {
@@ -241,6 +255,10 @@ public class TerminalOpenApproval {
 
         public TerminalExchangeMarketSectionSnapshot getExchangeMarketSectionSnapshot() {
             return exchangeMarketSectionSnapshot;
+        }
+
+        public TerminalServerToolsSectionSnapshot getServerToolsSectionSnapshot() {
+            return serverToolsSectionSnapshot;
         }
     }
 

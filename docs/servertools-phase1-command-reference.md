@@ -75,20 +75,55 @@
 - 暂未引入维度白名单和冷却配置文件
 - 本次会把随机落点写入 PostgreSQL `player_rtp_record`
 
-### warp
+### servertools / warp
 
-- `/warp`
+推荐验收入口：
+
+- `/jgbst warp list`
   - 列出当前所有系统 warp
-- `/warp list`
-  - 同上
-- `/warp <name>`
+- `/jgbst warp <name>`
   - 传送到指定 warp
+- `/jsirgalaxybase servertools warp list`
+  - 主命令下的同等入口
+- `/jsirgalaxybase servertools warp <name>`
+  - 主命令下的同等入口
+
+兼容保留入口：
+
+- `/warp list`
+- `/warp <name>`
+
+GTNH 整合包内可能已有其他模组接管 `/warp` 裸命令；跨服 warp 灰度测试请以 `/jgbst warp ...` 或 `/jsirgalaxybase servertools warp ...` 为准。
 
 说明：
 
 - warp 直接落 PostgreSQL `server_warp`
 - 当前只实现“系统/制度维护的 warp 可传送链路”
 - warp 没有玩家创建命令；建议由 SQL/migration 或后续制度管理链维护
+- `jgbst` 命名空间入口复用原有 `PlayerTeleportService.prepareWarpTeleport` 与 cluster dispatch 主链，不复制传送业务逻辑
+
+## Warp 灰度手动验证
+
+游戏内命令：
+
+- `/jgbst warp list`
+- `/jgbst warp s2test`
+- `/jgbst warp lobbytest`
+- `/jsirgalaxybase servertools warp list`
+- `/jsirgalaxybase servertools warp s2test`
+
+数据库观测 SQL：
+
+```sql
+SELECT warp_name, server_id, enabled
+FROM server_warp
+ORDER BY warp_name;
+
+SELECT ticket_id, request_id, player_name, source_server_id, target_server_id, status, status_message, created_at, updated_at
+FROM cluster_transfer_ticket
+ORDER BY created_at DESC
+LIMIT 20;
+```
 
 ## 数据表落点
 

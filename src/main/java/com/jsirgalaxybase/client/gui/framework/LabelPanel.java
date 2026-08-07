@@ -6,6 +6,7 @@ import java.util.function.Supplier;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.FontRenderer;
+import org.lwjgl.opengl.GL11;
 
 import com.jsirgalaxybase.client.gui.theme.ThemeColorKey;
 
@@ -14,11 +15,17 @@ public class LabelPanel extends AbstractGuiPanel {
     private final Supplier<String> textSupplier;
     private final ThemeColorKey colorKey;
     private final boolean centered;
+    private final float textScale;
 
     public LabelPanel(Supplier<String> textSupplier, ThemeColorKey colorKey, boolean centered) {
+        this(textSupplier, colorKey, centered, 1.0F);
+    }
+
+    public LabelPanel(Supplier<String> textSupplier, ThemeColorKey colorKey, boolean centered, float textScale) {
         this.textSupplier = textSupplier;
         this.colorKey = colorKey;
         this.centered = centered;
+        this.textScale = Math.max(0.60F, Math.min(1.0F, textScale));
     }
 
     @Override
@@ -34,18 +41,24 @@ public class LabelPanel extends AbstractGuiPanel {
 
         FontRenderer fontRenderer = minecraft.fontRenderer;
         GuiRect bounds = getBounds();
-        int availableWidth = Math.max(8, bounds.getWidth() - 8);
+        int availableWidth = Math.max(8, Math.round((bounds.getWidth() - 8) / textScale));
         String text = textSupplier == null ? "" : textSupplier.get();
         List<String> lines = safeWrap(fontRenderer, text == null ? "" : text, availableWidth);
         int color = scene.getTheme().color(colorKey);
         int lineY = bounds.getY() + 2;
+        int lineStep = Math.max(7, Math.round(10 * textScale));
         for (String line : lines) {
+            int lineWidth = Math.round(fontRenderer.getStringWidth(line) * textScale);
             int drawX = centered
-                ? bounds.getX() + Math.max(0, (bounds.getWidth() - fontRenderer.getStringWidth(line)) / 2)
+                ? bounds.getX() + Math.max(0, (bounds.getWidth() - lineWidth) / 2)
                 : bounds.getX() + 4;
-            fontRenderer.drawStringWithShadow(line, drawX, lineY, color);
-            lineY += 10;
-            if (lineY > bounds.getBottom() - 10) {
+            GL11.glPushMatrix();
+            GL11.glTranslatef(drawX, lineY, 0.0F);
+            GL11.glScalef(textScale, textScale, 1.0F);
+            fontRenderer.drawStringWithShadow(line, 0, 0, color);
+            GL11.glPopMatrix();
+            lineY += lineStep;
+            if (lineY > bounds.getBottom() - lineStep) {
                 break;
             }
         }

@@ -11,11 +11,13 @@ import com.jsirgalaxybase.modules.core.InstitutionCoreModule;
 import com.jsirgalaxybase.modules.diagnostics.ClientItemDumpModule;
 import com.jsirgalaxybase.modules.servertools.ServerToolsModule;
 import com.jsirgalaxybase.modules.terminal.TerminalModule;
+import com.jsirgalaxybase.modules.core.vault.infrastructure.minecraft.BaseVaultGuiHandler;
 
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 import cpw.mods.fml.common.event.FMLServerStartingEvent;
+import cpw.mods.fml.common.network.NetworkRegistry;
 
 public class ModBootstrap {
 
@@ -48,6 +50,8 @@ public class ModBootstrap {
 
     public void init(FMLInitializationEvent event) {
         moduleManager.init(moduleContext, event);
+        NetworkRegistry.INSTANCE.registerGuiHandler(GalaxyBase.instance, new BaseVaultGuiHandler());
+        GalaxyBase.LOG.info("Registered Base Vault native container GUI");
     }
 
     public void postInit(FMLPostInitializationEvent event) {

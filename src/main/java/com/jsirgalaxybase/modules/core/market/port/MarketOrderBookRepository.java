@@ -20,6 +20,11 @@ public interface MarketOrderBookRepository {
 
 	List<MarketOrder> findOpenBuyOrdersByProductKey(String productKey);
 
+	/** One page-level order-book read for terminal browse summaries. */
+	default List<MarketOrder> findOpenOrdersByProductKeys(List<String> productKeys) {
+		return Collections.emptyList();
+	}
+
 	List<MarketOrder> findMatchingSellOrders(String productKey, long maxUnitPrice);
 
 	List<MarketOrder> findMatchingBuyOrders(String productKey, long minUnitPrice);

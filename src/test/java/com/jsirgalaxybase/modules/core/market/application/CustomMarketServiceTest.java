@@ -27,18 +27,20 @@ import com.jsirgalaxybase.modules.core.market.application.command.PublishCustomM
 import com.jsirgalaxybase.modules.core.market.application.command.PurchaseCustomMarketListingCommand;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketAuditLog;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketAuditType;
+import com.jsirgalaxybase.modules.core.market.domain.CustomMarketDeliveryResolution;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketDeliveryStatus;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketItemSnapshot;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketListing;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketListingStatus;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketTradeRecord;
 import com.jsirgalaxybase.modules.core.market.port.CustomMarketAuditLogRepository;
+import com.jsirgalaxybase.modules.core.market.port.CustomMarketDeliveryPort;
 import com.jsirgalaxybase.modules.core.market.port.CustomMarketItemSnapshotRepository;
 import com.jsirgalaxybase.modules.core.market.port.CustomMarketListingRepository;
 import com.jsirgalaxybase.modules.core.market.port.CustomMarketTradeRecordRepository;
 import com.jsirgalaxybase.modules.core.market.repository.MarketTransactionRunner;
 
-import net.minecraft.init.Blocks;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 
@@ -174,6 +176,198 @@ public class CustomMarketServiceTest {
     }
 
     @Test
+    public void terminalStyleClaimDeliversSnapshotBeforeCompletionState() {
+        FakeCustomMarketListingRepository listingRepository = new FakeCustomMarketListingRepository();
+        FakeCustomMarketItemSnapshotRepository snapshotRepository = new FakeCustomMarketItemSnapshotRepository();
+        FakeCustomMarketTradeRecordRepository tradeRecordRepository = new FakeCustomMarketTradeRecordRepository();
+        FakeCustomMarketAuditLogRepository auditLogRepository = new FakeCustomMarketAuditLogRepository();
+        FakeMarketSettlementFacade settlementFacade = new FakeMarketSettlementFacade();
+        settlementFacade.registerPlayer("seller-a");
+        settlementFacade.registerPlayer("buyer-b");
+        CustomMarketService service = createService(listingRepository, snapshotRepository, tradeRecordRepository,
+            auditLogRepository, settlementFacade);
+
+        CustomMarketService.PublishListingResult published = service.publishListing(new PublishCustomMarketListingCommand(
+            "req-custom-delivery-publish", "seller-a", "test-server", 2400L, "STARCOIN",
+            namedStack("Ancient Gear", 1, "seller-a")));
+        service.purchaseListing(new PurchaseCustomMarketListingCommand("req-custom-delivery-buy", "buyer-b",
+            "test-server", published.getListing().getListingId()));
+
+        RecordingDeliveryPort delivery = new RecordingDeliveryPort();
+        CustomMarketService.ClaimListingResult result = service.claimPurchasedListing(
+            new ClaimCustomMarketListingCommand("req-custom-delivery-claim", "buyer-b", "test-server",
+                published.getListing().getListingId()), delivery);
+
+        assertEquals(1, delivery.deliveries);
+        assertEquals("buyer-b", delivery.playerRef);
+        assertEquals("Ancient Gear", delivery.snapshot.getDisplayName());
+        assertEquals(CustomMarketDeliveryStatus.COMPLETED, result.getListing().getDeliveryStatus());
+    }
+
+    @Test
+    public void failedDeliveryKeepsCustomListingClaimable() {
+        FakeCustomMarketListingRepository listingRepository = new FakeCustomMarketListingRepository();
+        FakeCustomMarketItemSnapshotRepository snapshotRepository = new FakeCustomMarketItemSnapshotRepository();
+        FakeCustomMarketTradeRecordRepository tradeRecordRepository = new FakeCustomMarketTradeRecordRepository();
+        FakeCustomMarketAuditLogRepository auditLogRepository = new FakeCustomMarketAuditLogRepository();
+        FakeMarketSettlementFacade settlementFacade = new FakeMarketSettlementFacade();
+        settlementFacade.registerPlayer("seller-a");
+        settlementFacade.registerPlayer("buyer-b");
+        CustomMarketService service = createService(listingRepository, snapshotRepository, tradeRecordRepository,
+            auditLogRepository, settlementFacade);
+
+        CustomMarketService.PublishListingResult published = service.publishListing(new PublishCustomMarketListingCommand(
+            "req-custom-failed-delivery-publish", "seller-a", "test-server", 2400L, "STARCOIN",
+            namedStack("Ancient Gear", 1, "seller-a")));
+        service.purchaseListing(new PurchaseCustomMarketListingCommand("req-custom-failed-delivery-buy", "buyer-b",
+            "test-server", published.getListing().getListingId()));
+
+        try {
+            service.claimPurchasedListing(new ClaimCustomMarketListingCommand("req-custom-failed-delivery-claim",
+                "buyer-b", "test-server", published.getListing().getListingId()), new FailingDeliveryPort());
+            fail("expected delivery failure");
+        } catch (MarketOperationException expected) {
+            assertTrue(expected.getMessage().contains("inventory full"));
+        }
+        assertEquals(CustomMarketDeliveryStatus.BUYER_PENDING_CLAIM,
+            service.inspectListing(published.getListing().getListingId()).getListing().getDeliveryStatus());
+        assertEquals(1, service.listBuyerPendingClaims("buyer-b").size());
+    }
+
+    @Test
+    public void unknownDeliveryFailureLocksCustomClaimUntilManualRecovery() {
+        FakeCustomMarketListingRepository listingRepository = new FakeCustomMarketListingRepository();
+        FakeCustomMarketItemSnapshotRepository snapshotRepository = new FakeCustomMarketItemSnapshotRepository();
+        FakeCustomMarketTradeRecordRepository tradeRecordRepository = new FakeCustomMarketTradeRecordRepository();
+        FakeCustomMarketAuditLogRepository auditLogRepository = new FakeCustomMarketAuditLogRepository();
+        FakeMarketSettlementFacade settlementFacade = new FakeMarketSettlementFacade();
+        settlementFacade.registerPlayer("seller-a");
+        settlementFacade.registerPlayer("buyer-b");
+        CustomMarketService service = createService(listingRepository, snapshotRepository, tradeRecordRepository,
+            auditLogRepository, settlementFacade);
+
+        CustomMarketService.PublishListingResult published = service.publishListing(new PublishCustomMarketListingCommand(
+            "req-custom-unknown-delivery-publish", "seller-a", "test-server", 2400L, "STARCOIN",
+            namedStack("Ancient Gear", 1, "seller-a")));
+        service.purchaseListing(new PurchaseCustomMarketListingCommand("req-custom-unknown-delivery-buy", "buyer-b",
+            "test-server", published.getListing().getListingId()));
+
+        try {
+            service.claimPurchasedListing(new ClaimCustomMarketListingCommand("req-custom-unknown-delivery-claim",
+                "buyer-b", "test-server", published.getListing().getListingId()), new UnknownDeliveryPort());
+            fail("expected uncertain delivery failure");
+        } catch (MarketOperationException expected) {
+            assertTrue(expected.getMessage().contains("delivery transport interrupted"));
+        }
+
+        assertEquals(CustomMarketDeliveryStatus.EXCEPTION,
+            service.inspectListing(published.getListing().getListingId()).getListing().getDeliveryStatus());
+        assertTrue(auditLogRepository.findByRequestId("req-custom-unknown-delivery-claim:delivery").get()
+            .getMessage().contains("DELIVERY_UNKNOWN"));
+
+        try {
+            service.claimPurchasedListing(new ClaimCustomMarketListingCommand("req-custom-unknown-delivery-retry",
+                "buyer-b", "test-server", published.getListing().getListingId()), new RecordingDeliveryPort());
+            fail("expected guarded custom claim to reject automatic redelivery");
+        } catch (MarketOperationException expected) {
+            assertTrue(expected.getMessage().contains("not available for guarded claim"));
+        }
+    }
+
+    @Test
+    public void completionFailureAfterDeliveryRemainsLockedForManualRecovery() {
+        FakeCustomMarketListingRepository listingRepository = new FakeCustomMarketListingRepository();
+        FakeCustomMarketItemSnapshotRepository snapshotRepository = new FakeCustomMarketItemSnapshotRepository();
+        FakeCustomMarketTradeRecordRepository tradeRecordRepository = new FakeCustomMarketTradeRecordRepository();
+        FakeCustomMarketAuditLogRepository auditLogRepository = new FakeCustomMarketAuditLogRepository();
+        FakeMarketSettlementFacade settlementFacade = new FakeMarketSettlementFacade();
+        settlementFacade.registerPlayer("seller-a");
+        settlementFacade.registerPlayer("buyer-b");
+        CustomMarketService service = createService(listingRepository, snapshotRepository, tradeRecordRepository,
+            auditLogRepository, settlementFacade);
+
+        CustomMarketService.PublishListingResult published = service.publishListing(new PublishCustomMarketListingCommand(
+            "req-custom-completion-failure-publish", "seller-a", "test-server", 2400L, "STARCOIN",
+            namedStack("Ancient Gear", 1, "seller-a")));
+        service.purchaseListing(new PurchaseCustomMarketListingCommand("req-custom-completion-failure-buy", "buyer-b",
+            "test-server", published.getListing().getListingId()));
+        listingRepository.failNextCompletedDeliveryUpdate();
+        RecordingDeliveryPort delivery = new RecordingDeliveryPort();
+
+        try {
+            service.claimPurchasedListing(new ClaimCustomMarketListingCommand("req-custom-completion-failure-claim",
+                "buyer-b", "test-server", published.getListing().getListingId()), delivery);
+            fail("expected completion persistence failure");
+        } catch (MarketOperationException expected) {
+            assertTrue(expected.getMessage().contains("completion persistence failure"));
+        }
+
+        assertEquals(1, delivery.deliveries);
+        assertEquals(CustomMarketDeliveryStatus.EXCEPTION,
+            service.inspectListing(published.getListing().getListingId()).getListing().getDeliveryStatus());
+        assertTrue(auditLogRepository.findByRequestId("req-custom-completion-failure-claim:delivery").get()
+            .getMessage().contains("DELIVERY_UNKNOWN"));
+    }
+
+    @Test
+    public void manualRestoreReturnsCancelledDeliveryToSellerEscrowWithoutIssuingInventory() {
+        FakeCustomMarketListingRepository listingRepository = new FakeCustomMarketListingRepository();
+        FakeCustomMarketItemSnapshotRepository snapshotRepository = new FakeCustomMarketItemSnapshotRepository();
+        FakeCustomMarketTradeRecordRepository tradeRecordRepository = new FakeCustomMarketTradeRecordRepository();
+        FakeCustomMarketAuditLogRepository auditLogRepository = new FakeCustomMarketAuditLogRepository();
+        CustomMarketService service = createService(listingRepository, snapshotRepository, tradeRecordRepository,
+            auditLogRepository, new FakeMarketSettlementFacade());
+
+        CustomMarketService.PublishListingResult published = service.publishListing(new PublishCustomMarketListingCommand(
+            "req-custom-manual-restore-publish", "seller-a", "test-server", 2400L, "STARCOIN",
+            namedStack("Ancient Gear", 1, "seller-a")));
+        listingRepository.update(published.getListing().withDeliveryStatus(CustomMarketDeliveryStatus.EXCEPTION,
+            Instant.now()));
+
+        CustomMarketService.ManualDeliveryResolutionResult restored = service.resolveDeliveryException(
+            "req-custom-manual-restore", "operator-a", "test-server", published.getListing().getListingId(),
+            CustomMarketDeliveryResolution.RESTORE, "inventory adapter confirmed no insert");
+
+        assertEquals(CustomMarketListingStatus.ACTIVE, restored.getListing().getListingStatus());
+        assertEquals(CustomMarketDeliveryStatus.ESCROW_HELD, restored.getListing().getDeliveryStatus());
+        assertEquals(null, restored.getTradeRecord());
+        assertTrue(restored.getAuditLog().getMessage().contains("MANUAL_RESTORE"));
+    }
+
+    @Test
+    public void manualCompleteClosesSoldDeliveryAfterAdministratorVerifiesIssue() {
+        FakeCustomMarketListingRepository listingRepository = new FakeCustomMarketListingRepository();
+        FakeCustomMarketItemSnapshotRepository snapshotRepository = new FakeCustomMarketItemSnapshotRepository();
+        FakeCustomMarketTradeRecordRepository tradeRecordRepository = new FakeCustomMarketTradeRecordRepository();
+        FakeCustomMarketAuditLogRepository auditLogRepository = new FakeCustomMarketAuditLogRepository();
+        FakeMarketSettlementFacade settlementFacade = new FakeMarketSettlementFacade();
+        settlementFacade.registerPlayer("seller-a");
+        settlementFacade.registerPlayer("buyer-b");
+        CustomMarketService service = createService(listingRepository, snapshotRepository, tradeRecordRepository,
+            auditLogRepository, settlementFacade);
+
+        CustomMarketService.PublishListingResult published = service.publishListing(new PublishCustomMarketListingCommand(
+            "req-custom-manual-complete-publish", "seller-a", "test-server", 2400L, "STARCOIN",
+            namedStack("Ancient Gear", 1, "seller-a")));
+        service.purchaseListing(new PurchaseCustomMarketListingCommand("req-custom-manual-complete-buy", "buyer-b",
+            "test-server", published.getListing().getListingId()));
+        CustomMarketListing uncertainListing = listingRepository.lockById(published.getListing().getListingId())
+            .withDeliveryStatus(CustomMarketDeliveryStatus.EXCEPTION, Instant.now());
+        listingRepository.update(uncertainListing);
+        tradeRecordRepository.update(tradeRecordRepository.findByListingId(published.getListing().getListingId()).get()
+            .withDeliveryStatus(CustomMarketDeliveryStatus.EXCEPTION));
+
+        CustomMarketService.ManualDeliveryResolutionResult completed = service.resolveDeliveryException(
+            "req-custom-manual-complete", "operator-a", "test-server", published.getListing().getListingId(),
+            CustomMarketDeliveryResolution.COMPLETE, "player confirmed inventory receipt");
+
+        assertEquals(CustomMarketListingStatus.SOLD, completed.getListing().getListingStatus());
+        assertEquals(CustomMarketDeliveryStatus.COMPLETED, completed.getListing().getDeliveryStatus());
+        assertEquals(CustomMarketDeliveryStatus.COMPLETED, completed.getTradeRecord().getDeliveryStatus());
+        assertTrue(completed.getAuditLog().getMessage().contains("MANUAL_COMPLETE"));
+    }
+
+    @Test
     public void publishListingRejectsRequestIdSemanticsConflict() {
         FakeCustomMarketListingRepository listingRepository = new FakeCustomMarketListingRepository();
         FakeCustomMarketItemSnapshotRepository snapshotRepository = new FakeCustomMarketItemSnapshotRepository();
@@ -204,7 +398,7 @@ public class CustomMarketServiceTest {
     }
 
     private ItemStack namedStack(String displayName, int stackSize, String owner) {
-        ItemStack stack = new ItemStack(Blocks.stone, stackSize, 0);
+        ItemStack stack = new ItemStack(new Item().setUnlocalizedName("custom_market_test_item"), stackSize, 0);
         NBTTagCompound tag = new NBTTagCompound();
         NBTTagCompound display = new NBTTagCompound();
         display.setString("Name", displayName);
@@ -214,10 +408,41 @@ public class CustomMarketServiceTest {
         return stack;
     }
 
+    private static final class RecordingDeliveryPort implements CustomMarketDeliveryPort {
+
+        private int deliveries;
+        private String playerRef;
+        private CustomMarketItemSnapshot snapshot;
+
+        @Override
+        public void deliver(String requestId, String playerRef, String sourceServerId, CustomMarketItemSnapshot snapshot) {
+            this.deliveries++;
+            this.playerRef = playerRef;
+            this.snapshot = snapshot;
+        }
+    }
+
+    private static final class FailingDeliveryPort implements CustomMarketDeliveryPort {
+
+        @Override
+        public void deliver(String requestId, String playerRef, String sourceServerId, CustomMarketItemSnapshot snapshot) {
+            throw new MarketClaimDeliveryException("inventory full", true);
+        }
+    }
+
+    private static final class UnknownDeliveryPort implements CustomMarketDeliveryPort {
+
+        @Override
+        public void deliver(String requestId, String playerRef, String sourceServerId, CustomMarketItemSnapshot snapshot) {
+            throw new MarketClaimDeliveryException("delivery transport interrupted", false);
+        }
+    }
+
     private static final class FakeCustomMarketListingRepository implements CustomMarketListingRepository {
 
         private final Map<Long, CustomMarketListing> listingsById = new HashMap<Long, CustomMarketListing>();
         private long nextId = 1L;
+        private boolean failNextCompletedDeliveryUpdate;
 
         @Override
         public CustomMarketListing save(CustomMarketListing listing) {
@@ -231,8 +456,17 @@ public class CustomMarketServiceTest {
 
         @Override
         public CustomMarketListing update(CustomMarketListing listing) {
+            if (failNextCompletedDeliveryUpdate
+                && listing.getDeliveryStatus() == CustomMarketDeliveryStatus.COMPLETED) {
+                failNextCompletedDeliveryUpdate = false;
+                throw new MarketOperationException("completion persistence failure");
+            }
             listingsById.put(Long.valueOf(listing.getListingId()), listing);
             return listing;
+        }
+
+        private void failNextCompletedDeliveryUpdate() {
+            failNextCompletedDeliveryUpdate = true;
         }
 
         @Override
@@ -353,6 +587,12 @@ public class CustomMarketServiceTest {
                 auditLog.getMessage(), auditLog.getCreatedAt(), auditLog.getUpdatedAt());
             auditByRequestId.put(persisted.getRequestId(), persisted);
             return persisted;
+        }
+
+        @Override
+        public CustomMarketAuditLog update(CustomMarketAuditLog auditLog) {
+            auditByRequestId.put(auditLog.getRequestId(), auditLog);
+            return auditLog;
         }
 
         @Override

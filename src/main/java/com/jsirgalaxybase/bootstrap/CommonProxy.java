@@ -3,6 +3,8 @@ package com.jsirgalaxybase.bootstrap;
 import com.jsirgalaxybase.config.ModConfiguration;
 import com.jsirgalaxybase.module.ModuleManager;
 
+import net.minecraft.entity.player.InventoryPlayer;
+
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
@@ -42,5 +44,10 @@ public class CommonProxy {
 
     public ModConfiguration getConfiguration() {
         return bootstrap.getConfiguration();
+    }
+
+    /** Client-only Vault GUI factory. Dedicated servers intentionally return null. */
+    public Object createBaseVaultClientGui(InventoryPlayer inventory) {
+        return null;
     }
 }

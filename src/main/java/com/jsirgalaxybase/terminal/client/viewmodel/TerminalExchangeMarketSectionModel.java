@@ -122,10 +122,52 @@ public final class TerminalExchangeMarketSectionModel {
     public String getExecutionHint() { return executionHint; }
     public boolean isExecutable() { return executable; }
     public ActionFeedbackModel getActionFeedback() { return actionFeedback; }
+    public boolean hasTargetOptions() { return !targetCodes.isEmpty(); }
+    public boolean hasSelectedTarget() { return !selectedTargetCode.isEmpty(); }
+    public boolean hasFormalQuote() { return !"--".equals(pairCode); }
+    public String getDisabledReason() {
+        if (!hasTargetOptions()) {
+            return "当前没有可选兑换标的。";
+        }
+        if (!hasSelectedTarget()) {
+            return "先从左侧选择兑换标的。";
+        }
+        if (!hasFormalQuote()) {
+            return notes;
+        }
+        if (!executable) {
+            return executionHint;
+        }
+        return "";
+    }
 
     private static <T> List<T> freeze(List<T> source, List<T> fallback) {
-        List<T> resolved = source == null || source.isEmpty() ? fallback : source;
+        List<T> compact = trimTrailingPadding(source);
+        List<T> resolved = compact.isEmpty() ? fallback : compact;
         return Collections.unmodifiableList(new ArrayList<T>(resolved));
+    }
+
+    private static <T> List<T> trimTrailingPadding(List<T> source) {
+        if (source == null || source.isEmpty()) {
+            return Collections.emptyList();
+        }
+        int lastIncluded = source.size() - 1;
+        while (lastIncluded >= 0) {
+            T value = source.get(lastIncluded);
+            if (value == null) {
+                lastIncluded--;
+                continue;
+            }
+            if (value instanceof String && ((String) value).trim().isEmpty()) {
+                lastIncluded--;
+                continue;
+            }
+            break;
+        }
+        if (lastIncluded < 0) {
+            return Collections.emptyList();
+        }
+        return new ArrayList<T>(source.subList(0, lastIncluded + 1));
     }
 
     private static String normalize(String value, String fallback) {

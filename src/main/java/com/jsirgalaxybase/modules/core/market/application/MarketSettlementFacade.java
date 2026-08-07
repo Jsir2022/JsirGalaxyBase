@@ -48,6 +48,11 @@ public class MarketSettlementFacade {
         return bankingService;
     }
 
+    public boolean hasBankTransactionForRequest(String requestId) {
+        return requestId != null && bankingInfrastructure != null
+            && bankingInfrastructure.getBankTransactionRepository().findByRequestId(requestId).isPresent();
+    }
+
     public BankPostingResult freezeBuyerFunds(FrozenBalanceCommand command) {
         return bankingService.freezeFunds(command);
     }

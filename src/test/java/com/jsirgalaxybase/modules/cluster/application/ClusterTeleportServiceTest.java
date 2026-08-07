@@ -44,6 +44,7 @@ public class ClusterTeleportServiceTest {
         assertEquals(1, ticketRepository.updatedTickets.size());
         assertNotNull(gatewayAdapter.lastTicket);
         assertEquals("server-beta", gatewayAdapter.lastTicket.getTarget().getServerId());
+        assertTrue(gatewayAdapter.lastTicket.getExpiresAt().isAfter(Instant.now().plusSeconds(240)));
         assertEquals(TransferTicketStatus.DISPATCHED, ticketRepository.updatedTickets.get(0).getStatus());
         assertEquals("proxy dispatch requested", ticketRepository.updatedTickets.get(0).getStatusMessage());
     }
@@ -200,6 +201,11 @@ public class ClusterTeleportServiceTest {
         public Optional<TransferTicket> findActiveForTargetPlayer(String targetServerId, String playerUuid,
             Instant now) {
             return Optional.empty();
+        }
+
+        @Override
+        public List<TransferTicket> findRecentForPlayer(String playerUuid, int limit) {
+            return new ArrayList<TransferTicket>();
         }
 
         @Override

@@ -2,7 +2,7 @@ package com.jsirgalaxybase.modules.core.market.application;
 
 import net.minecraft.item.ItemStack;
 
-public class StandardizedMarketCatalogService implements StandardizedMarketProductCatalog {
+public class StandardizedMarketCatalogService implements StandardizedMarketProductCatalog, StandardizedMarketCatalogBrowser {
 
     private final StandardizedMarketCatalogVersion catalogVersion;
     private final StandardizedMarketCatalogSource catalogSource;
@@ -72,6 +72,15 @@ public class StandardizedMarketCatalogService implements StandardizedMarketProdu
                         StandardizedMarketAdmissionReason.CATALOG_BOUNDARY_REJECTED);
                 }
             });
+    }
+
+    @Override
+    public StandardizedMarketCatalogPage browse(String query, int pageIndex, int pageSize) {
+        if (catalogSource instanceof StandardizedMarketCatalogBrowser) {
+            return ((StandardizedMarketCatalogBrowser) catalogSource).browse(query, pageIndex, pageSize);
+        }
+        return new StandardizedMarketCatalogPage(query, pageIndex, pageSize, 0,
+            java.util.Collections.<StandardizedMarketCatalogEntry>emptyList());
     }
 
     private StandardizedMarketAdmissionDecision admittedDecision(StandardizedMarketCatalogEntry entry) {

@@ -1,5 +1,7 @@
 package com.jsirgalaxybase.terminal.network;
 
+import com.jsirgalaxybase.modules.core.vault.infrastructure.minecraft.BaseVaultSortRequestMessage;
+
 import cpw.mods.fml.common.network.NetworkRegistry;
 import cpw.mods.fml.common.network.simpleimpl.SimpleNetworkWrapper;
 import cpw.mods.fml.relauncher.Side;
@@ -24,5 +26,7 @@ public final class TerminalNetwork {
             Side.CLIENT);
         CHANNEL.registerMessage(TerminalActionMessage.Handler.class, TerminalActionMessage.class, 2, Side.SERVER);
         CHANNEL.registerMessage(TerminalSnapshotMessage.Handler.class, TerminalSnapshotMessage.class, 3, Side.CLIENT);
+        CHANNEL.registerMessage(BaseVaultSortRequestMessage.Handler.class, BaseVaultSortRequestMessage.class, 4,
+            Side.SERVER);
     }
 }

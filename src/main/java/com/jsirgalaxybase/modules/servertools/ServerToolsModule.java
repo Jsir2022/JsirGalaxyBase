@@ -13,6 +13,7 @@ import com.jsirgalaxybase.modules.cluster.infrastructure.ClusterInfrastructure;
 import com.jsirgalaxybase.modules.servertools.application.PlayerTeleportService;
 import com.jsirgalaxybase.modules.servertools.command.BackCommand;
 import com.jsirgalaxybase.modules.servertools.command.HomeCommand;
+import com.jsirgalaxybase.modules.servertools.command.JgbServerToolsCommand;
 import com.jsirgalaxybase.modules.servertools.command.RtpCommand;
 import com.jsirgalaxybase.modules.servertools.command.SpawnCommand;
 import com.jsirgalaxybase.modules.servertools.command.TpaCommand;
@@ -71,6 +72,9 @@ public class ServerToolsModule extends ModModule {
         event.registerServerCommand(new TpaCommand(this));
         event.registerServerCommand(new RtpCommand(this));
         event.registerServerCommand(new WarpCommand(this));
+        event.registerServerCommand(new JgbServerToolsCommand(this));
+        GalaxyBase.LOG.info("Registered /jgbst server tools command");
+        GalaxyBase.LOG.info("Registered /jsirgalaxybase servertools route");
     }
 
     public PlayerTeleportService getPlayerTeleportService() {
@@ -79,6 +83,10 @@ public class ServerToolsModule extends ModModule {
 
     public ServerToolsInfrastructure getInfrastructure() {
         return infrastructure;
+    }
+
+    public ClusterInfrastructure getClusterInfrastructure() {
+        return clusterInfrastructure;
     }
 
     public String getLocalServerId() {

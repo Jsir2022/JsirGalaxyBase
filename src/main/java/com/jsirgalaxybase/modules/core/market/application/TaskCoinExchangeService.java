@@ -1,6 +1,7 @@
 package com.jsirgalaxybase.modules.core.market.application;
 
 import java.util.Optional;
+import java.time.Instant;
 
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.item.Item;
@@ -17,6 +18,10 @@ import com.jsirgalaxybase.modules.core.market.domain.ExchangeMarketQuoteRequest;
 import com.jsirgalaxybase.modules.core.market.domain.ExchangeMarketQuoteResult;
 import com.jsirgalaxybase.modules.core.market.domain.TaskCoinDescriptor;
 import com.jsirgalaxybase.modules.core.market.domain.TaskCoinExchangeQuote;
+import com.jsirgalaxybase.modules.core.market.domain.MarketOperationLog;
+import com.jsirgalaxybase.modules.core.market.domain.MarketOperationStatus;
+import com.jsirgalaxybase.modules.core.market.domain.MarketOperationType;
+import com.jsirgalaxybase.modules.core.market.port.MarketOperationLogRepository;
 
 import cpw.mods.fml.common.registry.GameData;
 import cpw.mods.fml.common.registry.GameRegistry;
@@ -26,6 +31,7 @@ public class TaskCoinExchangeService {
     private final BankingApplicationService bankingService;
     private final ExchangeMarketService exchangeMarketService;
     private final String sourceServerId;
+    private final MarketOperationLogRepository operationLogRepository;
 
     public TaskCoinExchangeService(BankingInfrastructure bankingInfrastructure, String sourceServerId) {
         this(bankingInfrastructure, new TaskCoinExchangePlanner(), sourceServerId);
@@ -33,10 +39,16 @@ public class TaskCoinExchangeService {
 
     public TaskCoinExchangeService(BankingInfrastructure bankingInfrastructure, TaskCoinExchangePlanner planner,
         String sourceServerId) {
+        this(bankingInfrastructure, planner, sourceServerId, null);
+    }
+
+    public TaskCoinExchangeService(BankingInfrastructure bankingInfrastructure, TaskCoinExchangePlanner planner,
+        String sourceServerId, MarketOperationLogRepository operationLogRepository) {
         this.bankingService = bankingInfrastructure.getBankingApplicationService();
         this.exchangeMarketService = new ExchangeMarketService(bankingInfrastructure, planner, sourceServerId);
         this.sourceServerId = sourceServerId == null || sourceServerId.trim().isEmpty() ? "unknown-server"
             : sourceServerId.trim();
+        this.operationLogRepository = operationLogRepository;
     }
 
     public TaskCoinExchangeQuote previewHeldCoin(EntityPlayerMP player) {
@@ -60,6 +72,8 @@ public class TaskCoinExchangeService {
             throw new MarketExchangeException("请先开户后再兑换任务书硬币");
         }
 
+        String requestId = newRequestId();
+        MarketOperationLog operation = createExchangeOperation(requestId, player, selection);
         ItemStack snapshot = selection.stack.copy();
         player.inventory.setInventorySlotContents(selection.slotIndex, null);
         player.inventory.markDirty();
@@ -69,8 +83,9 @@ public class TaskCoinExchangeService {
 
         try {
             ExchangeMarketExecutionResult result = exchangeMarketService.executeTaskCoinToStarcoin(
-                new ExchangeMarketExecutionRequest(newRequestId(), player.getUniqueID().toString(), sourceServerId,
+                new ExchangeMarketExecutionRequest(requestId, player.getUniqueID().toString(), sourceServerId,
                     player.getCommandSenderName(), selection.stackRegistryName, selection.stack.stackSize));
+            completeExchangeOperation(operation, result);
             return new ExchangeMarketExecutionCompatibilityResult(result, selection.legacyQuote);
         } catch (RuntimeException exception) {
             player.inventory.setInventorySlotContents(selection.slotIndex, snapshot);
@@ -78,8 +93,30 @@ public class TaskCoinExchangeService {
             if (player.openContainer != null) {
                 player.openContainer.detectAndSendChanges();
             }
+            failExchangeOperation(operation, exception);
             throw exception;
         }
+    }
+
+    /**
+     * Vault-facing exchange entry point. The caller has already removed the
+     * exact item through an audited Base Vault transfer; this service only owns
+     * quote validation and bank settlement, never a Minecraft inventory.
+     */
+    public PreviewResult previewVaultCoinFormal(String playerRef, ItemStack stack) {
+        ItemStack source = requireCoinStack(stack);
+        return previewRegistryQuote(playerRef, resolveRegistryName(source.getItem()), source.stackSize);
+    }
+
+    public ExchangeMarketExecutionCompatibilityResult exchangeVaultCoinFormal(String requestId, String playerRef,
+        ItemStack stack) {
+        ItemStack source = requireCoinStack(stack);
+        PreviewResult quote = requireExecutableRegistryQuote(playerRef, resolveRegistryName(source.getItem()),
+            source.stackSize);
+        ExchangeMarketExecutionResult result = exchangeMarketService.executeTaskCoinToStarcoin(
+            new ExchangeMarketExecutionRequest(requireText(requestId), playerRef, sourceServerId,
+                "base-vault", resolveRegistryName(source.getItem()), source.stackSize));
+        return new ExchangeMarketExecutionCompatibilityResult(result, quote.getLegacyQuote());
     }
 
     PreviewResult previewRegistryQuote(String playerRef, String registryName, int quantity) {
@@ -150,8 +187,83 @@ public class TaskCoinExchangeService {
         return fallback == null ? "" : String.valueOf(fallback);
     }
 
+    private ItemStack requireCoinStack(ItemStack stack) {
+        if (stack == null || stack.getItem() == null || stack.stackSize <= 0) {
+            throw new MarketExchangeException("请选择 Base Vault 中可兑换的任务书硬币");
+        }
+        return stack.copy();
+    }
+
+    private String requireText(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            throw new MarketExchangeException("exchange request id is required");
+        }
+        return value.trim();
+    }
+
     private String newRequestId() {
         return exchangeMarketService.newRequestId();
+    }
+
+    private MarketOperationLog createExchangeOperation(String requestId, EntityPlayerMP player,
+        HeldCoinSelection selection) {
+        if (operationLogRepository == null) {
+            return null;
+        }
+        Instant now = Instant.now();
+        String playerRef = player.getUniqueID().toString();
+        MarketRecoveryMetadata metadata = MarketRecoveryMetadata.builder()
+            .put("mode", "exchange-execution")
+            .put("inputRegistryName", selection.stackRegistryName)
+            .putLong("inputMeta", selection.stack.getItemDamage())
+            .putLong("inputQuantity", selection.stack.stackSize)
+            .putLong("inventorySlot", selection.slotIndex)
+            .put("physicalInputState", "PENDING_REMOVAL")
+            .build();
+        MarketOperationLog created = operationLogRepository.save(new MarketOperationLog(0L, requestId,
+            MarketOperationType.EXCHANGE_EXECUTION, MarketOperationStatus.CREATED, sourceServerId, playerRef,
+            "exchange-execution|registry=" + selection.stackRegistryName + "|meta=" + selection.stack.getItemDamage()
+                + "|quantity=" + selection.stack.stackSize,
+            metadata.toKey(), 0L, 0L, 0L, "exchange input accepted; physical removal is pending", now, now));
+        return operationLogRepository.update(created.withState(MarketOperationStatus.PROCESSING, 0L, 0L, 0L,
+            "exchange input removed; waiting for idempotent bank settlement", metadata.toKey(), Instant.now()));
+    }
+
+    private void completeExchangeOperation(MarketOperationLog operation, ExchangeMarketExecutionResult result) {
+        if (operation == null || operationLogRepository == null) {
+            return;
+        }
+        long transactionId = result.getPostingResult().getTransaction().getTransactionId();
+        MarketRecoveryMetadata metadata = MarketRecoveryMetadata.parse(operation.getRecoveryMetadataKey()).toBuilder()
+            .put("physicalInputState", "REMOVED")
+            .putLong("bankTransactionId", transactionId)
+            .putLong("exchangeRecordId", result.getPostingResult().getExchangeRecord() == null ? 0L
+                : result.getPostingResult().getExchangeRecord().getExchangeId())
+            .build();
+        operationLogRepository.update(operation.withState(MarketOperationStatus.COMPLETED, 0L, 0L, transactionId,
+            "exchange input removed and formal bank settlement completed", metadata.toKey(), Instant.now()));
+    }
+
+    private void failExchangeOperation(MarketOperationLog operation, RuntimeException exception) {
+        if (operation == null || operationLogRepository == null) {
+            return;
+        }
+        try {
+            MarketRecoveryMetadata metadata = MarketRecoveryMetadata.parse(operation.getRecoveryMetadataKey()).toBuilder()
+                .put("physicalInputState", "RESTORED_AFTER_FAILURE")
+                .build();
+            operationLogRepository.update(operation.withState(MarketOperationStatus.FAILED, 0L, 0L, 0L,
+                "exchange settlement failed; held input restored: " + safeMessage(exception), metadata.toKey(),
+                Instant.now()));
+        } catch (RuntimeException ignored) {
+            // Preserve the original settlement failure; startup recovery will surface the incomplete operation.
+        }
+    }
+
+    private String safeMessage(RuntimeException exception) {
+        String message = exception == null ? null : exception.getMessage();
+        return message == null || message.trim().isEmpty() ? exception == null ? "unknown" : exception.getClass().getSimpleName()
+            : message.trim();
     }
 
     public static final class TaskCoinExchangeExecutionResult {

@@ -8,5 +8,9 @@ public interface CustomMarketAuditLogRepository {
 
     CustomMarketAuditLog save(CustomMarketAuditLog auditLog);
 
+    default CustomMarketAuditLog update(CustomMarketAuditLog auditLog) {
+        throw new UnsupportedOperationException("custom market audit update is not supported");
+    }
+
     Optional<CustomMarketAuditLog> findByRequestId(String requestId);
 }

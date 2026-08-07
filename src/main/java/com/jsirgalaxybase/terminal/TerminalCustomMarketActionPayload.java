@@ -7,10 +7,32 @@ public final class TerminalCustomMarketActionPayload {
 
     private final String selectedScope;
     private final String selectedListingId;
+    private final String publishPriceText;
+    private final String query;
+    private final int pageIndex;
+    private final int selectedVaultSlot;
 
     public TerminalCustomMarketActionPayload(String selectedScope, String selectedListingId) {
+        this(selectedScope, selectedListingId, "");
+    }
+
+    public TerminalCustomMarketActionPayload(String selectedScope, String selectedListingId, String publishPriceText) {
+        this(selectedScope, selectedListingId, publishPriceText, "", 0, -1);
+    }
+
+    public TerminalCustomMarketActionPayload(String selectedScope, String selectedListingId, String publishPriceText,
+        String query, int pageIndex) {
+        this(selectedScope, selectedListingId, publishPriceText, query, pageIndex, -1);
+    }
+
+    public TerminalCustomMarketActionPayload(String selectedScope, String selectedListingId, String publishPriceText,
+        String query, int pageIndex, int selectedVaultSlot) {
         this.selectedScope = normalize(selectedScope);
         this.selectedListingId = sanitizeNumber(selectedListingId);
+        this.publishPriceText = sanitizeNumber(publishPriceText);
+        this.query = normalize(query);
+        this.pageIndex = Math.max(0, pageIndex);
+        this.selectedVaultSlot = selectedVaultSlot < 0 ? -1 : selectedVaultSlot;
     }
 
     public static TerminalCustomMarketActionPayload empty() {
@@ -22,14 +44,19 @@ public final class TerminalCustomMarketActionPayload {
             return empty();
         }
         String[] parts = payload.split("\\|", -1);
-        if (parts.length != 2) {
+        if (parts.length != 2 && parts.length != 3 && parts.length != 5 && parts.length != 6) {
             return empty();
         }
-        return new TerminalCustomMarketActionPayload(decodePart(parts[0]), decodePart(parts[1]));
+        return new TerminalCustomMarketActionPayload(decodePart(parts[0]), decodePart(parts[1]),
+            parts.length >= 3 ? decodePart(parts[2]) : "", parts.length >= 5 ? decodePart(parts[3]) : "",
+            parts.length >= 5 ? parsePage(decodePart(parts[4])) : 0,
+            parts.length == 6 ? parseSlot(decodePart(parts[5])) : -1);
     }
 
     public String encode() {
-        return encodePart(selectedScope) + "|" + encodePart(selectedListingId);
+        return encodePart(selectedScope) + "|" + encodePart(selectedListingId) + "|" + encodePart(publishPriceText)
+            + "|" + encodePart(query) + "|" + encodePart(String.valueOf(pageIndex))
+            + "|" + encodePart(String.valueOf(selectedVaultSlot));
     }
 
     public String getSelectedScope() {
@@ -51,8 +78,28 @@ public final class TerminalCustomMarketActionPayload {
         }
     }
 
+    public String getPublishPriceText() {
+        return publishPriceText;
+    }
+
+    public long parsePublishPrice() {
+        if (publishPriceText.isEmpty()) {
+            return 0L;
+        }
+        try {
+            return Long.parseLong(publishPriceText);
+        } catch (NumberFormatException ignored) {
+            return 0L;
+        }
+    }
+
+    public String getQuery() { return query; }
+    public int getPageIndex() { return pageIndex; }
+    public int getSelectedVaultSlot() { return selectedVaultSlot; }
+
     public TerminalCustomMarketActionPayload clearedAfterSuccess() {
-        return new TerminalCustomMarketActionPayload(selectedScope, selectedListingId);
+        return new TerminalCustomMarketActionPayload(selectedScope, selectedListingId, publishPriceText, query, pageIndex,
+            selectedVaultSlot);
     }
 
     private static String sanitizeNumber(String value) {
@@ -77,6 +124,14 @@ public final class TerminalCustomMarketActionPayload {
         } catch (IllegalArgumentException ignored) {
             return "";
         }
+    }
+
+    private static int parsePage(String value) {
+        try { return Math.max(0, Integer.parseInt(normalize(value))); } catch (NumberFormatException ignored) { return 0; }
+    }
+
+    private static int parseSlot(String value) {
+        try { return Math.max(-1, Integer.parseInt(normalize(value))); } catch (NumberFormatException ignored) { return -1; }
     }
 
     private static String normalize(String value) {

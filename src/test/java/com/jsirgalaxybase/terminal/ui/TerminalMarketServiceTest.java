@@ -6,6 +6,7 @@ import static org.junit.Assert.assertTrue;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -24,6 +25,8 @@ import com.jsirgalaxybase.modules.core.market.application.StandardizedSpotMarket
 import com.jsirgalaxybase.modules.core.market.domain.MarketCustodyInventory;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOperationLog;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOperationStatus;
+import com.jsirgalaxybase.modules.core.market.domain.MarketOrderSide;
+import com.jsirgalaxybase.modules.core.market.domain.MarketOrderStatus;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOrder;
 import com.jsirgalaxybase.modules.core.market.domain.StandardizedMarketProduct;
 import com.jsirgalaxybase.modules.core.market.port.MarketCustodyInventoryRepository;
@@ -104,6 +107,53 @@ public class TerminalMarketServiceTest {
         Object normalized = method.invoke(TerminalMarketService.INSTANCE, "", Arrays.asList("product-a", "product-b"), null);
 
         assertEquals(null, normalized);
+    }
+
+    @Test
+    public void instantBuyCancelFailureFeedbackPreservesPartialExecutionState() {
+        StandardizedSpotMarketService.CreateBuyOrderResult result = new StandardizedSpotMarketService.CreateBuyOrderResult(
+            new MarketOrder(41L, MarketOrderSide.BUY, MarketOrderStatus.OPEN, "buyer",
+                new StandardizedMarketProduct("minecraft:stone:0", 0), true, 12L, 10L, 4L, 6L, 72L, 0L,
+                "test-server", Instant.now(), Instant.now()),
+            new MarketOperationLog(1L, "req", null, MarketOperationStatus.COMPLETED, "test-server", "buyer", "key",
+                41L, 0L, 0L, "ok", Instant.now(), Instant.now()),
+            Collections.<MarketCustodyInventory>emptyList(),
+            Collections.<com.jsirgalaxybase.modules.core.market.domain.MarketTradeRecord>emptyList());
+
+        TerminalActionFeedback feedback = TerminalMarketService.buildInstantBuyResidualCancelFailureFeedback(
+            result, new RuntimeException("release failed"));
+
+        assertEquals(TerminalNotificationSeverity.WARNING, feedback.getSeverity());
+        assertTrue(feedback.getTitle().contains("剩余撤回失败"));
+        assertTrue(feedback.getBody().contains("已真实成交 6"));
+        assertTrue(feedback.getBody().contains("orderId=41"));
+        assertTrue(feedback.getBody().contains("开放买单"));
+        assertTrue(feedback.getBody().contains("release failed"));
+    }
+
+    @Test
+    public void instantSellCancelFailureFeedbackPreservesPartialExecutionState() {
+        StandardizedSpotMarketService.CreateSellOrderResult result = new StandardizedSpotMarketService.CreateSellOrderResult(
+            new MarketOrder(51L, MarketOrderSide.SELL, MarketOrderStatus.OPEN, "seller",
+                new StandardizedMarketProduct("minecraft:stone:0", 0), true, 11L, 9L, 3L, 6L, 0L, 22L,
+                "test-server", Instant.now(), Instant.now()),
+            new MarketCustodyInventory(22L, "seller", new StandardizedMarketProduct("minecraft:stone:0", 0), true, 3L,
+                com.jsirgalaxybase.modules.core.market.domain.MarketCustodyStatus.ESCROW_SELL, 51L, 1L, "test-server",
+                Instant.now(), Instant.now()),
+            new MarketOperationLog(2L, "req-sell", null, MarketOperationStatus.COMPLETED, "test-server", "seller",
+                "key", 51L, 22L, 0L, "ok", Instant.now(), Instant.now()),
+            Collections.<MarketCustodyInventory>emptyList(),
+            Collections.<com.jsirgalaxybase.modules.core.market.domain.MarketTradeRecord>emptyList());
+
+        TerminalActionFeedback feedback = TerminalMarketService.buildInstantSellResidualCancelFailureFeedback(
+            result, new RuntimeException("escrow rollback failed"));
+
+        assertEquals(TerminalNotificationSeverity.WARNING, feedback.getSeverity());
+        assertTrue(feedback.getTitle().contains("剩余撤回失败"));
+        assertTrue(feedback.getBody().contains("已真实成交 6"));
+        assertTrue(feedback.getBody().contains("orderId=51"));
+        assertTrue(feedback.getBody().contains("ESCROW"));
+        assertTrue(feedback.getBody().contains("escrow rollback failed"));
     }
 
     private static final class RecordingSpotMarketService extends StandardizedSpotMarketService {

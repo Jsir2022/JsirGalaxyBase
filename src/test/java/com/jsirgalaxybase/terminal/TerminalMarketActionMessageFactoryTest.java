@@ -53,6 +53,74 @@ public class TerminalMarketActionMessageFactoryTest {
     }
 
     @Test
+    public void depositRequiresExplicitVaultQuantity() {
+        TerminalHomeScreenModel screenModel = createMarketScreenModel();
+        TerminalMarketSectionState state = new TerminalMarketSectionState();
+        state.applyModel(screenModel.getSelectedPageSnapshot().getMarketSectionModel());
+
+        assertNull(TerminalMarketActionMessageFactory.createConfirmDepositHeldMessage(
+            screenModel, screenModel.getSelectedPageSnapshot().getMarketSectionModel(), state));
+
+        state.setVaultDepositQuantityText("6");
+        TerminalActionMessage message = TerminalMarketActionMessageFactory.createConfirmDepositHeldMessage(
+            screenModel, screenModel.getSelectedPageSnapshot().getMarketSectionModel(), state);
+
+        assertNotNull(message);
+        assertEquals(6L, TerminalMarketActionPayload.decode(message.getPayload()).parseVaultDepositQuantity());
+    }
+
+    @Test
+    public void limitSellInstantAndCancelBuildExplicitStandardizedMessages() {
+        TerminalHomeScreenModel screenModel = createMarketScreenModel();
+        TerminalMarketSectionState state = new TerminalMarketSectionState();
+        state.applyModel(screenModel.getSelectedPageSnapshot().getMarketSectionModel());
+        state.setPendingCancelOrderId("7");
+
+        TerminalActionMessage limitSell = TerminalMarketActionMessageFactory.createConfirmLimitSellMessage(
+            screenModel,
+            screenModel.getSelectedPageSnapshot().getMarketSectionModel(),
+            state);
+        TerminalActionMessage instantBuy = TerminalMarketActionMessageFactory.createConfirmInstantBuyMessage(
+            screenModel,
+            screenModel.getSelectedPageSnapshot().getMarketSectionModel(),
+            state);
+        TerminalActionMessage instantSell = TerminalMarketActionMessageFactory.createConfirmInstantSellMessage(
+            screenModel,
+            screenModel.getSelectedPageSnapshot().getMarketSectionModel(),
+            state);
+        TerminalActionMessage cancel = TerminalMarketActionMessageFactory.createCancelOrderMessage(
+            screenModel,
+            screenModel.getSelectedPageSnapshot().getMarketSectionModel(),
+            state);
+
+        assertEquals(TerminalActionType.MARKET_CONFIRM_LIMIT_SELL.getId(), limitSell.getActionType());
+        assertEquals(TerminalActionType.MARKET_CONFIRM_INSTANT_BUY.getId(), instantBuy.getActionType());
+        assertEquals(TerminalActionType.MARKET_CONFIRM_INSTANT_SELL.getId(), instantSell.getActionType());
+        assertEquals(TerminalActionType.MARKET_CANCEL_ORDER.getId(), cancel.getActionType());
+        assertEquals(7L, TerminalMarketActionPayload.decode(cancel.getPayload()).parseOrderId());
+    }
+
+    @Test
+    public void unifiedOrderTicketUsesSingleModernActionContract() {
+        TerminalHomeScreenModel screenModel = createMarketScreenModel();
+        TerminalMarketSectionState state = new TerminalMarketSectionState();
+        state.applyModel(screenModel.getSelectedPageSnapshot().getMarketSectionModel());
+        state.setOrderSide(TerminalMarketSectionState.OrderSide.SELL);
+        state.setOrderType(TerminalMarketSectionState.OrderType.LIMIT);
+
+        TerminalActionMessage message = TerminalMarketActionMessageFactory.createConfirmOrderMessage(screenModel,
+            screenModel.getSelectedPageSnapshot().getMarketSectionModel(), state);
+
+        assertNotNull(message);
+        assertEquals(TerminalActionType.MARKET_CONFIRM_ORDER.getId(), message.getActionType());
+        TerminalMarketActionPayload payload = TerminalMarketActionPayload.decode(message.getPayload());
+        assertEquals("SELL", payload.getOrderSide());
+        assertEquals("LIMIT", payload.getOrderType());
+        assertEquals(8L, payload.parseOrderQuantity());
+        assertEquals(13L, payload.parseOrderLimitPrice());
+    }
+
+    @Test
     public void customBuyBuildsExplicitCustomActionMessage() {
         TerminalHomeScreenModel screenModel = createCustomMarketScreenModel();
         TerminalMarketSectionState state = new TerminalMarketSectionState();
@@ -107,6 +175,8 @@ public class TerminalMarketActionMessageFactoryTest {
                 "12 STARCOIN",
                 "11 STARCOIN",
                 "13 STARCOIN",
+                "12",
+                "16",
                 "64",
                 "768 STARCOIN",
                 "32",
@@ -114,13 +184,25 @@ public class TerminalMarketActionMessageFactoryTest {
                 "4",
                 "120 STARCOIN",
                 "最新成交价仅用于行情展示。",
+                "目录版本=default | 来源=runtime | 卖出来源=统一仓储 AVAILABLE",
+                "当前 AVAILABLE=32，可直接卖出。",
+                "冻结预计 204 STARCOIN。",
+                "将锁定 AVAILABLE 数量 16。",
+                "预计按当前卖盘成交。",
+                "预计按当前买盘成交。",
                 Arrays.asList("13 x 16", "14 x 32"),
                 Arrays.asList("11 x 12", "10 x 48"),
                 Arrays.asList("orderId=7 | BUY | OPEN | 16 @ 11"),
+                Arrays.asList("7"),
+                Arrays.asList("1"),
                 Arrays.asList("custodyId=31 | 4 单位待提取"),
                 Arrays.asList("31"),
                 Arrays.asList("即时成交按真实盘口撮合。", "CLAIMABLE 资产可直接提取。"),
+                true,
                 new TerminalMarketSectionModel.LimitBuyDraftModel("minecraft:stone:0", "12", "16", true),
+                new TerminalMarketSectionModel.LimitSellDraftModel("minecraft:stone:0", "13", "8", true),
+                new TerminalMarketSectionModel.InstantDraftModel("minecraft:stone:0", "5", true),
+                new TerminalMarketSectionModel.InstantDraftModel("minecraft:stone:0", "6", true),
                 new TerminalMarketSectionModel.ActionFeedbackModel("市场动作反馈", "等待确认提交。", "INFO")));
         TerminalHomeScreenModel.PageSnapshotModel bank = TerminalHomeScreenModel.PageSnapshotModel.placeholder(TerminalPage.BANK);
 

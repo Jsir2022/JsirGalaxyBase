@@ -39,6 +39,7 @@ import com.jsirgalaxybase.modules.core.market.application.MarketExchangeExceptio
 import com.jsirgalaxybase.modules.core.market.application.CustomMarketService;
 import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketAdmissionDecision;
 import com.jsirgalaxybase.modules.core.market.application.TaskCoinExchangeService;
+import com.jsirgalaxybase.modules.core.market.application.TaskCoinExchangePlanner;
 import com.jsirgalaxybase.modules.core.market.application.StandardizedSpotMarketService;
 import com.jsirgalaxybase.modules.core.market.application.command.CancelCustomMarketListingCommand;
 import com.jsirgalaxybase.modules.core.market.application.command.ClaimCustomMarketListingCommand;
@@ -54,10 +55,14 @@ import com.jsirgalaxybase.modules.core.market.domain.MarketCustodyInventory;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOperationLog;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOrder;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketItemSnapshot;
+import com.jsirgalaxybase.modules.core.market.domain.CustomMarketDeliveryResolution;
 import com.jsirgalaxybase.modules.core.market.domain.ExchangeMarketExecutionResult;
 import com.jsirgalaxybase.modules.core.market.domain.ExchangeMarketQuoteResult;
+import com.jsirgalaxybase.modules.core.market.port.CustomMarketDeliveryPort;
 import com.jsirgalaxybase.modules.core.market.domain.StandardizedMarketProduct;
 import com.jsirgalaxybase.modules.core.market.domain.TaskCoinExchangeQuote;
+import com.jsirgalaxybase.modules.servertools.ServerToolsModule;
+import com.jsirgalaxybase.modules.servertools.command.ServerToolsCommandHandler;
 
 import cpw.mods.fml.common.registry.GameRegistry;
 
@@ -76,7 +81,7 @@ public class GalaxyBaseCommand extends CommandBase {
 
     @Override
     public String getCommandUsage(ICommandSender sender) {
-        return "/jsirgalaxybase [modules|architecture|bank|market]";
+        return "/jsirgalaxybase [modules|architecture|bank|market|servertools]";
     }
 
     @Override
@@ -94,6 +99,10 @@ public class GalaxyBaseCommand extends CommandBase {
             processMarketCommand(sender, args);
             return;
         }
+        if (args.length > 0 && ("servertools".equalsIgnoreCase(args[0]) || "st".equalsIgnoreCase(args[0]))) {
+            processServerToolsCommand(sender, args);
+            return;
+        }
 
         if (args.length == 0 || "modules".equalsIgnoreCase(args[0]) || "architecture".equalsIgnoreCase(args[0])) {
             sender.addChatMessage(new ChatComponentText("JsirGalaxyBase architecture: modular monolith, institution core + capability modules"));
@@ -109,7 +118,15 @@ public class GalaxyBaseCommand extends CommandBase {
     @Override
     public List<String> addTabCompletionOptions(ICommandSender sender, String[] args) {
         if (args.length == 1) {
-            return getListOfStringsMatchingLastWord(args, new String[] { "modules", "architecture", "bank", "market" });
+            return getListOfStringsMatchingLastWord(args,
+                new String[] { "modules", "architecture", "bank", "market", "servertools", "st" });
+        }
+        if (args.length >= 2 && ("servertools".equalsIgnoreCase(args[0]) || "st".equalsIgnoreCase(args[0]))) {
+            ServerToolsModule serverToolsModule = moduleManager.findModule(ServerToolsModule.class);
+            if (serverToolsModule == null) {
+                return new ArrayList<String>();
+            }
+            return new ServerToolsCommandHandler(serverToolsModule).addRootTabCompletionOptions(tail(args));
         }
         if (args.length == 2 && "bank".equalsIgnoreCase(args[0])) {
             return getListOfStringsMatchingLastWord(args,
@@ -151,7 +168,7 @@ public class GalaxyBaseCommand extends CommandBase {
             }
             if ("custom".equals(action)) {
                 return getListOfStringsMatchingLastWord(args,
-                    new String[] { "list", "browse", "inspect", "buy", "claim", "cancel", "pending" });
+                    new String[] { "list", "browse", "inspect", "buy", "claim", "cancel", "pending", "recover" });
             }
             if ("sell".equals(action) || "buy".equals(action)) {
                 return getListOfStringsMatchingLastWord(args,
@@ -248,6 +265,22 @@ public class GalaxyBaseCommand extends CommandBase {
         }
     }
 
+    private void processServerToolsCommand(ICommandSender sender, String[] args) {
+        ServerToolsModule serverToolsModule = moduleManager.findModule(ServerToolsModule.class);
+        if (serverToolsModule == null) {
+            sender.addChatMessage(new ChatComponentText("Server tools module is not registered."));
+            return;
+        }
+        new ServerToolsCommandHandler(serverToolsModule).processRootCommand(sender, tail(args),
+            "/jsirgalaxybase servertools warp [list|name]");
+    }
+
+    private String[] tail(String[] args) {
+        String[] tail = new String[args.length - 1];
+        System.arraycopy(args, 1, tail, 0, tail.length);
+        return tail;
+    }
+
     private void processMarketCommand(ICommandSender sender, String[] args) {
         ReplySink reply = new LiveReplySink(sender);
         if (args.length == 1 || "help".equalsIgnoreCase(args[1])) {
@@ -266,6 +299,15 @@ public class GalaxyBaseCommand extends CommandBase {
             }
 
             if ("custom".equals(action)) {
+                if (args.length >= 3 && "recover".equalsIgnoreCase(args[2])) {
+                    if (institutionCoreModule == null || institutionCoreModule.getCustomMarketService() == null) {
+                        reply.send("定制商品市场恢复服务未就绪，请检查独立服 PostgreSQL 市场启动日志。");
+                        return;
+                    }
+                    processCustomMarketRecoveryCommand(reply, args, institutionCoreModule,
+                        sender.canCommandSenderUseCommand(2, getCommandName()), sender.getCommandSenderName());
+                    return;
+                }
                 if (!(sender instanceof EntityPlayerMP)) {
                     reply.send("定制商品市场兼容指令只能由在线玩家执行。");
                     return;
@@ -330,7 +372,9 @@ public class GalaxyBaseCommand extends CommandBase {
 
     protected TaskCoinExchangeService createTaskCoinExchangeService(InstitutionCoreModule institutionCoreModule) {
         return new TaskCoinExchangeService(institutionCoreModule.getBankingInfrastructure(),
-            institutionCoreModule.getBankingSourceServerId());
+            new TaskCoinExchangePlanner(), institutionCoreModule.getBankingSourceServerId(),
+            institutionCoreModule.getMarketInfrastructure() == null ? null
+                : institutionCoreModule.getMarketInfrastructure().getOperationLogRepository());
     }
 
     void processMarketRecoveryCommand(ReplySink reply, String[] args, InstitutionCoreModule institutionCoreModule,
@@ -448,6 +492,36 @@ public class GalaxyBaseCommand extends CommandBase {
         }
 
         sendMarketUsage(reply);
+    }
+
+    void processCustomMarketRecoveryCommand(ReplySink reply, String[] args, InstitutionCoreModule institutionCoreModule,
+        boolean operator, String operatorRef) {
+        if (!operator) {
+            reply.send("只有管理员才能处理定制商品市场的不确定交付。");
+            return;
+        }
+        if (args.length < 5) {
+            reply.send("Usage: /jsirgalaxybase market custom recover <listingId> <restore|complete> [reason]");
+            return;
+        }
+        long listingId = parsePositiveLong(args[3], "listingId");
+        CustomMarketDeliveryResolution resolution;
+        if ("restore".equalsIgnoreCase(args[4])) {
+            resolution = CustomMarketDeliveryResolution.RESTORE;
+        } else if ("complete".equalsIgnoreCase(args[4])) {
+            resolution = CustomMarketDeliveryResolution.COMPLETE;
+        } else {
+            reply.send("恢复决议只能是 restore（确认未交付）或 complete（确认已交付）。");
+            return;
+        }
+        String reason = args.length > 5 ? joinTail(args, 5) : "administrator verified delivery outcome";
+        CustomMarketService.ManualDeliveryResolutionResult result = institutionCoreModule.getCustomMarketService()
+            .resolveDeliveryException(newRequestId("market-custom-recover"), operatorRef,
+                institutionCoreModule.getBankingSourceServerId(), listingId, resolution, reason);
+        reply.send("定制市场交付异常已人工收口: listingId=" + result.getListing().getListingId()
+            + ", resolution=" + resolution.name() + ", listingStatus=" + result.getListing().getListingStatus()
+            + ", deliveryStatus=" + result.getListing().getDeliveryStatus() + ", auditId="
+            + result.getAuditLog().getAuditId());
     }
 
     private void handleStandardizedSellCommand(StandardizedMarketPlayerContext playerContext, ReplySink reply,
@@ -659,12 +733,11 @@ public class GalaxyBaseCommand extends CommandBase {
         InstitutionCoreModule institutionCoreModule, long listingId) {
         CustomMarketService.ListingView listingView = institutionCoreModule.getCustomMarketService()
             .inspectListing(listingId);
-        ItemStack restoredStack = requirePreparedCustomClaimStack(playerContext, listingView.getSnapshot());
+        ensureHandEmptyForCustomRestore(playerContext, listingView.getSnapshot());
         CustomMarketService.ClaimListingResult result = institutionCoreModule.getCustomMarketService()
             .claimPurchasedListing(new ClaimCustomMarketListingCommand(newRequestId("market-custom-claim"),
-                playerContext.getPlayerRef(), institutionCoreModule.getBankingSourceServerId(), listingId));
-        playerContext.setHeldItem(restoredStack);
-        playerContext.syncInventory();
+                playerContext.getPlayerRef(), institutionCoreModule.getBankingSourceServerId(), listingId),
+                createCustomHandDeliveryPort(playerContext));
         reply.send("定制商品已领取并完结: listingId=" + result.getListing().getListingId() + ", item="
             + result.getSnapshot().getDisplayName() + ", deliveryStatus=" + result.getListing().getDeliveryStatus());
     }
@@ -676,8 +749,8 @@ public class GalaxyBaseCommand extends CommandBase {
         ensureHandEmptyForCustomRestore(playerContext, listingView.getSnapshot());
         CustomMarketService.CancelListingResult result = institutionCoreModule.getCustomMarketService()
             .cancelListing(new CancelCustomMarketListingCommand(newRequestId("market-custom-cancel"),
-                playerContext.getPlayerRef(), institutionCoreModule.getBankingSourceServerId(), listingId));
-        restoreCustomSnapshotToHand(playerContext, result.getSnapshot());
+                playerContext.getPlayerRef(), institutionCoreModule.getBankingSourceServerId(), listingId),
+                createCustomHandDeliveryPort(playerContext));
         reply.send("定制商品挂牌已下架并返还到当前手持槽: listingId=" + result.getListing().getListingId() + ", item="
             + result.getSnapshot().getDisplayName() + ", status=" + result.getListing().getListingStatus());
     }
@@ -835,6 +908,17 @@ public class GalaxyBaseCommand extends CommandBase {
         CustomMarketItemSnapshot snapshot) {
         playerContext.setHeldItem(snapshot.toItemStack());
         playerContext.syncInventory();
+    }
+
+    private CustomMarketDeliveryPort createCustomHandDeliveryPort(final StandardizedMarketPlayerContext playerContext) {
+        return new CustomMarketDeliveryPort() {
+            @Override
+            public void deliver(String requestId, String playerRef, String sourceServerId,
+                CustomMarketItemSnapshot snapshot) {
+                ensureHandEmptyForCustomRestore(playerContext, snapshot);
+                restoreCustomSnapshotToHand(playerContext, snapshot);
+            }
+        };
     }
 
     private ItemStack requirePreparedCustomClaimStack(StandardizedMarketPlayerContext playerContext,
@@ -1386,6 +1470,7 @@ public class GalaxyBaseCommand extends CommandBase {
         reply.send("/jsirgalaxybase market custom claim <listingId>");
         reply.send("/jsirgalaxybase market custom cancel <listingId>");
         reply.send("/jsirgalaxybase market custom pending");
+        reply.send("/jsirgalaxybase market custom recover <listingId> <restore|complete> [reason]  (管理员)");
         reply.send("汇率市场入口（quote / exchange 兼容子入口）:");
         reply.send("/jsirgalaxybase market quote hand");
         reply.send("/jsirgalaxybase market exchange hand");

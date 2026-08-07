@@ -36,6 +36,9 @@ public final class TerminalNotification {
     }
 
     public static TerminalNotification fromBankMessage(String rawMessage, long autoCloseMillis) {
+        if (DEFAULT_BANK_ACTION_MESSAGE.equals(stripFormatting(rawMessage))) {
+            return null;
+        }
         return fromFeedback(TerminalActionFeedback.fromLegacyBankMessage(rawMessage, autoCloseMillis));
     }
 

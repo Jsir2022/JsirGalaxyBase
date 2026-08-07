@@ -9,4 +9,9 @@ public interface GuiScene {
     void openPopup(GuiPanel panel);
 
     void closePopup();
+
+    /** Opens a passive overlay. Unlike a popup it never receives input. */
+    void openHoverOverlay(GuiPanel panel);
+
+    void closeHoverOverlay();
 }

@@ -75,4 +75,9 @@ public class CustomMarketAuditLog {
     public Instant getUpdatedAt() {
         return updatedAt;
     }
+
+    public CustomMarketAuditLog withMessage(String newMessage, Instant newUpdatedAt) {
+        return new CustomMarketAuditLog(auditId, requestId, auditType, playerRef, requestSemanticsKey,
+            listingId, tradeId, sourceServerId, newMessage, createdAt, newUpdatedAt);
+    }
 }

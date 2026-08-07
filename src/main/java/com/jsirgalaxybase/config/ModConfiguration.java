@@ -1,17 +1,19 @@
 package com.jsirgalaxybase.config;
 
 import java.io.File;
+import java.util.Locale;
 
 import net.minecraftforge.common.config.Configuration;
+import net.minecraftforge.common.config.Property;
 
 public class ModConfiguration {
 
     private static final String BANKING_CATEGORY = "banking";
     private static final String TERMINAL_CATEGORY = "terminal";
     private static final int DEFAULT_TERMINAL_ACCENT_COLOR = 0x529BED;
-    private static final float DEFAULT_TERMINAL_PANEL_WIDTH_RATIO = 0.90f;
-    private static final float DEFAULT_TERMINAL_PANEL_HEIGHT_RATIO = 0.90f;
-    private static final float DEFAULT_TERMINAL_NAVIGATION_WIDTH_RATIO = 0.13f;
+    private static final float DEFAULT_TERMINAL_PANEL_WIDTH_RATIO = 0.72f;
+    private static final float DEFAULT_TERMINAL_PANEL_HEIGHT_RATIO = 0.44f;
+    private static final float DEFAULT_TERMINAL_NAVIGATION_WIDTH_RATIO = 0.07f;
 
     private final File minecraftDirectory;
     private final boolean autoDumpItemsOnClientStart;
@@ -67,36 +69,33 @@ public class ModConfiguration {
                 "#529BED",
                 "Client-only terminal accent color in #RRGGBB format."),
             DEFAULT_TERMINAL_ACCENT_COLOR);
-        final float terminalPanelWidthRatio = clampRatio(
-            parseRatio(
-                clientConfiguration.getString(
-                    "terminalPanelWidthRatio",
-                    TERMINAL_CATEGORY,
-                    "0.90",
-                    "Client-only terminal width ratio relative to screen size. Recommended 0.70 - 0.98."),
-                DEFAULT_TERMINAL_PANEL_WIDTH_RATIO),
-            0.70f,
-            0.98f);
-        final float terminalPanelHeightRatio = clampRatio(
-            parseRatio(
-                clientConfiguration.getString(
-                    "terminalPanelHeightRatio",
-                    TERMINAL_CATEGORY,
-                    "0.90",
-                    "Client-only terminal height ratio relative to screen size. Recommended 0.70 - 0.98."),
-                DEFAULT_TERMINAL_PANEL_HEIGHT_RATIO),
-            0.70f,
-            0.98f);
-        final float terminalNavigationWidthRatio = clampRatio(
-            parseRatio(
-                clientConfiguration.getString(
-                    "terminalNavigationWidthRatio",
-                    TERMINAL_CATEGORY,
-                    "0.13",
-                    "Client-only navigation width ratio inside terminal layout. Recommended 0.10 - 0.25."),
-                DEFAULT_TERMINAL_NAVIGATION_WIDTH_RATIO),
-            0.10f,
-            0.25f);
+        final float terminalPanelWidthRatio = readClampedRatio(
+            clientConfiguration,
+            TERMINAL_CATEGORY,
+            "terminalPanelWidthRatio",
+            "0.72",
+            "Client-only terminal width ratio relative to screen size. Recommended 0.68 - 0.80.",
+            DEFAULT_TERMINAL_PANEL_WIDTH_RATIO,
+            0.68f,
+            0.80f);
+        final float terminalPanelHeightRatio = readClampedRatio(
+            clientConfiguration,
+            TERMINAL_CATEGORY,
+            "terminalPanelHeightRatio",
+            "0.44",
+            "Client-only terminal height ratio relative to screen size. Recommended 0.40 - 0.54.",
+            DEFAULT_TERMINAL_PANEL_HEIGHT_RATIO,
+            0.40f,
+            0.54f);
+        final float terminalNavigationWidthRatio = readClampedRatio(
+            clientConfiguration,
+            TERMINAL_CATEGORY,
+            "terminalNavigationWidthRatio",
+            "0.07",
+            "Client-only navigation width ratio inside terminal layout. Recommended 0.06 - 0.09.",
+            DEFAULT_TERMINAL_NAVIGATION_WIDTH_RATIO,
+            0.06f,
+            0.09f);
 
         final boolean bankingPostgresEnabled = serverConfiguration == null ? false : serverConfiguration.getBoolean(
             "bankingPostgresEnabled",
@@ -168,6 +167,17 @@ public class ModConfiguration {
             return max;
         }
         return value;
+    }
+
+    private static float readClampedRatio(Configuration configuration, String category, String key, String defaultValue,
+        String comment, float fallback, float min, float max) {
+        Property property = configuration.get(category, key, defaultValue, comment);
+        float clamped = clampRatio(parseRatio(property.getString(), fallback), min, max);
+        String normalized = String.format(Locale.ROOT, "%.2f", clamped);
+        if (!normalized.equals(property.getString())) {
+            property.set(normalized);
+        }
+        return clamped;
     }
 
     private static int parseHexColor(String value, int fallback) {

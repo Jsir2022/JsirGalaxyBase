@@ -95,6 +95,33 @@ public class StandardizedSpotMarketServiceTest {
     }
 
     @Test
+    public void cancelSellOrderAfterItIsFilledLeavesSettledOrderUntouched() {
+        FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
+        FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
+        FakeMarketOperationLogRepository operationLogRepository = new FakeMarketOperationLogRepository();
+        StandardizedSpotMarketService service = createService(orderRepository, custodyRepository,
+            operationLogRepository);
+
+        depositInventory(service, "req-filled-cancel-deposit", "player-a", "minecraft:stone:0", 1L, true);
+        StandardizedSpotMarketService.CreateSellOrderResult created = service.createSellOrder(new CreateSellOrderCommand(
+            "req-filled-cancel-create", "player-a", "test-server", "minecraft:stone:0", 1L, true, 12L));
+        orderRepository.update(created.getOrder().withLifecycle(MarketOrderStatus.FILLED, 0L, 1L, 0L, Instant.now()));
+
+        try {
+            service.cancelSellOrder(new CancelSellOrderCommand("req-filled-cancel", "player-a", "test-server",
+                created.getOrder().getOrderId()));
+            fail("expected filled order cancellation to be rejected");
+        } catch (MarketOperationException expected) {
+            assertEquals("order is not cancellable in current status", expected.getMessage());
+        }
+
+        assertEquals(MarketOrderStatus.FILLED,
+            orderRepository.findById(created.getOrder().getOrderId()).get().getStatus());
+        assertEquals(MarketOperationStatus.FAILED,
+            operationLogRepository.findByRequestId("req-filled-cancel").get().getStatus());
+    }
+
+    @Test
     public void depositInventoryCreatesAvailableCustodyAndListsAvailableAssets() {
         FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
         FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
@@ -251,6 +278,26 @@ public class StandardizedSpotMarketServiceTest {
     }
 
     @Test
+    public void createBuyOrderKeepsLongTerminalRequestBusinessReferenceWithinBankLimit() {
+        FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
+        FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
+        FakeMarketOperationLogRepository operationLogRepository = new FakeMarketOperationLogRepository();
+        FakeMarketTradeRecordRepository tradeRecordRepository = new FakeMarketTradeRecordRepository();
+        FakeMarketSettlementFacade settlementFacade = new FakeMarketSettlementFacade();
+        settlementFacade.registerPlayer("buyer");
+        StandardizedSpotMarketService service = createService(orderRepository, custodyRepository,
+            operationLogRepository, tradeRecordRepository, new DirectMarketTransactionRunner(), settlementFacade);
+
+        String terminalRequestId = "terminal-market-buy:12345678-1234-1234-1234-123456789012";
+        service.createBuyOrder(new CreateBuyOrderCommand(terminalRequestId, "buyer", "test-server",
+            "minecraft:stone:0", 1L, true, 100L));
+
+        assertEquals(1, settlementFacade.freezeCommands.size());
+        assertTrue(settlementFacade.freezeCommands.get(0).getBusinessRef().length() <= 64);
+        assertEquals(terminalRequestId + ":freeze", settlementFacade.freezeCommands.get(0).getRequestId());
+    }
+
+    @Test
     public void matchingBuyAndSellGeneratesTradeAndClaimableAsset() {
         FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
         FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
@@ -309,6 +356,49 @@ public class StandardizedSpotMarketServiceTest {
         assertEquals(MarketOperationStatus.RECOVERY_REQUIRED, escalated.get(0).getStatus());
         assertEquals(MarketOrderStatus.EXCEPTION, orderRepository.findById(order.getOrderId()).get().getStatus());
         assertEquals(MarketCustodyStatus.EXCEPTION, custodyRepository.findById(custody.getCustodyId()).get().getStatus());
+    }
+
+    @Test
+    public void recoveryServiceCompletesExchangeOperationWhenFormalSettlementExists() {
+        FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
+        FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
+        FakeMarketOperationLogRepository operationLogRepository = new FakeMarketOperationLogRepository();
+        FakeMarketSettlementFacade settlementFacade = new FakeMarketSettlementFacade();
+        settlementFacade.exchangeSettlementPresent = true;
+        operationLogRepository.save(new MarketOperationLog(0L, "req-exchange-settled",
+            MarketOperationType.EXCHANGE_EXECUTION, MarketOperationStatus.PROCESSING, "test-server", "player-a",
+            "exchange-execution|registry=dreamcraft:item.CoinMiner", MarketRecoveryMetadata.builder()
+                .put("mode", "exchange-execution").put("physicalInputState", "PENDING_REMOVAL").build().toKey(),
+            0L, 0L, 0L, "stuck exchange", Instant.now(), Instant.now()));
+
+        MarketRecoveryService recoveryService = new MarketRecoveryService(orderRepository, custodyRepository,
+            operationLogRepository, new DirectMarketTransactionRunner(), settlementFacade);
+        List<MarketOperationLog> recovered = recoveryService.scanAndEscalateIncompleteOperations(10);
+
+        assertEquals(1, recovered.size());
+        assertEquals(MarketOperationStatus.COMPLETED, recovered.get(0).getStatus());
+        assertTrue(recovered.get(0).getMessage().contains("formal bank settlement"));
+    }
+
+    @Test
+    public void recoveryServiceEscalatesUnconfirmedExchangeInputForManualReconciliation() {
+        FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
+        FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
+        FakeMarketOperationLogRepository operationLogRepository = new FakeMarketOperationLogRepository();
+        FakeMarketSettlementFacade settlementFacade = new FakeMarketSettlementFacade();
+        operationLogRepository.save(new MarketOperationLog(0L, "req-exchange-unknown",
+            MarketOperationType.EXCHANGE_EXECUTION, MarketOperationStatus.PROCESSING, "test-server", "player-a",
+            "exchange-execution|registry=dreamcraft:item.CoinMiner", MarketRecoveryMetadata.builder()
+                .put("mode", "exchange-execution").put("physicalInputState", "PENDING_REMOVAL").build().toKey(),
+            0L, 0L, 0L, "stuck exchange", Instant.now(), Instant.now()));
+
+        MarketRecoveryService recoveryService = new MarketRecoveryService(orderRepository, custodyRepository,
+            operationLogRepository, new DirectMarketTransactionRunner(), settlementFacade);
+        List<MarketOperationLog> recovered = recoveryService.scanAndEscalateIncompleteOperations(10);
+
+        assertEquals(1, recovered.size());
+        assertEquals(MarketOperationStatus.RECOVERY_REQUIRED, recovered.get(0).getStatus());
+        assertTrue(recovered.get(0).getMessage().contains("reconcile"));
     }
 
     @Test
@@ -772,6 +862,12 @@ public class StandardizedSpotMarketServiceTest {
         private final List<InternalTransferCommand> settleCommands = new ArrayList<InternalTransferCommand>();
         private final List<InternalTransferCommand> taxCommands = new ArrayList<InternalTransferCommand>();
         private long nextAccountId = 1L;
+        private boolean exchangeSettlementPresent;
+
+        @Override
+        public boolean hasBankTransactionForRequest(String requestId) {
+            return exchangeSettlementPresent;
+        }
 
         private void registerPlayer(String playerRef) {
             playerAccounts.put(playerRef, newAccount(nextAccountId++, playerRef));

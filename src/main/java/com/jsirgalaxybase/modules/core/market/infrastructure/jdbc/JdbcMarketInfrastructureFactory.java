@@ -39,6 +39,7 @@ public final class JdbcMarketInfrastructureFactory {
         "market_custody_inventory",
         "market_operation_log",
         "market_trade_record",
+        "standardized_market_catalog",
         "custom_market_listing",
         "custom_market_item_snapshot",
         "custom_market_trade_record",
@@ -150,6 +151,11 @@ public final class JdbcMarketInfrastructureFactory {
             "sell_order_id",
             "operation_id",
             "created_at"
+        });
+        columns.put("standardized_market_catalog", new String[] {
+            "product_key", "registry_name", "meta", "display_name", "unit_label", "reference_price", "stackable", "enabled",
+            "sort_order", "catalog_version", "category_code", "admission_basis", "source_entry_label",
+            "created_at", "updated_at"
         });
         columns.put("custom_market_listing", new String[] {
             "listing_id",

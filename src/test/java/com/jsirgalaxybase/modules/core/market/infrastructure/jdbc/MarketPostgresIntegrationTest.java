@@ -34,6 +34,7 @@ import com.jsirgalaxybase.modules.core.banking.infrastructure.jdbc.JdbcConnectio
 import com.jsirgalaxybase.modules.core.market.application.MarketRecoveryMetadata;
 import com.jsirgalaxybase.modules.core.market.application.MarketRecoveryService;
 import com.jsirgalaxybase.modules.core.market.application.MarketSettlementFacade;
+import com.jsirgalaxybase.modules.core.market.application.MarketClaimDeliveryException;
 import com.jsirgalaxybase.modules.core.market.application.MarketOperationException;
 import com.jsirgalaxybase.modules.core.market.application.CustomMarketService;
 import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketAdmissionDecision;
@@ -292,6 +293,54 @@ public class MarketPostgresIntegrationTest {
     }
 
     @Test
+    public void safeClaimDeliveryFailureRestoresClaimableAndFailsOperationAfterTransactionRollback() {
+        RecordingSettlementFacade settlementFacade = new RecordingSettlementFacade();
+        settlementFacade.registerPlayer("buyer");
+        settlementFacade.registerPlayer("player-safe-claim");
+        StandardizedSpotMarketService matchingService = createService(marketInfrastructure,
+            marketInfrastructure.getTransactionRunner(), settlementFacade, null);
+
+        matchingService.depositInventory(new DepositMarketInventoryCommand("req-market-safe-claim-sell-deposit",
+            "player-safe-claim", "test-server", "minecraft:stone:0", 3L, true));
+        matchingService.createBuyOrder(new CreateBuyOrderCommand("req-market-safe-claim-buy", "buyer", "test-server",
+            "minecraft:stone:0", 3L, true, 14L));
+        StandardizedSpotMarketService.CreateSellOrderResult created = matchingService.createSellOrder(
+            new CreateSellOrderCommand("req-market-safe-claim-sell", "player-safe-claim", "test-server",
+                "minecraft:stone:0", 3L, true, 14L));
+
+        StandardizedSpotMarketService claimService = createService(marketInfrastructure,
+            marketInfrastructure.getTransactionRunner(), null, new SafeFailingClaimDeliveryPort());
+        long custodyId = created.getClaimableAssets().get(0).getCustodyId();
+
+        try {
+            claimService.claimMarketAsset(new ClaimMarketAssetCommand("req-market-safe-claim", "buyer", "test-server",
+                custodyId));
+            fail("expected safe claim delivery failure");
+        } catch (MarketClaimDeliveryException expected) {
+            assertTrue(expected.isSafeToRestoreClaimable());
+        }
+
+        MarketCustodyInventory storedCustody = marketInfrastructure.getCustodyInventoryRepository().findById(custodyId)
+            .orElseThrow(new java.util.function.Supplier<AssertionError>() {
+
+                @Override
+                public AssertionError get() {
+                    return new AssertionError("claim custody was not persisted");
+                }
+            });
+        MarketOperationLog storedOperation = marketInfrastructure.getOperationLogRepository()
+            .findByRequestId("req-market-safe-claim").orElseThrow(new java.util.function.Supplier<AssertionError>() {
+
+                @Override
+                public AssertionError get() {
+                    return new AssertionError("claim operation was not persisted");
+                }
+            });
+        assertEquals(MarketCustodyStatus.CLAIMABLE, storedCustody.getStatus());
+        assertEquals(MarketOperationStatus.FAILED, storedOperation.getStatus());
+    }
+
+    @Test
     public void customPublishPersistsSnapshotAndAuditOnPostgres() {
         CustomMarketService.PublishListingResult result = customMarketService.publishListing(
             new PublishCustomMarketListingCommand("req-custom-market-pg-publish", "seller-a", "test-server",
@@ -545,6 +594,16 @@ public class MarketPostgresIntegrationTest {
             com.jsirgalaxybase.modules.core.market.domain.StandardizedMarketProduct product, boolean stackable,
             long quantity) {
             deliveries.add(deliveryRequestId + "|" + playerRef + "|" + product.getProductKey() + "|" + quantity);
+        }
+    }
+
+    private static final class SafeFailingClaimDeliveryPort implements MarketClaimDeliveryPort {
+
+        @Override
+        public void deliver(String deliveryRequestId, String playerRef, String sourceServerId,
+            com.jsirgalaxybase.modules.core.market.domain.StandardizedMarketProduct product, boolean stackable,
+            long quantity) {
+            throw new MarketClaimDeliveryException("inventory is full", true);
         }
     }
 

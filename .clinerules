@@ -1,0 +1,73 @@
+# JsirGalaxyBase Workspace Rules
+
+## Scope
+
+- Repository: `/media/u24/data/gtnh/JsirGalaxyBase`
+- Main areas: terminal UI, ServerTools / cluster travel, market, banking, PostgreSQL persistence, gray-server validation
+
+## Working Style
+
+- Read current code and docs before changing behavior.
+- Keep edits tightly scoped to the requested feature.
+- Do not revert unrelated user or prior-AI changes.
+- Update `docs/WORKLOG.md` after meaningful code or product-document changes.
+
+## Current Product Direction
+
+- The terminal is the comprehensive intelligent console for the group server, not just a shell UI.
+- Near-term priorities:
+  1. ServerTools / group-server terminal page
+  2. Market workflow completion and terminal usability
+  3. Terminal status, notifications, confirmations, and player-facing explanations
+- Cosmetic UI tuning is secondary unless it blocks usability or business workflows.
+
+## Terminal / ServerTools Constraints
+
+- For transport work, reuse the existing backend chain:
+  - `PlayerTeleportService.prepareWarpTeleport(...)`
+  - `ServerToolsModule.dispatchTeleport(...)`
+- Do not reimplement teleport business logic if the existing service chain already covers the behavior.
+- If the request is warp-only v1, do not expand into `home/back/spawn/rtp/tpa` or unrelated bank/market behavior.
+- Gate teleport-triggering terminal actions behind a confirmation popup. Confirm actions must not dispatch immediately on first click.
+- Keep page names concise and in-game native, such as `传送` and `群组服`.
+- Preserve existing terminal layout work in shared shell files. Do not roll back responsive shell fixes while implementing adjacent features.
+
+## Server Safety
+
+- Do not touch S1 unless the user explicitly approves it.
+- Treat Entrance / Lobby / S2 as the current gray chain unless current docs or the user say otherwise.
+- Do not stop or kill remote-access, proxy, or system connectivity services.
+
+## Documentation First
+
+- Read these first when relevant:
+  - `docs/current-product-direction-and-gap-review-2026-05-18.md`
+  - `docs/README.md`
+  - `docs/WORKLOG.md`
+- Treat old phase prompt docs as historical context, not authoritative current status.
+
+## Build And Test
+
+- The host environment may not have `JAVA_HOME` or `java` configured correctly.
+- Do not ask Cline or DeepSeek running in Cline to invoke Docker-based Gradle builds for this repo.
+- Docker Gradle runs may stall or hang in the Cline execution environment and should be treated as disallowed there.
+- If compile or test verification is required and local Java is unavailable, hand the build step back to Codex instead of attempting Docker fallback inside Cline.
+- For targeted verification, prefer narrow test selection before broad suites.
+- Use `git diff --check` as a cheap hygiene check, but do not claim compile/test success if compilation never ran.
+
+## Client / Deployment Notes
+
+- GTNH client instance path:
+  - `/media/u24/data/gtnh/client-tools/prism/instances/GT New Horizons 2.8.4`
+- If a new jar must be validated in client, replace the jar in the instance `mods` directory only after a successful build.
+- Prefer opening the game client for the user instead of asking them to reconstruct launch steps.
+
+## Output Quality
+
+- State assumptions explicitly.
+- Separate confirmed behavior from planned behavior.
+- When reporting validation, distinguish:
+  - static code review
+  - targeted tests
+  - full compile / assemble
+  - in-game verification

@@ -6,6 +6,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 import com.jsirgalaxybase.modules.cluster.domain.TeleportTarget;
@@ -92,6 +94,29 @@ public class JdbcTeleportTicketRepository extends AbstractJdbcRepository impleme
                     statement.setTimestamp(4, java.sql.Timestamp.from(now));
                     try (ResultSet resultSet = statement.executeQuery()) {
                         return resultSet.next() ? Optional.of(mapTicket(resultSet)) : Optional.<TransferTicket>empty();
+                    }
+                }
+            }
+        });
+    }
+
+    @Override
+    public List<TransferTicket> findRecentForPlayer(final String playerUuid, final int limit) {
+        final int safeLimit = limit <= 0 ? 1 : Math.min(limit, 10);
+        return connectionManager.withConnection(new JdbcConnectionCallback<List<TransferTicket>>() {
+
+            @Override
+            public List<TransferTicket> doInConnection(Connection connection) throws SQLException {
+                try (PreparedStatement statement = connection.prepareStatement(
+                    "SELECT ticket_id, request_id, player_uuid, player_name, teleport_kind, source_server_id, target_server_id, target_dimension_id, target_x, target_y, target_z, target_yaw, target_pitch, status, status_message, created_at, expires_at, updated_at FROM cluster_transfer_ticket WHERE player_uuid = ? ORDER BY updated_at DESC, created_at DESC LIMIT ?")) {
+                    statement.setString(1, playerUuid);
+                    statement.setInt(2, safeLimit);
+                    try (ResultSet resultSet = statement.executeQuery()) {
+                        List<TransferTicket> tickets = new ArrayList<TransferTicket>();
+                        while (resultSet.next()) {
+                            tickets.add(mapTicket(resultSet));
+                        }
+                        return tickets;
                     }
                 }
             }

@@ -144,6 +144,15 @@ public class PlayerArrivalRestoreServiceTest {
         }
 
         @Override
+        public List<TransferTicket> findRecentForPlayer(String playerUuid, int limit) {
+            List<TransferTicket> tickets = new ArrayList<TransferTicket>();
+            if (activeTicket != null && activeTicket.getPlayerUuid().equals(playerUuid)) {
+                tickets.add(activeTicket);
+            }
+            return tickets;
+        }
+
+        @Override
         public int expireActiveTickets(Instant now) {
             expireCalls++;
             if (activeTicket != null && (activeTicket.getStatus() == TransferTicketStatus.PENDING_GATEWAY

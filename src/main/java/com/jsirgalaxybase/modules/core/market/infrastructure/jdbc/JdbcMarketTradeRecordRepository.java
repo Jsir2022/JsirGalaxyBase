@@ -5,6 +5,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import com.jsirgalaxybase.modules.core.banking.infrastructure.jdbc.AbstractJdbcRepository;
@@ -124,6 +125,48 @@ public class JdbcMarketTradeRecordRepository extends AbstractJdbcRepository impl
         return findTrades(
             "SELECT * FROM market_trade_record WHERE product_key = ? AND created_at >= ? ORDER BY created_at DESC, trade_id DESC LIMIT ?",
             productKey, since, sanitizeLimit(limit));
+    }
+
+    @Override
+    public List<MarketTradeRecord> findByProductKeysSince(final List<String> productKeys, final Instant since,
+        final int limit) {
+        if (productKeys == null || productKeys.isEmpty()) {
+            return Collections.emptyList();
+        }
+        final List<String> keys = new ArrayList<String>();
+        for (String key : productKeys) {
+            if (key != null && !key.trim().isEmpty() && !keys.contains(key.trim())) {
+                keys.add(key.trim());
+            }
+        }
+        if (keys.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return connectionManager.withConnection(new JdbcConnectionCallback<List<MarketTradeRecord>>() {
+            @Override
+            public List<MarketTradeRecord> doInConnection(java.sql.Connection connection) throws SQLException {
+                StringBuilder placeholders = new StringBuilder();
+                for (int index = 0; index < keys.size(); index++) {
+                    if (index > 0) { placeholders.append(','); }
+                    placeholders.append('?');
+                }
+                PreparedStatement statement = connection.prepareStatement(
+                    "SELECT * FROM market_trade_record WHERE product_key IN (" + placeholders
+                        + ") AND created_at >= ? ORDER BY created_at DESC, trade_id DESC LIMIT ?");
+                try {
+                    int parameter = 1;
+                    for (String key : keys) { statement.setString(parameter++, key); }
+                    statement.setTimestamp(parameter++, java.sql.Timestamp.from(since == null ? Instant.EPOCH : since));
+                    statement.setInt(parameter, sanitizeLimit(limit));
+                    ResultSet resultSet = statement.executeQuery();
+                    try {
+                        List<MarketTradeRecord> trades = new ArrayList<MarketTradeRecord>();
+                        while (resultSet.next()) { trades.add(mapTrade(resultSet)); }
+                        return trades;
+                    } finally { resultSet.close(); }
+                } finally { statement.close(); }
+            }
+        });
     }
 
     @Override

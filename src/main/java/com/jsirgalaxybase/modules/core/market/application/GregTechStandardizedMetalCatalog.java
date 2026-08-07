@@ -96,11 +96,11 @@ public class GregTechStandardizedMetalCatalog implements StandardizedMarketCatal
         if (!ALLOWED_PREFIXES.contains(prefixName)) {
             return Optional.empty();
         }
-        boolean hasMetalItems = invokeBoolean(material, "hasMetalItems");
+        Boolean hasMetalItems = invokeOptionalBoolean(material, "hasMetalItems");
         Object metalTag = readStaticField("gregtech.api.enums.SubTag", "METAL");
         boolean taggedMetal = metalTag != null && invokeBoolean(material, "contains",
             new Class<?>[] { metalTag.getClass() }, metalTag);
-        if (!hasMetalItems && !taggedMetal) {
+        if (!Boolean.TRUE.equals(hasMetalItems) && !taggedMetal) {
             return Optional.empty();
         }
 
@@ -113,7 +113,7 @@ public class GregTechStandardizedMetalCatalog implements StandardizedMarketCatal
         try {
             return Class.forName(className).getMethod(methodName, parameterTypes).invoke(null, args);
         } catch (Exception exception) {
-            throw new MarketOperationException("failed to inspect GregTech standardized metal metadata");
+            throw inspectionFailure("calling " + className + "." + methodName, exception);
         }
     }
 
@@ -126,7 +126,18 @@ public class GregTechStandardizedMetalCatalog implements StandardizedMarketCatal
             Object value = target.getClass().getMethod(methodName, parameterTypes).invoke(target, args);
             return value instanceof Boolean && ((Boolean) value).booleanValue();
         } catch (Exception exception) {
-            throw new MarketOperationException("failed to inspect GregTech standardized metal metadata");
+            throw inspectionFailure("calling " + target.getClass().getName() + "." + methodName, exception);
+        }
+    }
+
+    private Boolean invokeOptionalBoolean(Object target, String methodName) {
+        try {
+            Object value = target.getClass().getMethod(methodName).invoke(target);
+            return value instanceof Boolean ? (Boolean) value : Boolean.FALSE;
+        } catch (NoSuchMethodException exception) {
+            return null;
+        } catch (Exception exception) {
+            throw inspectionFailure("calling optional " + target.getClass().getName() + "." + methodName, exception);
         }
     }
 
@@ -134,7 +145,7 @@ public class GregTechStandardizedMetalCatalog implements StandardizedMarketCatal
         try {
             return target.getClass().getField(fieldName).get(target);
         } catch (Exception exception) {
-            throw new MarketOperationException("failed to inspect GregTech standardized metal metadata");
+            throw inspectionFailure("reading " + target.getClass().getName() + "." + fieldName, exception);
         }
     }
 
@@ -142,8 +153,17 @@ public class GregTechStandardizedMetalCatalog implements StandardizedMarketCatal
         try {
             return Class.forName(className).getField(fieldName).get(null);
         } catch (Exception exception) {
-            throw new MarketOperationException("failed to inspect GregTech standardized metal metadata");
+            throw inspectionFailure("reading " + className + "." + fieldName, exception);
         }
+    }
+
+    private MarketOperationException inspectionFailure(String action, Exception exception) {
+        String detail = exception.getMessage();
+        if (detail == null || detail.trim().isEmpty()) {
+            detail = exception.getClass().getSimpleName();
+        }
+        return new MarketOperationException("failed to inspect GregTech standardized metal metadata while " + action
+            + ": " + detail);
     }
 
     protected Item resolveItem(StandardizedMarketProduct product) {

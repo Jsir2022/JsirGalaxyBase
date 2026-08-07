@@ -133,21 +133,21 @@ public class TerminalHomeScreenModel {
 
     private static List<NavItemModel> defaultNavItems(String selectedPageId) {
         List<NavItemModel> defaults = new ArrayList<NavItemModel>();
-        defaults.add(new NavItemModel("home", "首页", "总览", true, "home".equals(selectedPageId)));
-        defaults.add(new NavItemModel("career", "职业", "职业页", true, "career".equals(selectedPageId)));
-        defaults.add(new NavItemModel("public_service", "公共", "公共页", true, "public_service".equals(selectedPageId)));
-        defaults.add(new NavItemModel("market", "市场", "总入口", true, "market".equals(selectedPageId)));
-        defaults.add(new NavItemModel("bank", "银行", "银行页", true, "bank".equals(selectedPageId)));
+        defaults.add(new NavItemModel("home", "首页", "", true, "home".equals(selectedPageId)));
+        defaults.add(new NavItemModel("market", "市场", "三市场入口", true, "market".equals(selectedPageId)));
+        defaults.add(new NavItemModel("bank", "银行", "", true, "bank".equals(selectedPageId)));
+        defaults.add(new NavItemModel("server_tools", "传送", "", true, "server_tools".equals(selectedPageId)));
+        defaults.add(new NavItemModel("vault", "仓库", "保险箱", true, "vault".equals(selectedPageId)));
         return defaults;
     }
 
     private static List<PageSnapshotModel> defaultPageSnapshots() {
         List<PageSnapshotModel> defaults = new ArrayList<PageSnapshotModel>();
         defaults.add(PageSnapshotModel.placeholder(TerminalPage.HOME));
-        defaults.add(PageSnapshotModel.placeholder(TerminalPage.CAREER));
-        defaults.add(PageSnapshotModel.placeholder(TerminalPage.PUBLIC_SERVICE));
         defaults.add(PageSnapshotModel.placeholder(TerminalPage.MARKET));
         defaults.add(PageSnapshotModel.placeholder(TerminalPage.BANK));
+        defaults.add(PageSnapshotModel.placeholder(TerminalPage.SERVER_TOOLS));
+        defaults.add(PageSnapshotModel.placeholder(TerminalPage.VAULT));
         return defaults;
     }
 
@@ -170,10 +170,10 @@ public class TerminalHomeScreenModel {
         List<PageSnapshotModel> normalized = new ArrayList<PageSnapshotModel>();
         TerminalPage[] topLevelPages = new TerminalPage[] {
             TerminalPage.HOME,
-            TerminalPage.CAREER,
-            TerminalPage.PUBLIC_SERVICE,
             TerminalPage.MARKET,
-            TerminalPage.BANK };
+            TerminalPage.BANK,
+            TerminalPage.SERVER_TOOLS,
+            TerminalPage.VAULT };
         for (TerminalPage page : topLevelPages) {
             normalized.add(findPageSnapshot(pageSnapshots, page));
         }
@@ -315,6 +315,7 @@ public class TerminalHomeScreenModel {
         private final TerminalMarketSectionModel marketSectionModel;
         private final TerminalCustomMarketSectionModel customMarketSectionModel;
         private final TerminalExchangeMarketSectionModel exchangeMarketSectionModel;
+        private final TerminalServerToolsSectionModel serverToolsSectionModel;
 
         public PageSnapshotModel(String pageId, String title, String lead, List<SectionModel> sections) {
             this(pageId, title, lead, sections, null, null);
@@ -334,6 +335,15 @@ public class TerminalHomeScreenModel {
             TerminalBankSectionModel bankSectionModel, TerminalMarketSectionModel marketSectionModel,
             TerminalCustomMarketSectionModel customMarketSectionModel,
             TerminalExchangeMarketSectionModel exchangeMarketSectionModel) {
+            this(pageId, title, lead, sections, bankSectionModel, marketSectionModel, customMarketSectionModel,
+                exchangeMarketSectionModel, null);
+        }
+
+        public PageSnapshotModel(String pageId, String title, String lead, List<SectionModel> sections,
+            TerminalBankSectionModel bankSectionModel, TerminalMarketSectionModel marketSectionModel,
+            TerminalCustomMarketSectionModel customMarketSectionModel,
+            TerminalExchangeMarketSectionModel exchangeMarketSectionModel,
+            TerminalServerToolsSectionModel serverToolsSectionModel) {
             this.pageId = TerminalPage.fromId(normalize(pageId, "home")).toTopLevelPageId();
             TerminalPage page = TerminalPage.fromId(this.pageId);
             this.title = normalize(title, page.getTitle());
@@ -348,6 +358,9 @@ public class TerminalHomeScreenModel {
                 : marketSectionModel;
             this.customMarketSectionModel = page == TerminalPage.MARKET ? customMarketSectionModel : customMarketSectionModel;
             this.exchangeMarketSectionModel = page == TerminalPage.MARKET ? exchangeMarketSectionModel : exchangeMarketSectionModel;
+            this.serverToolsSectionModel = page == TerminalPage.SERVER_TOOLS
+                ? (serverToolsSectionModel == null ? TerminalServerToolsSectionModel.placeholder() : serverToolsSectionModel)
+                : serverToolsSectionModel;
         }
 
         public static PageSnapshotModel placeholder(TerminalPage page) {
@@ -365,7 +378,8 @@ public class TerminalHomeScreenModel {
                     resolvedPage == TerminalPage.BANK ? TerminalBankSectionModel.placeholder() : null,
                     resolvedPage == TerminalPage.MARKET ? TerminalMarketSectionModel.placeholder(TerminalPage.MARKET.getId()) : null,
                     null,
-                    null);
+                    null,
+                    resolvedPage == TerminalPage.SERVER_TOOLS ? TerminalServerToolsSectionModel.placeholder() : null);
         }
 
         public String getPageId() {
@@ -414,6 +428,14 @@ public class TerminalHomeScreenModel {
 
         public boolean hasExchangeMarketSectionModel() {
             return exchangeMarketSectionModel != null;
+        }
+
+        public TerminalServerToolsSectionModel getServerToolsSectionModel() {
+            return serverToolsSectionModel;
+        }
+
+        public boolean hasServerToolsSectionModel() {
+            return serverToolsSectionModel != null;
         }
     }
 

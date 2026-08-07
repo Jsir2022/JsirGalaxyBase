@@ -6,6 +6,7 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import java.util.Optional;
+import java.util.Arrays;
 
 import net.minecraft.item.ItemStack;
 
@@ -59,11 +60,57 @@ public class StandardizedMarketCatalogServiceTest {
         assertTrue(decision.getDetailMessage().contains("真实物品堆"));
     }
 
-    private static final class FakeCatalogSource implements StandardizedMarketCatalogSource {
+    @Test
+    public void databaseStyleCatalogSourceExposesStableBrowsePage() {
+        StandardizedMarketCatalogService catalog = new StandardizedMarketCatalogService(
+            new StandardizedMarketCatalogVersion("catalog-v1", "目录 v1"), new BrowseableFakeCatalogSource());
+
+        StandardizedMarketCatalogPage page = catalog.browse("steel", 1, 2);
+
+        assertEquals("steel", page.getQuery());
+        assertEquals(1, page.getPageIndex());
+        assertEquals(2, page.getPageSize());
+        assertEquals(3, page.getTotalEntries());
+        assertTrue(page.hasPreviousPage());
+        assertFalse(page.hasNextPage());
+        assertEquals("Steel Ingot", page.getEntries().get(0).getDisplayName());
+        assertEquals("ingot", page.getEntries().get(0).getUnitLabel());
+    }
+
+    @Test
+    public void disabledProductIsNeitherBrowsableNorAdmitted() {
+        StandardizedMarketCatalogService catalog = new StandardizedMarketCatalogService(
+            new StandardizedMarketCatalogVersion("catalog-v1", "目录 v1"), new DisabledCatalogSource());
+
+        StandardizedMarketCatalogPage page = catalog.browse("iron", 0, 8);
+        StandardizedMarketAdmissionDecision decision = catalog.evaluateProduct("minecraft:iron_ingot:0");
+
+        assertEquals(0, page.getTotalEntries());
+        assertFalse(page.hasNextPage());
+        assertFalse(decision.isAdmitted());
+        assertEquals(StandardizedMarketAdmissionReason.CATALOG_BOUNDARY_REJECTED, decision.getReason());
+    }
+
+    @Test
+    public void emptyCatalogueKeepsStablePageContract() {
+        StandardizedMarketCatalogService catalog = new StandardizedMarketCatalogService(
+            new StandardizedMarketCatalogVersion("catalog-v1", "目录 v1"), new DisabledCatalogSource());
+
+        StandardizedMarketCatalogPage page = catalog.browse("missing", 9, 8);
+
+        assertEquals("missing", page.getQuery());
+        assertEquals(0, page.getPageIndex());
+        assertEquals(8, page.getPageSize());
+        assertEquals(0, page.getEntries().size());
+        assertFalse(page.hasPreviousPage());
+        assertFalse(page.hasNextPage());
+    }
+
+    private static class FakeCatalogSource implements StandardizedMarketCatalogSource {
 
         private final boolean admitted;
 
-        private FakeCatalogSource(boolean admitted) {
+        protected FakeCatalogSource(boolean admitted) {
             this.admitted = admitted;
         }
 
@@ -92,6 +139,37 @@ public class StandardizedMarketCatalogServiceTest {
                 return Optional.empty();
             }
             return findEntryByProductKey("minecraft:iron_ingot:0");
+        }
+    }
+
+    private static final class BrowseableFakeCatalogSource extends FakeCatalogSource
+        implements StandardizedMarketCatalogBrowser {
+
+        private BrowseableFakeCatalogSource() {
+            super(true);
+        }
+
+        @Override
+        public StandardizedMarketCatalogPage browse(String query, int pageIndex, int pageSize) {
+            StandardizedMarketCatalogEntry entry = new StandardizedMarketCatalogEntry(
+                new StandardizedMarketProduct("gregtech:steel_ingot", 0), "metal", "管理员目录准入", "test",
+                "Steel Ingot", "ingot", 20, "catalog-v1");
+            return new StandardizedMarketCatalogPage(query, pageIndex, pageSize, 3,
+                Arrays.asList(entry));
+        }
+    }
+
+    private static final class DisabledCatalogSource extends FakeCatalogSource
+        implements StandardizedMarketCatalogBrowser {
+
+        private DisabledCatalogSource() {
+            super(false);
+        }
+
+        @Override
+        public StandardizedMarketCatalogPage browse(String query, int pageIndex, int pageSize) {
+            return new StandardizedMarketCatalogPage(query, 0, pageSize, 0,
+                java.util.Collections.<StandardizedMarketCatalogEntry>emptyList());
         }
     }
 }

@@ -20,6 +20,11 @@ public interface MarketTradeRecordRepository {
         return Collections.emptyList();
     }
 
+    /** One page-level history read for terminal browse summaries. */
+    default List<MarketTradeRecord> findByProductKeysSince(List<String> productKeys, Instant since, int limit) {
+        return Collections.emptyList();
+    }
+
     default List<String> findDistinctProductKeys(int limit) {
         return Collections.emptyList();
     }

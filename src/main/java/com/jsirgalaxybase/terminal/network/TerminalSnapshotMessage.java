@@ -8,12 +8,14 @@ import com.jsirgalaxybase.terminal.TerminalCustomMarketSectionSnapshot;
 import com.jsirgalaxybase.terminal.TerminalExchangeMarketSectionSnapshot;
 import com.jsirgalaxybase.terminal.TerminalMarketSectionSnapshot;
 import com.jsirgalaxybase.terminal.TerminalOpenApproval;
+import com.jsirgalaxybase.terminal.TerminalServerToolsSectionSnapshot;
 import com.jsirgalaxybase.terminal.client.TerminalClientScreenController;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalBankSectionModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalCustomMarketSectionModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalExchangeMarketSectionModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalHomeScreenModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel;
+import com.jsirgalaxybase.terminal.client.viewmodel.TerminalServerToolsSectionModel;
 
 import cpw.mods.fml.common.network.ByteBufUtils;
 import cpw.mods.fml.common.network.simpleimpl.IMessage;
@@ -133,9 +135,42 @@ public class TerminalSnapshotMessage implements IMessage {
                 toBankSectionModel(snapshot.getBankSectionSnapshot()),
                 toMarketSectionModel(snapshot.getMarketSectionSnapshot()),
                 toCustomMarketSectionModel(snapshot.getCustomMarketSectionSnapshot()),
-                toExchangeMarketSectionModel(snapshot.getExchangeMarketSectionSnapshot())));
+                toExchangeMarketSectionModel(snapshot.getExchangeMarketSectionSnapshot()),
+                toServerToolsSectionModel(snapshot.getServerToolsSectionSnapshot())));
         }
         return models;
+    }
+
+    private static TerminalServerToolsSectionModel toServerToolsSectionModel(TerminalServerToolsSectionSnapshot snapshot) {
+        if (snapshot == null) {
+            return null;
+        }
+        return new TerminalServerToolsSectionModel(
+            snapshot.getServiceState(),
+            snapshot.getCurrentServerId(),
+            snapshot.getServerLines(),
+            snapshot.getServerIds(),
+            snapshot.getWarpLines(),
+            snapshot.getWarpNames(),
+            snapshot.getWarpSubtitles(),
+            snapshot.getWarpStateLabels(),
+            snapshot.getRecentTransferLines(),
+            snapshot.getSelectedWarpName(),
+            snapshot.getSelectedWarpTitle(),
+            snapshot.getSelectedWarpDetail(),
+            snapshot.getSelectedTargetServerId(),
+            snapshot.getSelectedTargetLocation(),
+            snapshot.getSelectedWarpDescription(),
+            snapshot.isSelectedWarpEnabled(),
+            snapshot.getRecentSourceServerId(),
+            snapshot.getRecentTargetServerId(),
+            snapshot.getRecentTransferStatus(),
+            snapshot.getRecentTransferTime(),
+            snapshot.getRecentTransferSummary(),
+            new TerminalServerToolsSectionModel.ActionFeedbackModel(
+                snapshot.getActionFeedback().getTitle(),
+                snapshot.getActionFeedback().getBody(),
+                snapshot.getActionFeedback().getSeverityName()));
     }
 
     private static TerminalCustomMarketSectionModel toCustomMarketSectionModel(
@@ -149,10 +184,13 @@ public class TerminalSnapshotMessage implements IMessage {
             snapshot.getScopeLabel(),
             snapshot.getActiveListingLines(),
             snapshot.getActiveListingIds(),
+            snapshot.getActiveListingIconRefs(),
             snapshot.getSellingListingLines(),
             snapshot.getSellingListingIds(),
+            snapshot.getSellingListingIconRefs(),
             snapshot.getPendingListingLines(),
             snapshot.getPendingListingIds(),
+            snapshot.getPendingListingIconRefs(),
             snapshot.getSelectedListingId(),
             snapshot.getSelectedTitle(),
             snapshot.getSelectedPrice(),
@@ -253,6 +291,8 @@ public class TerminalSnapshotMessage implements IMessage {
             snapshot.getLatestTradePrice(),
             snapshot.getHighestBid(),
             snapshot.getLowestAsk(),
+            snapshot.getBestBidQuantity(),
+            snapshot.getBestAskQuantity(),
             snapshot.getVolume24h(),
             snapshot.getTurnover24h(),
             snapshot.getSourceAvailable(),
@@ -260,21 +300,90 @@ public class TerminalSnapshotMessage implements IMessage {
             snapshot.getClaimableQuantity(),
             snapshot.getFrozenFunds(),
             snapshot.getSummaryNotice(),
+            snapshot.getSourceMode(),
+            snapshot.getWarehouseNotice(),
+            snapshot.getLimitBuyPreview(),
+            snapshot.getLimitSellPreview(),
+            snapshot.getInstantBuyPreview(),
+            snapshot.getInstantSellPreview(),
             snapshot.getAskLines(),
             snapshot.getBidLines(),
             snapshot.getMyOrderLines(),
+            snapshot.getMyOrderIds(),
+            snapshot.getMyOrderCancelableFlags(),
             snapshot.getClaimLines(),
             snapshot.getClaimIds(),
             snapshot.getRuleLines(),
+            snapshot.isDepositEnabled(),
             new TerminalMarketSectionModel.LimitBuyDraftModel(
                 snapshot.getLimitBuyDraft().getSelectedProductKey(),
                 snapshot.getLimitBuyDraft().getPriceText(),
                 snapshot.getLimitBuyDraft().getQuantityText(),
                 snapshot.getLimitBuyDraft().isSubmitEnabled()),
+            new TerminalMarketSectionModel.LimitSellDraftModel(
+                snapshot.getLimitSellDraft().getSelectedProductKey(),
+                snapshot.getLimitSellDraft().getPriceText(),
+                snapshot.getLimitSellDraft().getQuantityText(),
+                snapshot.getLimitSellDraft().isSubmitEnabled()),
+            new TerminalMarketSectionModel.InstantDraftModel(
+                snapshot.getInstantBuyDraft().getSelectedProductKey(),
+                snapshot.getInstantBuyDraft().getQuantityText(),
+                snapshot.getInstantBuyDraft().isSubmitEnabled()),
+            new TerminalMarketSectionModel.InstantDraftModel(
+                snapshot.getInstantSellDraft().getSelectedProductKey(),
+                snapshot.getInstantSellDraft().getQuantityText(),
+                snapshot.getInstantSellDraft().isSubmitEnabled()),
             new TerminalMarketSectionModel.ActionFeedbackModel(
                 snapshot.getActionFeedback().getTitle(),
                 snapshot.getActionFeedback().getBody(),
-                snapshot.getActionFeedback().getSeverityName()));
+                snapshot.getActionFeedback().getSeverityName())).withCatalogPage(
+                    toCatalogProducts(snapshot),
+                    snapshot.getCatalogQuery(),
+                    snapshot.getCatalogPageIndex(),
+                    snapshot.getCatalogPageSize(),
+                    snapshot.getCatalogTotalEntries(),
+                    snapshot.hasCatalogPreviousPage(),
+                    snapshot.hasCatalogNextPage())
+                .withVaultAssets(toVaultAssets(snapshot));
+    }
+
+    private static List<TerminalMarketSectionModel.CatalogProductModel> toCatalogProducts(
+        TerminalMarketSectionSnapshot snapshot) {
+        List<TerminalMarketSectionModel.CatalogProductModel> models =
+            new ArrayList<TerminalMarketSectionModel.CatalogProductModel>();
+        for (TerminalMarketSectionSnapshot.CatalogProduct product : snapshot.getCatalogProducts()) {
+            models.add(new TerminalMarketSectionModel.CatalogProductModel(
+                product.getProductKey(), product.getRegistryName(), product.getMeta(), product.getDisplayName(),
+                product.getUnitLabel(), product.getSortOrder(), product.isEnabled(), product.getReferencePrice(),
+                product.getTradability(), toCatalogSummary(product.getMarketSummary())));
+        }
+        return models;
+    }
+
+    private static TerminalMarketSectionModel.CatalogMarketSummaryModel toCatalogSummary(
+        TerminalMarketSectionSnapshot.CatalogMarketSummary summary) {
+        List<TerminalMarketSectionModel.PricePointModel> points = new ArrayList<TerminalMarketSectionModel.PricePointModel>();
+        if (summary != null) {
+            for (TerminalMarketSectionSnapshot.PricePoint point : summary.getPricePoints()) {
+                points.add(new TerminalMarketSectionModel.PricePointModel(point.getPrice(), point.getQuantity(), point.getCreatedAtEpochSeconds()));
+            }
+            return new TerminalMarketSectionModel.CatalogMarketSummaryModel(summary.getLatestTrade(), summary.getBestBid(),
+                summary.getBestAsk(), summary.getVolume24h(), summary.getAvailable(), summary.getEscrow(),
+                summary.getClaimable(), summary.getDayChange(), points);
+        }
+        return TerminalMarketSectionModel.CatalogMarketSummaryModel.empty();
+    }
+
+    private static List<TerminalMarketSectionModel.VaultAssetModel> toVaultAssets(
+        TerminalMarketSectionSnapshot snapshot) {
+        List<TerminalMarketSectionModel.VaultAssetModel> models =
+            new ArrayList<TerminalMarketSectionModel.VaultAssetModel>();
+        for (TerminalMarketSectionSnapshot.VaultAsset asset : snapshot.getVaultAssets()) {
+            models.add(new TerminalMarketSectionModel.VaultAssetModel(asset.getSlotIndex(), asset.getRegistryName(),
+                asset.getMeta(), asset.getDisplayName(), asset.getQuantity(), asset.getStandardizedProductKey(),
+                asset.isStandardizedEligible(), asset.getStandardizedReason()));
+        }
+        return models;
     }
 
     private static List<TerminalHomeScreenModel.SectionModel> toSectionModels(List<TerminalOpenApproval.Section> sections) {

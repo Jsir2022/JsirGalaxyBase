@@ -3,11 +3,28 @@ package com.jsirgalaxybase.terminal;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
 
+import com.jsirgalaxybase.GalaxyBase;
+import com.jsirgalaxybase.modules.cluster.domain.GatewayDispatchResult;
+import com.jsirgalaxybase.modules.cluster.domain.ServerDescriptor;
+import com.jsirgalaxybase.modules.cluster.domain.TransferTicket;
+import com.jsirgalaxybase.modules.core.InstitutionCoreModule;
+import com.jsirgalaxybase.modules.core.vault.application.BaseVaultService;
+import com.jsirgalaxybase.modules.core.vault.domain.VaultSlot;
+import com.jsirgalaxybase.modules.core.vault.infrastructure.minecraft.BaseVaultGuiHandler;
+import com.jsirgalaxybase.modules.cluster.infrastructure.ClusterInfrastructure;
+import com.jsirgalaxybase.modules.servertools.ServerToolsModule;
+import com.jsirgalaxybase.modules.servertools.application.PlayerTeleportService;
+import com.jsirgalaxybase.modules.servertools.domain.ServerWarp;
+import com.jsirgalaxybase.modules.servertools.domain.TeleportDispatchPlan;
 import com.jsirgalaxybase.terminal.ui.TerminalBankSnapshot;
 import com.jsirgalaxybase.terminal.ui.TerminalBankSnapshotProvider;
 import com.jsirgalaxybase.terminal.ui.TerminalBankingService;
@@ -21,8 +38,15 @@ import com.jsirgalaxybase.terminal.ui.TerminalPage;
 
 public final class TerminalService {
 
+    private static final DateTimeFormatter SERVER_TOOLS_TIME_FORMATTER =
+        DateTimeFormatter.ofPattern("MM-dd HH:mm", Locale.ROOT).withZone(ZoneId.systemDefault());
+
     static BankPageFacade bankPageFacade = new DefaultBankPageFacade();
     static MarketPageFacade marketPageFacade = new DefaultMarketPageFacade();
+    static ServerToolsPageFacade serverToolsPageFacade = new DefaultServerToolsPageFacade();
+    static ServerToolsRuntimeProvider serverToolsRuntimeProvider = new DefaultServerToolsRuntimeProvider();
+    static final TerminalExchangeQuoteConfirmationGate exchangeQuoteConfirmationGate =
+        new TerminalExchangeQuoteConfirmationGate();
 
     private TerminalService() {}
 
@@ -39,6 +63,14 @@ public final class TerminalService {
         if (!canOpenTerminal(player)) {
             return null;
         }
+        if (TerminalActionType.fromId(actionType) == TerminalActionType.VAULT_OPEN
+            && TerminalPage.fromId(pageId) == TerminalPage.VAULT) {
+            if (!BaseVaultGuiHandler.openPersonalVault(player)) {
+                GalaxyBase.LOG.warn("Base Vault GUI was requested before its server runtime was ready for {}",
+                    player.getCommandSenderName());
+            }
+            return null;
+        }
         return buildTerminalSnapshot(player, pageId, sessionToken, TerminalActionType.fromId(actionType), payload);
     }
 
@@ -49,8 +81,10 @@ public final class TerminalService {
         String normalizedSessionToken = normalize(sessionToken, "terminal-session");
         String playerName = player == null ? "访客" : player.getCommandSenderName();
         TerminalHomeSnapshot snapshot = TerminalHomeSnapshotProvider.INSTANCE.create(player);
+        MarketActionContext marketContext = buildMarketActionContext(player, normalizedSessionToken, selectedPage, actionType,
+            payload);
         BankActionContext bankContext = buildBankActionContext(player, selectedPage, actionType, payload);
-        MarketActionContext marketContext = buildMarketActionContext(player, selectedPage, actionType, payload);
+        ServerToolsActionContext serverToolsContext = buildServerToolsActionContext(player, selectedPage, actionType, payload);
         return new TerminalOpenApproval(
             normalizedPageId,
             "银河终端 / " + (playerName == null || playerName.trim().isEmpty() ? "访客" : playerName),
@@ -58,12 +92,12 @@ public final class TerminalService {
             new TerminalOpenApproval.StatusBand(
                 "当前页",
                 selectedPage.getTitle(),
-                buildStatusDetail(snapshot, selectedPage, actionType, bankContext, marketContext),
+                buildStatusDetail(snapshot, selectedPage, actionType, bankContext, marketContext, serverToolsContext),
                 "贡献",
                 String.valueOf(snapshot == null ? 0 : snapshot.getContribution())),
             createTopLevelNavItems(normalizedPageId),
-            createPageSnapshots(player, snapshot, bankContext, marketContext, selectedPage),
-            createNotifications(selectedPage, actionType, bankContext, marketContext),
+            createPageSnapshots(player, snapshot, bankContext, marketContext, serverToolsContext, selectedPage),
+            createNotifications(selectedPage, actionType, bankContext, marketContext, serverToolsContext),
             normalizedSessionToken);
     }
 
@@ -81,6 +115,22 @@ public final class TerminalService {
 
     static void resetMarketPageFacadeForTest() {
         marketPageFacade = new DefaultMarketPageFacade();
+    }
+
+    static void setServerToolsPageFacadeForTest(ServerToolsPageFacade facade) {
+        serverToolsPageFacade = facade == null ? new DefaultServerToolsPageFacade() : facade;
+    }
+
+    static void resetServerToolsPageFacadeForTest() {
+        serverToolsPageFacade = new DefaultServerToolsPageFacade();
+    }
+
+    static void setServerToolsRuntimeProviderForTest(ServerToolsRuntimeProvider provider) {
+        serverToolsRuntimeProvider = provider == null ? new DefaultServerToolsRuntimeProvider() : provider;
+    }
+
+    static void resetServerToolsRuntimeProviderForTest() {
+        serverToolsRuntimeProvider = new DefaultServerToolsRuntimeProvider();
     }
 
     private static BankActionContext buildBankActionContext(EntityPlayer player, TerminalPage selectedPage,
@@ -108,18 +158,48 @@ public final class TerminalService {
         return new BankActionContext(latestSnapshot, bankPayload, actionResult);
     }
 
-    private static MarketActionContext buildMarketActionContext(EntityPlayer player, TerminalPage selectedPage,
-        TerminalActionType actionType, String payload) {
+    private static MarketActionContext buildMarketActionContext(EntityPlayer player, String sessionToken,
+        TerminalPage selectedPage, TerminalActionType actionType, String payload) {
         TerminalMarketActionPayload marketPayload = TerminalMarketActionPayload.decode(payload);
         TerminalCustomMarketActionPayload customPayload = TerminalCustomMarketActionPayload.decode(payload);
         TerminalExchangeMarketActionPayload exchangePayload = TerminalExchangeMarketActionPayload.decode(payload);
         TerminalActionFeedback actionResult = null;
 
         if (selectedPage == TerminalPage.MARKET_STANDARDIZED
+            && actionType == TerminalActionType.MARKET_CONFIRM_DEPOSIT_HELD) {
+            actionResult = marketPageFacade.submitDepositHeld(player, marketPayload);
+        } else if (selectedPage == TerminalPage.MARKET_STANDARDIZED
+            && actionType == TerminalActionType.MARKET_CONFIRM_ORDER) {
+            actionResult = submitUnifiedMarketOrder(player, marketPayload);
+        } else if (selectedPage == TerminalPage.MARKET_STANDARDIZED
             && actionType == TerminalActionType.MARKET_CONFIRM_LIMIT_BUY) {
             actionResult = marketPageFacade.submitLimitBuy(player, marketPayload);
             if (actionResult != null && actionResult.getSeverity() == TerminalNotificationSeverity.SUCCESS) {
                 marketPayload = marketPayload.clearedAfterLimitBuySuccess();
+            }
+        } else if (selectedPage == TerminalPage.MARKET_STANDARDIZED
+            && actionType == TerminalActionType.MARKET_CONFIRM_LIMIT_SELL) {
+            actionResult = marketPageFacade.submitLimitSell(player, marketPayload);
+            if (actionResult != null && actionResult.getSeverity() == TerminalNotificationSeverity.SUCCESS) {
+                marketPayload = marketPayload.clearedAfterLimitSellSuccess();
+            }
+        } else if (selectedPage == TerminalPage.MARKET_STANDARDIZED
+            && actionType == TerminalActionType.MARKET_CONFIRM_INSTANT_BUY) {
+            actionResult = marketPageFacade.submitInstantBuy(player, marketPayload);
+            if (actionResult != null && actionResult.getSeverity() == TerminalNotificationSeverity.SUCCESS) {
+                marketPayload = marketPayload.clearedAfterInstantBuySuccess();
+            }
+        } else if (selectedPage == TerminalPage.MARKET_STANDARDIZED
+            && actionType == TerminalActionType.MARKET_CONFIRM_INSTANT_SELL) {
+            actionResult = marketPageFacade.submitInstantSell(player, marketPayload);
+            if (actionResult != null && actionResult.getSeverity() == TerminalNotificationSeverity.SUCCESS) {
+                marketPayload = marketPayload.clearedAfterInstantSellSuccess();
+            }
+        } else if (selectedPage == TerminalPage.MARKET_STANDARDIZED
+            && actionType == TerminalActionType.MARKET_CANCEL_ORDER) {
+            actionResult = marketPageFacade.cancelOrder(player, marketPayload);
+            if (actionResult != null && actionResult.getSeverity() == TerminalNotificationSeverity.SUCCESS) {
+                marketPayload = marketPayload.clearedAfterCancelSuccess();
             }
         } else if (selectedPage == TerminalPage.MARKET_STANDARDIZED
             && actionType == TerminalActionType.MARKET_CLAIM_ASSET) {
@@ -138,6 +218,9 @@ public final class TerminalService {
                 || actionType == TerminalActionType.REFRESH_PAGE || actionType == TerminalActionType.MARKET_CUSTOM_SELECT_LISTING)) {
             actionResult = TerminalActionFeedback.info("定制商品市场已刷新", "listing 浏览、详情与个人资产摘要已刷新。", 3200L);
         } else if (selectedPage == TerminalPage.MARKET_CUSTOM
+            && actionType == TerminalActionType.MARKET_CUSTOM_PUBLISH_HELD) {
+            actionResult = marketPageFacade.publishCustomListing(player, customPayload);
+        } else if (selectedPage == TerminalPage.MARKET_CUSTOM
             && actionType == TerminalActionType.MARKET_CUSTOM_BUY_LISTING) {
             actionResult = marketPageFacade.purchaseCustomListing(player, customPayload);
         } else if (selectedPage == TerminalPage.MARKET_CUSTOM
@@ -155,18 +238,15 @@ public final class TerminalService {
                 : TerminalActionFeedback.info("汇率市场已刷新", "标的、quote、rule 与执行门禁已刷新。", 3200L);
         } else if (selectedPage == TerminalPage.MARKET_EXCHANGE
             && actionType == TerminalActionType.MARKET_EXCHANGE_CONFIRM) {
-            actionResult = exchangePayload.hasSelectedTarget()
-                ? marketPageFacade.submitExchangeHeld(player)
-                : TerminalActionFeedback.of(
-                    TerminalNotificationSeverity.ERROR,
-                    "汇率兑换已拒绝",
-                    "服务端拒绝未选择正式兑换标的的确认请求。",
-                    3600L);
+            actionResult = confirmExchangeHeld(player, sessionToken, exchangePayload);
         }
 
+        // Custom and exchange retain their own business snapshots. The standardized snapshot is
+        // additionally carried as the shared, read-only personal Vault picker source.
         TerminalMarketSectionSnapshot latestSnapshot = selectedPage == TerminalPage.MARKET_CUSTOM
             || selectedPage == TerminalPage.MARKET_EXCHANGE
-                ? TerminalMarketSectionSnapshot.placeholder(TerminalPage.MARKET.getId())
+                ? marketPageFacade.createSnapshot(player, TerminalPage.MARKET_STANDARDIZED,
+                    TerminalMarketActionPayload.empty(), null)
                 : marketPageFacade.createSnapshot(player, selectedPage, marketPayload, actionResult);
         TerminalCustomMarketSectionSnapshot customSnapshot = selectedPage == TerminalPage.MARKET_CUSTOM
             ? marketPageFacade.createCustomSnapshot(player, customPayload, actionResult)
@@ -174,11 +254,124 @@ public final class TerminalService {
         TerminalExchangeMarketSectionSnapshot exchangeSnapshot = selectedPage == TerminalPage.MARKET_EXCHANGE
             ? marketPageFacade.createExchangeSnapshot(player, exchangePayload, actionResult)
             : null;
+        registerExchangeQuoteConfirmation(player, sessionToken, exchangePayload, exchangeSnapshot);
         return new MarketActionContext(latestSnapshot, customSnapshot, exchangeSnapshot, actionResult);
+    }
+
+    private static TerminalActionFeedback submitUnifiedMarketOrder(EntityPlayer player,
+        TerminalMarketActionPayload payload) {
+        if (payload == null || !payload.hasUnifiedOrderTicket()) {
+            return TerminalActionFeedback.of(TerminalNotificationSeverity.ERROR, "订单票据无效",
+                "请选择买卖方向、订单类型并填写有效数量与价格。", 4800L);
+        }
+        String productKey = payload.getSelectedProductKey();
+        String query = payload.getBrowserQuery();
+        String page = String.valueOf(payload.getBrowserPage());
+        String filter = payload.getBrowserFilter();
+        String quantity = String.valueOf(payload.parseOrderQuantity());
+        if ("BUY".equals(payload.getOrderSide())) {
+            if ("MARKET".equals(payload.getOrderType())) {
+                return marketPageFacade.submitInstantBuy(player, new TerminalMarketActionPayload(productKey,
+                    "", "", "", "", "", "", quantity, "", query, page, filter, ""));
+            }
+            return marketPageFacade.submitLimitBuy(player, new TerminalMarketActionPayload(productKey,
+                String.valueOf(payload.parseOrderLimitPrice()), quantity, "", "", "", "", "", "",
+                query, page, filter, ""));
+        }
+        if ("MARKET".equals(payload.getOrderType())) {
+            return marketPageFacade.submitInstantSell(player, new TerminalMarketActionPayload(productKey,
+                "", "", "", "", "", "", "", quantity, query, page, filter, ""));
+        }
+        return marketPageFacade.submitLimitSell(player, new TerminalMarketActionPayload(productKey,
+            "", "", "", "", String.valueOf(payload.parseOrderLimitPrice()), quantity, "", "",
+            query, page, filter, ""));
+    }
+
+    private static TerminalActionFeedback confirmExchangeHeld(EntityPlayer player, String sessionToken,
+        TerminalExchangeMarketActionPayload exchangePayload) {
+        if (!exchangePayload.hasSelectedTarget()) {
+            return TerminalActionFeedback.of(TerminalNotificationSeverity.ERROR, "汇率兑换已拒绝",
+                "服务端拒绝未选择正式兑换标的的确认请求。", 3600L);
+        }
+        if (!(player instanceof EntityPlayerMP)) {
+            return marketPageFacade.submitExchange(player, exchangePayload);
+        }
+        TerminalExchangeMarketSectionSnapshot currentQuote = marketPageFacade.createExchangeSnapshot(player,
+            exchangePayload, null);
+        if (!exchangeQuoteConfirmationGate.consumeIfCurrent(player.getUniqueID().toString(), sessionToken,
+            exchangePayload, currentQuote)) {
+            return TerminalActionFeedback.of(TerminalNotificationSeverity.WARNING, "正式报价需要重新确认",
+                "Base Vault 选中资产、报价规则、限额或终端会话已变化。请刷新正式报价后再次确认兑换。", 4200L);
+        }
+        return marketPageFacade.submitExchange(player, exchangePayload);
+    }
+
+    private static void registerExchangeQuoteConfirmation(EntityPlayer player, String sessionToken,
+        TerminalExchangeMarketActionPayload exchangePayload, TerminalExchangeMarketSectionSnapshot exchangeSnapshot) {
+        if (!(player instanceof EntityPlayerMP)) {
+            return;
+        }
+        exchangeQuoteConfirmationGate.register(player.getUniqueID().toString(), sessionToken, exchangePayload,
+            exchangeSnapshot);
+    }
+
+    private static ServerToolsActionContext buildServerToolsActionContext(EntityPlayer player, TerminalPage selectedPage,
+        TerminalActionType actionType, String payload) {
+        TerminalServerToolsActionPayload serverToolsPayload = TerminalServerToolsActionPayload.decode(payload);
+        TerminalServerToolsSectionSnapshot.ActionFeedback actionFeedback = null;
+
+        if (selectedPage == TerminalPage.SERVER_TOOLS) {
+            if (actionType == TerminalActionType.SERVER_TOOLS_REFRESH || actionType == TerminalActionType.REFRESH_PAGE) {
+                actionFeedback = new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                    "传送页已刷新",
+                    "服务器目录、系统 warp 与最近反馈已刷新。",
+                    TerminalNotificationSeverity.INFO.name());
+            } else if (actionType == TerminalActionType.SERVER_TOOLS_SELECT_WARP) {
+                actionFeedback = new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                    "已选择 warp",
+                    serverToolsPayload.hasWarpName() ? "当前选中: " + serverToolsPayload.getWarpName() : "当前未选择 warp。",
+                    TerminalNotificationSeverity.INFO.name());
+            } else if (actionType == TerminalActionType.SERVER_TOOLS_CONFIRM_WARP) {
+                if (!(player instanceof EntityPlayerMP)) {
+                    actionFeedback = new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                        "传送已拒绝",
+                        "只有服务端在线玩家可以从终端确认传送。",
+                        TerminalNotificationSeverity.ERROR.name());
+                } else if (!serverToolsPayload.hasWarpName()) {
+                    actionFeedback = new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                        "传送已拒绝",
+                        "请先选择一个系统 warp。",
+                        TerminalNotificationSeverity.ERROR.name());
+                } else {
+                    actionFeedback = serverToolsPageFacade.confirmWarp((EntityPlayerMP) player,
+                        serverToolsPayload.getWarpName());
+                }
+            }
+        }
+
+        TerminalServerToolsSectionSnapshot latestSnapshot =
+            serverToolsPageFacade.createSnapshot(player, serverToolsPayload, actionFeedback);
+        return new ServerToolsActionContext(latestSnapshot, serverToolsPayload, actionFeedback);
     }
 
     private static boolean canOpenTerminal(EntityPlayerMP player) {
         return player != null && player.playerNetServerHandler != null && !player.isDead;
+    }
+
+    private static BaseVaultService resolveBaseVaultService() {
+        if (GalaxyBase.proxy == null || GalaxyBase.proxy.getModuleManager() == null) {
+            return null;
+        }
+        InstitutionCoreModule module = GalaxyBase.proxy.getModuleManager().findModule(InstitutionCoreModule.class);
+        return module == null ? null : module.getBaseVaultService();
+    }
+
+    private static String playerRef(EntityPlayer player) {
+        return player instanceof EntityPlayerMP ? ((EntityPlayerMP) player).getUniqueID().toString() : "";
+    }
+
+    private static String safeText(String value, String fallback) {
+        return value == null || value.trim().isEmpty() ? fallback : value.trim();
     }
 
     private static List<TerminalOpenApproval.NavItem> createTopLevelNavItems(String selectedPageId) {
@@ -188,7 +381,9 @@ public final class TerminalService {
             TerminalPage.CAREER,
             TerminalPage.PUBLIC_SERVICE,
             TerminalPage.MARKET,
-            TerminalPage.BANK };
+            TerminalPage.SERVER_TOOLS,
+            TerminalPage.BANK,
+            TerminalPage.VAULT };
         for (TerminalPage page : pages) {
             items.add(new TerminalOpenApproval.NavItem(
                 page.getId(),
@@ -202,14 +397,53 @@ public final class TerminalService {
 
     private static List<TerminalOpenApproval.PageSnapshot> createPageSnapshots(EntityPlayer player,
         TerminalHomeSnapshot snapshot, BankActionContext bankContext, MarketActionContext marketContext,
-        TerminalPage selectedPage) {
+        ServerToolsActionContext serverToolsContext, TerminalPage selectedPage) {
         List<TerminalOpenApproval.PageSnapshot> pageSnapshots = new ArrayList<TerminalOpenApproval.PageSnapshot>();
         pageSnapshots.add(createHomePageSnapshot(snapshot));
         pageSnapshots.add(createCareerPageSnapshot(player));
         pageSnapshots.add(createPublicServicePageSnapshot(player));
         pageSnapshots.add(createMarketPageSnapshot(selectedPage, marketContext));
         pageSnapshots.add(createBankPageSnapshot(bankContext));
+        pageSnapshots.add(createServerToolsPageSnapshot(serverToolsContext));
+        pageSnapshots.add(createVaultPageSnapshot(player));
         return pageSnapshots;
+    }
+
+    private static TerminalOpenApproval.PageSnapshot createVaultPageSnapshot(EntityPlayer player) {
+        List<TerminalOpenApproval.Section> sections = new ArrayList<TerminalOpenApproval.Section>();
+        if (!(player instanceof EntityPlayerMP)) {
+            sections.add(new TerminalOpenApproval.Section("vault_unavailable", "Base Vault", "当前没有服务端仓库会话。",
+                "请在已连接的服务器内打开终端。"));
+        } else {
+            BaseVaultService vaultService = resolveBaseVaultService();
+            if (vaultService == null) {
+                sections.add(new TerminalOpenApproval.Section("vault_runtime_unavailable", "Base Vault 未就绪",
+                    "仓储 PostgreSQL 运行时尚未启动。", "管理员需先应用仓储迁移并检查服务端启动日志。"));
+            } else {
+                try {
+                    BaseVaultService.VaultView view = vaultService.viewPersonalVault(playerRef(player));
+                    int occupied = 0;
+                    int itemCount = 0;
+                    for (VaultSlot slot : view.getSlots()) {
+                        if (slot != null && slot.getStack() != null && slot.getStack().stackSize > 0) {
+                            occupied++;
+                            itemCount += slot.getStack().stackSize;
+                        }
+                    }
+                    sections.add(new TerminalOpenApproval.Section("vault_personal_capacity", "个人 Base Vault",
+                        "占用 " + occupied + " / " + view.getAccount().getSlotCount() + " 格 | 实体 " + itemCount,
+                        "市场领取、定制市场领取和标准商品托管都以此账户为实体来源或目标。"));
+                    sections.add(new TerminalOpenApproval.Section("vault_transfer_boundary", "跨服资产边界",
+                        "个人仓为跨服持久资产；市场托管、订单冻结与银行余额保持独立。",
+                        "背包存取仅会由专用 Vault 格位交互发起，并记录可恢复 request id 操作。"));
+                } catch (RuntimeException exception) {
+                    sections.add(new TerminalOpenApproval.Section("vault_runtime_error", "Base Vault 不可用",
+                        "无法读取个人保险箱。", "原因：" + safeText(exception.getMessage(), "仓储运行时异常")));
+                }
+            }
+        }
+        return new TerminalOpenApproval.PageSnapshot(TerminalPage.VAULT.getId(), TerminalPage.VAULT.getTitle(),
+            TerminalPage.VAULT.getLead(), sections);
     }
 
     private static TerminalOpenApproval.PageSnapshot createHomePageSnapshot(TerminalHomeSnapshot snapshot) {
@@ -325,7 +559,7 @@ public final class TerminalService {
                 "market_overview_standardized",
                 "标准商品市场入口",
                 "最新成交价 " + snapshot.getLatestTradePrice() + " | CLAIMABLE " + snapshot.getClaimableQuantity(),
-                "MARKET_STANDARDIZED 现在承接真实买单与 claim 动作。"));
+                "MARKET_STANDARDIZED 现在承接存入、限价买卖、即时买卖、撤单与 claim 动作。"));
             sections.add(new TerminalOpenApproval.Section(
                 "market_overview_boundary",
                 "迁移边界",
@@ -341,6 +575,27 @@ public final class TerminalService {
                 snapshot,
                 null,
                 null);
+    }
+
+    private static TerminalOpenApproval.PageSnapshot createServerToolsPageSnapshot(ServerToolsActionContext context) {
+        TerminalServerToolsSectionSnapshot snapshot = context == null || context.snapshot == null
+            ? TerminalServerToolsSectionSnapshot.placeholder() : context.snapshot;
+        List<TerminalOpenApproval.Section> sections = new ArrayList<TerminalOpenApproval.Section>();
+        sections.add(new TerminalOpenApproval.Section(
+            "server_tools_transport_console",
+            "群组服传送工具页",
+            snapshot.getSelectedWarpTitle(),
+            "当前服务器 " + snapshot.getCurrentServerId() + " / 目标 " + snapshot.getSelectedTargetServerId()));
+        return new TerminalOpenApproval.PageSnapshot(
+            TerminalPage.SERVER_TOOLS.getId(),
+            TerminalPage.SERVER_TOOLS.getTitle(),
+            TerminalPage.SERVER_TOOLS.getLead(),
+            sections,
+            null,
+            null,
+            null,
+            null,
+            snapshot);
     }
 
     private static TerminalOpenApproval.PageSnapshot createBankPageSnapshot(BankActionContext bankContext) {
@@ -408,7 +663,8 @@ public final class TerminalService {
     }
 
     private static String buildStatusDetail(TerminalHomeSnapshot snapshot, TerminalPage selectedPage,
-        TerminalActionType actionType, BankActionContext bankContext, MarketActionContext marketContext) {
+        TerminalActionType actionType, BankActionContext bankContext, MarketActionContext marketContext,
+        ServerToolsActionContext serverToolsContext) {
         String base = TerminalOpenSummaryFormatter.buildStatusBandDetail(snapshot) + " | " + selectedPage.getLabel();
         if (selectedPage.isMarketPage()) {
             TerminalMarketSectionSnapshot marketSnapshot = marketContext.snapshot;
@@ -418,6 +674,15 @@ public final class TerminalService {
                 marketDetail = marketDetail + " | " + marketContext.actionResult.getBody();
             }
             return base + " | " + marketDetail;
+        }
+        if (selectedPage.isServerToolsPage()) {
+            TerminalServerToolsSectionSnapshot serverToolsSnapshot = serverToolsContext == null ? null : serverToolsContext.snapshot;
+            String detail = serverToolsSnapshot == null ? "传送页不可用"
+                : serverToolsSnapshot.getCurrentServerId() + " | " + serverToolsSnapshot.getServiceState();
+            if (serverToolsContext != null && serverToolsContext.actionFeedback != null) {
+                detail = detail + " | " + serverToolsContext.actionFeedback.getBody();
+            }
+            return base + " | " + detail;
         }
         if (!selectedPage.isBankPage()) {
             String actionDetail = actionType == TerminalActionType.REFRESH_PAGE ? "已通过最小 snapshot 链刷新当前分区"
@@ -436,7 +701,8 @@ public final class TerminalService {
     }
 
     private static List<TerminalOpenApproval.NotificationEntry> createNotifications(TerminalPage selectedPage,
-        TerminalActionType actionType, BankActionContext bankContext, MarketActionContext marketContext) {
+        TerminalActionType actionType, BankActionContext bankContext, MarketActionContext marketContext,
+        ServerToolsActionContext serverToolsContext) {
         List<TerminalOpenApproval.NotificationEntry> notifications = new ArrayList<TerminalOpenApproval.NotificationEntry>();
         if (selectedPage.isMarketPage()) {
             if (marketContext.actionResult != null) {
@@ -460,6 +726,24 @@ public final class TerminalService {
                 "后续阶段边界仍有效",
                 "phase 8 只做正式 cutover，phase 9 再删除旧 ModularUI terminal 实现。",
                 TerminalNotificationSeverity.WARNING.name()));
+            return notifications;
+        }
+        if (selectedPage.isServerToolsPage()) {
+            if (serverToolsContext != null && serverToolsContext.actionFeedback != null) {
+                notifications.add(new TerminalOpenApproval.NotificationEntry(
+                    serverToolsContext.actionFeedback.getTitle(),
+                    serverToolsContext.actionFeedback.getBody(),
+                    serverToolsContext.actionFeedback.getSeverityName()));
+            } else if (actionType == TerminalActionType.SELECT_PAGE) {
+                notifications.add(new TerminalOpenApproval.NotificationEntry(
+                    "已切换传送分区",
+                    "selectedPageId 已切换到传送页，主体区现在承接系统 warp 浏览与确认。",
+                    TerminalNotificationSeverity.INFO.name()));
+            }
+            notifications.add(new TerminalOpenApproval.NotificationEntry(
+                "传送页 v1 已接入",
+                "当前只开放系统 warp 浏览与确认，确认传送复用 ServerTools 现有 warp 主链。",
+                TerminalNotificationSeverity.INFO.name()));
             return notifications;
         }
         if (selectedPage.isBankPage()) {
@@ -580,12 +864,24 @@ public final class TerminalService {
 
         TerminalActionFeedback submitLimitBuy(EntityPlayer player, TerminalMarketActionPayload payload);
 
+        TerminalActionFeedback submitDepositHeld(EntityPlayer player, TerminalMarketActionPayload payload);
+
+        TerminalActionFeedback submitLimitSell(EntityPlayer player, TerminalMarketActionPayload payload);
+
+        TerminalActionFeedback submitInstantBuy(EntityPlayer player, TerminalMarketActionPayload payload);
+
+        TerminalActionFeedback submitInstantSell(EntityPlayer player, TerminalMarketActionPayload payload);
+
+        TerminalActionFeedback cancelOrder(EntityPlayer player, TerminalMarketActionPayload payload);
+
         TerminalActionFeedback claimAsset(EntityPlayer player, TerminalMarketActionPayload payload);
 
         TerminalCustomMarketSectionSnapshot createCustomSnapshot(EntityPlayer player, TerminalCustomMarketActionPayload payload,
             TerminalActionFeedback actionFeedback);
 
         TerminalActionFeedback purchaseCustomListing(EntityPlayer player, TerminalCustomMarketActionPayload payload);
+
+        TerminalActionFeedback publishCustomListing(EntityPlayer player, TerminalCustomMarketActionPayload payload);
 
         TerminalActionFeedback cancelCustomListing(EntityPlayer player, TerminalCustomMarketActionPayload payload);
 
@@ -596,7 +892,40 @@ public final class TerminalService {
 
         TerminalActionFeedback refreshExchangeQuote(EntityPlayer player);
 
-        TerminalActionFeedback submitExchangeHeld(EntityPlayer player);
+        TerminalActionFeedback submitExchange(EntityPlayer player, TerminalExchangeMarketActionPayload payload);
+    }
+
+    static interface ServerToolsPageFacade {
+
+        TerminalServerToolsSectionSnapshot createSnapshot(EntityPlayer player,
+            TerminalServerToolsActionPayload payload,
+            TerminalServerToolsSectionSnapshot.ActionFeedback actionFeedback);
+
+        TerminalServerToolsSectionSnapshot.ActionFeedback confirmWarp(EntityPlayerMP player, String warpName);
+    }
+
+    static interface ServerToolsRuntimeProvider {
+
+        ServerToolsRuntimeBridge resolve();
+    }
+
+    static interface ServerToolsRuntimeBridge {
+
+        boolean isRuntimeAvailable();
+
+        String getLocalServerId();
+
+        List<ServerDescriptor> listServers();
+
+        List<ServerWarp> listWarps();
+
+        List<TransferTicket> findRecentTickets(String playerUuid, int limit);
+
+        TeleportDispatchPlan prepareWarpTeleport(EntityPlayerMP player, String warpName);
+
+        GatewayDispatchResult dispatchTeleport(EntityPlayerMP player, TeleportDispatchPlan dispatchPlan);
+
+        EntityPlayerMP findOnlinePlayer(String playerName);
     }
 
     private static final class DefaultBankPageFacade implements BankPageFacade {
@@ -632,6 +961,31 @@ public final class TerminalService {
         }
 
         @Override
+        public TerminalActionFeedback submitDepositHeld(EntityPlayer player, TerminalMarketActionPayload payload) {
+            return TerminalMarketSectionService.INSTANCE.submitDepositHeld(player, payload);
+        }
+
+        @Override
+        public TerminalActionFeedback submitLimitSell(EntityPlayer player, TerminalMarketActionPayload payload) {
+            return TerminalMarketSectionService.INSTANCE.submitLimitSell(player, payload);
+        }
+
+        @Override
+        public TerminalActionFeedback submitInstantBuy(EntityPlayer player, TerminalMarketActionPayload payload) {
+            return TerminalMarketSectionService.INSTANCE.submitInstantBuy(player, payload);
+        }
+
+        @Override
+        public TerminalActionFeedback submitInstantSell(EntityPlayer player, TerminalMarketActionPayload payload) {
+            return TerminalMarketSectionService.INSTANCE.submitInstantSell(player, payload);
+        }
+
+        @Override
+        public TerminalActionFeedback cancelOrder(EntityPlayer player, TerminalMarketActionPayload payload) {
+            return TerminalMarketSectionService.INSTANCE.cancelOrder(player, payload);
+        }
+
+        @Override
         public TerminalActionFeedback claimAsset(EntityPlayer player, TerminalMarketActionPayload payload) {
             return TerminalMarketSectionService.INSTANCE.claimAsset(player, payload);
         }
@@ -645,6 +999,11 @@ public final class TerminalService {
         @Override
         public TerminalActionFeedback purchaseCustomListing(EntityPlayer player, TerminalCustomMarketActionPayload payload) {
             return TerminalMarketSectionService.INSTANCE.purchaseCustomListing(player, payload);
+        }
+
+        @Override
+        public TerminalActionFeedback publishCustomListing(EntityPlayer player, TerminalCustomMarketActionPayload payload) {
+            return TerminalMarketSectionService.INSTANCE.publishCustomListing(player, payload);
         }
 
         @Override
@@ -669,9 +1028,395 @@ public final class TerminalService {
         }
 
         @Override
-        public TerminalActionFeedback submitExchangeHeld(EntityPlayer player) {
-            return TerminalMarketSectionService.INSTANCE.submitExchangeHeld(player);
+        public TerminalActionFeedback submitExchange(EntityPlayer player, TerminalExchangeMarketActionPayload payload) {
+            return TerminalMarketSectionService.INSTANCE.submitExchange(player, payload);
         }
+    }
+
+    private static final class DefaultServerToolsPageFacade implements ServerToolsPageFacade {
+
+        @Override
+        public TerminalServerToolsSectionSnapshot createSnapshot(EntityPlayer player,
+            TerminalServerToolsActionPayload payload,
+            TerminalServerToolsSectionSnapshot.ActionFeedback actionFeedback) {
+            ServerToolsRuntimeBridge runtime = serverToolsRuntimeProvider.resolve();
+            if (runtime == null || !runtime.isRuntimeAvailable()) {
+                return unavailableSnapshot(actionFeedback);
+            }
+            List<ServerDescriptor> servers = runtime.listServers();
+            List<ServerWarp> warps = runtime.listWarps();
+            List<TransferTicket> recentTickets = player == null ? new ArrayList<TransferTicket>()
+                : runtime.findRecentTickets(player.getUniqueID().toString(), 3);
+            String selectedWarpName = payload == null ? "" : payload.getWarpName();
+            ServerWarp selectedWarp = findWarp(warps, selectedWarpName);
+            return new TerminalServerToolsSectionSnapshot(
+                "ServerTools warp runtime online",
+                normalize(runtime.getLocalServerId(), "unknown"),
+                toServerLines(servers),
+                toServerIds(servers),
+                toWarpLines(warps),
+                toWarpNames(warps),
+                toWarpSubtitles(warps),
+                toWarpStateLabels(warps),
+                toRecentTransferLines(recentTickets),
+                selectedWarpName,
+                selectedWarp == null ? "未选择 warp" : displayWarpTitle(selectedWarp),
+                selectedWarp == null ? "当前没有可查看的 warp 详情。" : describeWarp(selectedWarp),
+                selectedWarp == null ? "--" : describeWarpTargetServer(selectedWarp),
+                selectedWarp == null ? "--" : describeWarpTargetLocation(selectedWarp),
+                selectedWarp == null ? "当前没有额外传送说明。" : normalize(selectedWarp.getDescription(), "当前没有额外传送说明。"),
+                selectedWarp != null && selectedWarp.isEnabled(),
+                resolveRecentSourceServerId(recentTickets),
+                resolveRecentTargetServerId(recentTickets),
+                resolveRecentTransferStatus(recentTickets),
+                resolveRecentTransferTime(recentTickets),
+                resolveRecentTransferSummary(recentTickets),
+                actionFeedback == null ? new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                    "传送动作反馈",
+                    "选择 warp 后点击确认传送，执行前会再次弹窗确认。",
+                    TerminalNotificationSeverity.INFO.name()) : actionFeedback);
+        }
+
+        @Override
+        public TerminalServerToolsSectionSnapshot.ActionFeedback confirmWarp(EntityPlayerMP player, String warpName) {
+            ServerToolsRuntimeBridge runtime = serverToolsRuntimeProvider.resolve();
+            if (runtime == null || !runtime.isRuntimeAvailable()) {
+                return new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                    "传送失败",
+                    "ServerTools runtime 不可用，请检查 dedicated server 启动日志与 PostgreSQL / Cluster 配置。",
+                    TerminalNotificationSeverity.ERROR.name());
+            }
+            try {
+                TeleportDispatchPlan dispatchPlan = runtime.prepareWarpTeleport(player, warpName);
+                GatewayDispatchResult result = runtime.dispatchTeleport(resolveLiveSubject(runtime, dispatchPlan), dispatchPlan);
+                return toActionFeedback(result, warpName);
+            } catch (RuntimeException exception) {
+                return new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                    "传送失败",
+                    exception.getMessage() == null ? "Teleport failed" : exception.getMessage(),
+                    TerminalNotificationSeverity.ERROR.name());
+            }
+        }
+
+        private static TerminalServerToolsSectionSnapshot unavailableSnapshot(
+            TerminalServerToolsSectionSnapshot.ActionFeedback actionFeedback) {
+            return new TerminalServerToolsSectionSnapshot(
+                "ServerTools runtime unavailable",
+                "unknown",
+                Arrays.asList("服务器目录不可用: runtime 未准备完成。"),
+                Arrays.asList(""),
+                Arrays.asList("当前没有可用系统 warp。"),
+                Arrays.asList(""),
+                Arrays.asList("当前没有额外说明。"),
+                Arrays.asList("不可用"),
+                Arrays.asList("当前没有最近传送记录。"),
+                "",
+                "未选择 warp",
+                "ServerTools runtime 不可用，无法读取 warp 列表。",
+                "--",
+                "--",
+                "ServerTools runtime 不可用。",
+                false,
+                "--",
+                "--",
+                "不可用",
+                "--",
+                "当前没有最近传送记录。",
+                actionFeedback == null ? new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                    "传送页不可用",
+                    "ServerTools runtime 不可用，请检查 dedicated server 启动日志与 PostgreSQL / Cluster 配置。",
+                    TerminalNotificationSeverity.WARNING.name()) : actionFeedback);
+        }
+
+        private static List<String> toServerLines(List<ServerDescriptor> servers) {
+            List<String> lines = new ArrayList<String>();
+            for (ServerDescriptor server : servers) {
+                lines.add(server.getServerId() + " | " + server.getDisplayName()
+                    + (server.isLocalServer() ? " | 当前" : "")
+                    + (server.isEnabled() ? " | 在线目录" : " | 已禁用"));
+            }
+            if (lines.isEmpty()) {
+                lines.add("服务器目录暂不可用。");
+            }
+            return lines;
+        }
+
+        private static List<String> toServerIds(List<ServerDescriptor> servers) {
+            List<String> ids = new ArrayList<String>();
+            for (ServerDescriptor server : servers) {
+                ids.add(server.getServerId());
+            }
+            if (ids.isEmpty()) {
+                ids.add("");
+            }
+            return ids;
+        }
+
+        private static List<String> toWarpLines(List<ServerWarp> warps) {
+            List<String> lines = new ArrayList<String>();
+            for (ServerWarp warp : warps) {
+                lines.add((warp.isEnabled() ? "[可用] " : "[禁用] ") + displayWarpTitle(warp));
+            }
+            if (lines.isEmpty()) {
+                lines.add("当前没有可用系统 warp。");
+            }
+            return lines;
+        }
+
+        private static List<String> toWarpNames(List<ServerWarp> warps) {
+            List<String> names = new ArrayList<String>();
+            for (ServerWarp warp : warps) {
+                names.add(warp.getWarpName());
+            }
+            if (names.isEmpty()) {
+                names.add("");
+            }
+            return names;
+        }
+
+        private static List<String> toWarpSubtitles(List<ServerWarp> warps) {
+            List<String> subtitles = new ArrayList<String>();
+            for (ServerWarp warp : warps) {
+                if (warp == null) {
+                    continue;
+                }
+                String description = normalize(warp.getDescription(), "");
+                if (!description.isEmpty()) {
+                    subtitles.add(description);
+                } else if (warp.getTarget() != null) {
+                    subtitles.add("目标服 " + normalize(warp.getTarget().getServerId(), "unknown"));
+                } else {
+                    subtitles.add("当前没有额外说明。");
+                }
+            }
+            if (subtitles.isEmpty()) {
+                subtitles.add("当前没有额外说明。");
+            }
+            return subtitles;
+        }
+
+        private static List<String> toWarpStateLabels(List<ServerWarp> warps) {
+            List<String> labels = new ArrayList<String>();
+            for (ServerWarp warp : warps) {
+                labels.add(warp != null && warp.isEnabled() ? "可用" : "禁用");
+            }
+            if (labels.isEmpty()) {
+                labels.add("不可用");
+            }
+            return labels;
+        }
+
+        private static List<String> toRecentTransferLines(List<TransferTicket> tickets) {
+            List<String> lines = new ArrayList<String>();
+            for (TransferTicket ticket : tickets) {
+                if (ticket == null || ticket.getTarget() == null) {
+                    continue;
+                }
+                lines.add(formatTicketLine(ticket));
+            }
+            if (lines.isEmpty()) {
+                lines.add("当前没有最近传送记录。");
+            }
+            return lines;
+        }
+
+        private static String formatTicketLine(TransferTicket ticket) {
+            String timestamp = formatInstant(ticket.getUpdatedAt());
+            String statusMessage = normalize(ticket.getStatusMessage(), "无额外状态说明");
+            return timestamp + " | " + ticket.getSourceServerId() + " -> " + ticket.getTarget().getServerId()
+                + " | " + ticket.getStatus().name() + " | " + statusMessage;
+        }
+
+        private static ServerWarp findWarp(List<ServerWarp> warps, String warpName) {
+            if (warpName == null || warpName.trim().isEmpty()) {
+                return null;
+            }
+            for (ServerWarp warp : warps) {
+                if (warp.getWarpName().equalsIgnoreCase(warpName.trim())) {
+                    return warp;
+                }
+            }
+            return null;
+        }
+
+        private static String displayWarpTitle(ServerWarp warp) {
+            String displayName = normalize(warp.getDisplayName(), "");
+            return displayName.isEmpty() || displayName.equals(warp.getWarpName())
+                ? warp.getWarpName()
+                : displayName + " / " + warp.getWarpName();
+        }
+
+        private static String describeWarpTargetServer(ServerWarp warp) {
+            return warp == null || warp.getTarget() == null ? "--" : normalize(warp.getTarget().getServerId(), "--");
+        }
+
+        private static String describeWarpTargetLocation(ServerWarp warp) {
+            if (warp == null || warp.getTarget() == null) {
+                return "--";
+            }
+            return "dim " + warp.getTarget().getDimensionId() + " / "
+                + Math.round(warp.getTarget().getX()) + ", "
+                + Math.round(warp.getTarget().getY()) + ", "
+                + Math.round(warp.getTarget().getZ());
+        }
+
+        private static String describeWarp(ServerWarp warp) {
+            String target = warp.getTarget() == null ? "target=unknown"
+                : "target=" + warp.getTarget().getServerId() + " / " + Math.round(warp.getTarget().getX())
+                    + ", " + Math.round(warp.getTarget().getY()) + ", " + Math.round(warp.getTarget().getZ());
+            String description = normalize(warp.getDescription(), "没有额外说明。");
+            return target + " | " + description;
+        }
+
+        private static String resolveRecentSourceServerId(List<TransferTicket> tickets) {
+            TransferTicket ticket = firstTicket(tickets);
+            return ticket == null ? "--" : normalize(ticket.getSourceServerId(), "--");
+        }
+
+        private static String resolveRecentTargetServerId(List<TransferTicket> tickets) {
+            TransferTicket ticket = firstTicket(tickets);
+            return ticket == null || ticket.getTarget() == null ? "--"
+                : normalize(ticket.getTarget().getServerId(), "--");
+        }
+
+        private static String resolveRecentTransferStatus(List<TransferTicket> tickets) {
+            TransferTicket ticket = firstTicket(tickets);
+            return ticket == null || ticket.getStatus() == null ? "暂无记录" : ticket.getStatus().name();
+        }
+
+        private static String resolveRecentTransferTime(List<TransferTicket> tickets) {
+            TransferTicket ticket = firstTicket(tickets);
+            return ticket == null ? "--" : formatInstant(ticket.getUpdatedAt());
+        }
+
+        private static String resolveRecentTransferSummary(List<TransferTicket> tickets) {
+            TransferTicket ticket = firstTicket(tickets);
+            return ticket == null ? "当前没有最近传送记录。"
+                : normalize(ticket.getStatusMessage(), "当前没有最近传送记录。");
+        }
+
+        private static TransferTicket firstTicket(List<TransferTicket> tickets) {
+            return tickets == null || tickets.isEmpty() ? null : tickets.get(0);
+        }
+
+        private static EntityPlayerMP resolveLiveSubject(ServerToolsRuntimeBridge runtime, TeleportDispatchPlan dispatchPlan) {
+            if (runtime.getLocalServerId() == null || !runtime.getLocalServerId().equals(dispatchPlan.getSourceServerId())) {
+                return null;
+            }
+            return runtime.findOnlinePlayer(dispatchPlan.getSubjectPlayerName());
+        }
+
+        private static TerminalServerToolsSectionSnapshot.ActionFeedback toActionFeedback(GatewayDispatchResult result,
+            String warpName) {
+            if (result.getStatus() == GatewayDispatchResult.Status.COMPLETED_LOCAL) {
+                return new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                    "本服传送完成",
+                    "已执行 warp: " + warpName,
+                    TerminalNotificationSeverity.SUCCESS.name());
+            }
+            if (result.getStatus() == GatewayDispatchResult.Status.PENDING_REMOTE) {
+                return new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                    "跨服传送已提交",
+                    result.getMessage() == null ? "Transfer ticket created / pending remote." : result.getMessage(),
+                    TerminalNotificationSeverity.SUCCESS.name());
+            }
+            return new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                "传送失败",
+                result.getMessage() == null ? "Teleport failed" : result.getMessage(),
+                TerminalNotificationSeverity.ERROR.name());
+        }
+    }
+
+    private static final class DefaultServerToolsRuntimeProvider implements ServerToolsRuntimeProvider {
+
+        @Override
+        public ServerToolsRuntimeBridge resolve() {
+            if (GalaxyBase.proxy == null || GalaxyBase.proxy.getModuleManager() == null) {
+                return null;
+            }
+            ServerToolsModule module = GalaxyBase.proxy.getModuleManager().findModule(ServerToolsModule.class);
+            return module == null ? null : new ModuleBackedServerToolsRuntimeBridge(module);
+        }
+    }
+
+    private static final class ModuleBackedServerToolsRuntimeBridge implements ServerToolsRuntimeBridge {
+
+        private final ServerToolsModule module;
+
+        private ModuleBackedServerToolsRuntimeBridge(ServerToolsModule module) {
+            this.module = module;
+        }
+
+        @Override
+        public boolean isRuntimeAvailable() {
+            return module != null && module.isRuntimeAvailable() && module.getPlayerTeleportService() != null;
+        }
+
+        @Override
+        public String getLocalServerId() {
+            return module == null ? null : module.getLocalServerId();
+        }
+
+        @Override
+        public List<ServerDescriptor> listServers() {
+            ClusterInfrastructure clusterInfrastructure = module == null ? null : module.getClusterInfrastructure();
+            if (clusterInfrastructure == null || clusterInfrastructure.getServerDirectory() == null) {
+                return new ArrayList<ServerDescriptor>();
+            }
+            try {
+                return clusterInfrastructure.getServerDirectory().listAll();
+            } catch (RuntimeException ignored) {
+                return new ArrayList<ServerDescriptor>();
+            }
+        }
+
+        @Override
+        public List<ServerWarp> listWarps() {
+            if (module == null || module.getPlayerTeleportService() == null) {
+                return new ArrayList<ServerWarp>();
+            }
+            try {
+                return module.getPlayerTeleportService().listWarps();
+            } catch (RuntimeException ignored) {
+                return new ArrayList<ServerWarp>();
+            }
+        }
+
+        @Override
+        public List<TransferTicket> findRecentTickets(String playerUuid, int limit) {
+            ClusterInfrastructure clusterInfrastructure = module == null ? null : module.getClusterInfrastructure();
+            if (clusterInfrastructure == null || clusterInfrastructure.getTeleportTicketRepository() == null
+                || playerUuid == null || playerUuid.trim().isEmpty()) {
+                return new ArrayList<TransferTicket>();
+            }
+            try {
+                return clusterInfrastructure.getTeleportTicketRepository().findRecentForPlayer(playerUuid, limit);
+            } catch (RuntimeException ignored) {
+                return new ArrayList<TransferTicket>();
+            }
+        }
+
+        @Override
+        public TeleportDispatchPlan prepareWarpTeleport(EntityPlayerMP player, String warpName) {
+            return module.getPlayerTeleportService().prepareWarpTeleport(
+                module.captureActor(player),
+                PlayerTeleportService.newRequestId("terminal-warp"),
+                warpName);
+        }
+
+        @Override
+        public GatewayDispatchResult dispatchTeleport(EntityPlayerMP player, TeleportDispatchPlan dispatchPlan) {
+            return module.dispatchTeleport(player, dispatchPlan);
+        }
+
+        @Override
+        public EntityPlayerMP findOnlinePlayer(String playerName) {
+            return module.findOnlinePlayer(playerName);
+        }
+    }
+
+    private static String formatInstant(Instant instant) {
+        return instant == null ? "--" : SERVER_TOOLS_TIME_FORMATTER.format(instant);
     }
 
     private static final class BankActionContext {
@@ -703,6 +1448,21 @@ public final class TerminalService {
             this.customSnapshot = customSnapshot;
             this.exchangeSnapshot = exchangeSnapshot;
             this.actionResult = actionResult;
+        }
+    }
+
+    private static final class ServerToolsActionContext {
+
+        private final TerminalServerToolsSectionSnapshot snapshot;
+        private final TerminalServerToolsActionPayload payload;
+        private final TerminalServerToolsSectionSnapshot.ActionFeedback actionFeedback;
+
+        private ServerToolsActionContext(TerminalServerToolsSectionSnapshot snapshot,
+            TerminalServerToolsActionPayload payload,
+            TerminalServerToolsSectionSnapshot.ActionFeedback actionFeedback) {
+            this.snapshot = snapshot == null ? TerminalServerToolsSectionSnapshot.placeholder() : snapshot;
+            this.payload = payload == null ? TerminalServerToolsActionPayload.empty() : payload;
+            this.actionFeedback = actionFeedback;
         }
     }
 }

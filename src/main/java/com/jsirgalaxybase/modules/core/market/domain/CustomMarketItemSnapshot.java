@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.util.Base64;
 
 import com.jsirgalaxybase.modules.core.market.application.MarketOperationException;
+import com.jsirgalaxybase.modules.core.vault.application.VaultItemStackCodec;
 
 import cpw.mods.fml.common.registry.GameRegistry;
 import net.minecraft.item.Item;
@@ -47,7 +48,14 @@ public class CustomMarketItemSnapshot {
             throw new MarketOperationException("custom market listing requires exactly one item in hand");
         }
         Item item = stack.getItem();
-        GameRegistry.UniqueIdentifier identifier = item == null ? null : GameRegistry.findUniqueIdentifierFor(item);
+        GameRegistry.UniqueIdentifier identifier = null;
+        if (item != null) {
+            try {
+                identifier = GameRegistry.findUniqueIdentifierFor(item);
+            } catch (RuntimeException ignored) {
+                // Unit fixtures and legacy snapshots can contain an item before Forge assigns its registry name.
+            }
+        }
         String itemId = identifier == null && item != null ? Item.itemRegistry.getNameForObject(item)
             : identifier == null ? null : identifier.modId + ":" + identifier.name;
         if (itemId == null) {
@@ -70,7 +78,7 @@ public class CustomMarketItemSnapshot {
             displayName = itemId;
         }
         return new CustomMarketItemSnapshot(0L, listingId, itemId, meta, stack.stackSize, stackable, displayName,
-            encodeStack(stack), now);
+            VaultItemStackCodec.encode(stack), now);
     }
 
     public long getSnapshotId() {
@@ -110,6 +118,11 @@ public class CustomMarketItemSnapshot {
     }
 
     public ItemStack toItemStack() {
+        try {
+            return VaultItemStackCodec.decode(nbtSnapshot);
+        } catch (RuntimeException ignored) {
+            // Retain field-based recovery for pre-Vault snapshots created by earlier releases.
+        }
         NBTTagCompound decodedTag = null;
         try {
             byte[] bytes = Base64.getDecoder().decode(nbtSnapshot);
@@ -138,18 +151,6 @@ public class CustomMarketItemSnapshot {
             restoredStack.setStackDisplayName(displayName);
         }
         return restoredStack;
-    }
-
-    private static String encodeStack(ItemStack stack) {
-        NBTTagCompound tag = new NBTTagCompound();
-        stack.writeToNBT(tag);
-        try {
-            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-            CompressedStreamTools.writeCompressed(tag, outputStream);
-            return Base64.getEncoder().encodeToString(outputStream.toByteArray());
-        } catch (IOException exception) {
-            throw new MarketOperationException("failed to capture custom market snapshot: " + exception.getMessage());
-        }
     }
 
     private static String readDisplayNameFromTag(ItemStack stack) {

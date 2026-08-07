@@ -121,6 +121,31 @@ CREATE INDEX IF NOT EXISTS idx_market_trade_sell_order
 CREATE INDEX IF NOT EXISTS idx_market_trade_buy_order
     ON market_trade_record (buy_order_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS standardized_market_catalog (
+    product_key VARCHAR(128) PRIMARY KEY,
+    registry_name VARCHAR(128) NOT NULL,
+    meta INT NOT NULL,
+    display_name VARCHAR(255) NOT NULL,
+    unit_label VARCHAR(64) NOT NULL DEFAULT '标准单位',
+    reference_price BIGINT NOT NULL DEFAULT 0,
+    stackable BOOLEAN NOT NULL DEFAULT TRUE,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    sort_order INT NOT NULL DEFAULT 1000,
+    catalog_version VARCHAR(64) NOT NULL DEFAULT 'standardized-market-catalog-db-v1',
+    category_code VARCHAR(64) NOT NULL DEFAULT 'standardized',
+    admission_basis VARCHAR(255) NOT NULL DEFAULT '管理员目录准入',
+    source_entry_label VARCHAR(255) NOT NULL DEFAULT '管理员维护',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_standardized_market_catalog_meta_nonnegative CHECK (meta >= 0),
+    CONSTRAINT ck_standardized_market_catalog_reference_price_nonnegative CHECK (reference_price >= 0)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_standardized_market_catalog_item
+    ON standardized_market_catalog (registry_name, meta);
+CREATE INDEX IF NOT EXISTS idx_standardized_market_catalog_browse
+    ON standardized_market_catalog (enabled, sort_order, display_name, product_key);
+
 CREATE TABLE IF NOT EXISTS custom_market_listing (
     listing_id BIGSERIAL PRIMARY KEY,
     seller_player_ref VARCHAR(64) NOT NULL,
@@ -201,7 +226,7 @@ CREATE TABLE IF NOT EXISTS custom_market_audit_log (
         REFERENCES custom_market_listing (listing_id) ON DELETE SET NULL,
     CONSTRAINT fk_custom_market_audit_trade FOREIGN KEY (trade_id)
         REFERENCES custom_market_trade_record (trade_id) ON DELETE SET NULL,
-    CONSTRAINT ck_custom_market_audit_type CHECK (audit_type IN ('LISTING_PUBLISH', 'LISTING_PURCHASE', 'LISTING_CLAIM', 'LISTING_CANCEL'))
+    CONSTRAINT ck_custom_market_audit_type CHECK (audit_type IN ('LISTING_PUBLISH', 'LISTING_PURCHASE', 'LISTING_CLAIM', 'LISTING_CANCEL', 'LISTING_DELIVERY'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_custom_market_audit_listing

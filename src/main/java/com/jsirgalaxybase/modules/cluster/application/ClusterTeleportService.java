@@ -18,7 +18,7 @@ import com.jsirgalaxybase.modules.cluster.port.TeleportTicketRepository;
 
 public class ClusterTeleportService {
 
-    private static final long DEFAULT_TICKET_TTL_SECONDS = 60L;
+    private static final long DEFAULT_TICKET_TTL_SECONDS = 300L;
 
     private final String localServerId;
     private final ServerDirectory serverDirectory;

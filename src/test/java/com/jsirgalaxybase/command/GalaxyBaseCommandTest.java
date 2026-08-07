@@ -60,6 +60,7 @@ import com.jsirgalaxybase.modules.core.market.domain.CustomMarketItemSnapshot;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketListing;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketListingStatus;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketTradeRecord;
+import com.jsirgalaxybase.modules.core.market.port.CustomMarketDeliveryPort;
 import com.jsirgalaxybase.modules.core.market.domain.ExchangeMarketLimitPolicy;
 import com.jsirgalaxybase.modules.core.market.domain.ExchangeMarketLimitStatus;
 import com.jsirgalaxybase.modules.core.market.domain.ExchangeMarketPairDefinition;
@@ -73,10 +74,37 @@ import com.jsirgalaxybase.modules.core.market.port.MarketOperationLogRepository;
 import com.jsirgalaxybase.modules.core.market.port.MarketOrderBookRepository;
 import com.jsirgalaxybase.modules.core.market.port.MarketTradeRecordRepository;
 import com.jsirgalaxybase.modules.core.market.repository.MarketTransactionRunner;
+import com.jsirgalaxybase.modules.servertools.ServerToolsModule;
 
 public class GalaxyBaseCommandTest {
 
     private static final Item CUSTOM_TEST_ITEM = new Item().setUnlocalizedName("custom_claim_test_item");
+
+    @Test
+    public void rootTabCompletionIncludesServerToolsRoutes() {
+        ModuleManager moduleManager = new ModuleManager();
+        moduleManager.addModule(new ServerToolsModule());
+        GalaxyBaseCommand command = new GalaxyBaseCommand(moduleManager);
+
+        List<String> rootSuggestions = command.addTabCompletionOptions(null, new String[] { "s" });
+        List<String> serverToolsSuggestions = command.addTabCompletionOptions(null,
+            new String[] { "servertools", "w" });
+
+        assertTrue(rootSuggestions.contains("servertools"));
+        assertTrue(rootSuggestions.contains("st"));
+        assertEquals(1, serverToolsSuggestions.size());
+        assertEquals("warp", serverToolsSuggestions.get(0));
+    }
+
+    @Test
+    public void marketCustomTabCompletionIncludesManualDeliveryRecovery() {
+        GalaxyBaseCommand command = new GalaxyBaseCommand(new ModuleManager());
+
+        List<String> suggestions = command.addTabCompletionOptions(null,
+            new String[] { "market", "custom", "rec" });
+
+        assertTrue(suggestions.contains("recover"));
+    }
 
     @Test
     public void marketUsageDescribesQuoteAndExchangeAsExchangeCompatibilityEntry() throws Exception {
@@ -780,8 +808,26 @@ public class GalaxyBaseCommandTest {
         }
 
         @Override
+        public ClaimListingResult claimPurchasedListing(ClaimCustomMarketListingCommand command,
+            CustomMarketDeliveryPort deliveryPort) {
+            lastClaimCommand = command;
+            deliveryPort.deliver(command.getRequestId(), command.getBuyerPlayerRef(), command.getSourceServerId(),
+                claimResult.getSnapshot());
+            return claimResult;
+        }
+
+        @Override
         public CancelListingResult cancelListing(CancelCustomMarketListingCommand command) {
             lastCancelCommand = command;
+            return cancelResult;
+        }
+
+        @Override
+        public CancelListingResult cancelListing(CancelCustomMarketListingCommand command,
+            CustomMarketDeliveryPort deliveryPort) {
+            lastCancelCommand = command;
+            deliveryPort.deliver(command.getRequestId(), command.getSellerPlayerRef(), command.getSourceServerId(),
+                cancelResult.getSnapshot());
             return cancelResult;
         }
 

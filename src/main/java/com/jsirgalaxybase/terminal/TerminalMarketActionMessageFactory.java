@@ -28,6 +28,60 @@ public final class TerminalMarketActionMessageFactory {
             marketSectionState.toPayload().encode());
     }
 
+    public static TerminalActionMessage createConfirmDepositHeldMessage(TerminalHomeScreenModel screenModel,
+        TerminalMarketSectionModel marketModel, TerminalMarketSectionState marketSectionState) {
+        if (!isStandardizedMarket(screenModel, marketModel, marketSectionState)
+            || marketSectionState.getVaultDepositQuantityText().isEmpty()
+            || marketSectionState.getVaultDepositQuantityText().equals("0")) {
+            return null;
+        }
+        return createMarketActionMessage(screenModel, TerminalActionType.MARKET_CONFIRM_DEPOSIT_HELD, marketSectionState);
+    }
+
+    public static TerminalActionMessage createConfirmLimitSellMessage(TerminalHomeScreenModel screenModel,
+        TerminalMarketSectionModel marketModel, TerminalMarketSectionState marketSectionState) {
+        if (!isStandardizedMarket(screenModel, marketModel, marketSectionState) || !marketSectionState.hasCompleteLimitSellDraft()) {
+            return null;
+        }
+        return createMarketActionMessage(screenModel, TerminalActionType.MARKET_CONFIRM_LIMIT_SELL, marketSectionState);
+    }
+
+    public static TerminalActionMessage createConfirmInstantBuyMessage(TerminalHomeScreenModel screenModel,
+        TerminalMarketSectionModel marketModel, TerminalMarketSectionState marketSectionState) {
+        if (!isStandardizedMarket(screenModel, marketModel, marketSectionState) || !marketSectionState.hasCompleteInstantBuyDraft()) {
+            return null;
+        }
+        return createMarketActionMessage(screenModel, TerminalActionType.MARKET_CONFIRM_INSTANT_BUY, marketSectionState);
+    }
+
+    public static TerminalActionMessage createConfirmInstantSellMessage(TerminalHomeScreenModel screenModel,
+        TerminalMarketSectionModel marketModel, TerminalMarketSectionState marketSectionState) {
+        if (!isStandardizedMarket(screenModel, marketModel, marketSectionState) || !marketSectionState.hasCompleteInstantSellDraft()) {
+            return null;
+        }
+        return createMarketActionMessage(screenModel, TerminalActionType.MARKET_CONFIRM_INSTANT_SELL, marketSectionState);
+    }
+
+    public static TerminalActionMessage createConfirmOrderMessage(TerminalHomeScreenModel screenModel,
+        TerminalMarketSectionModel marketModel, TerminalMarketSectionState marketSectionState) {
+        if (!isStandardizedMarket(screenModel, marketModel, marketSectionState)
+            || !marketSectionState.hasCompleteOrderTicket()) {
+            return null;
+        }
+        return new TerminalActionMessage(screenModel.getSessionToken(), screenModel.getSelectedPageId(),
+            TerminalActionType.MARKET_CONFIRM_ORDER.getId(),
+            marketSectionState.toUnifiedOrderPayload().encodeUnifiedOrder());
+    }
+
+    public static TerminalActionMessage createCancelOrderMessage(TerminalHomeScreenModel screenModel,
+        TerminalMarketSectionModel marketModel, TerminalMarketSectionState marketSectionState) {
+        if (!isStandardizedMarket(screenModel, marketModel, marketSectionState)
+            || !marketSectionState.hasPendingCancelOrderSelection()) {
+            return null;
+        }
+        return createMarketActionMessage(screenModel, TerminalActionType.MARKET_CANCEL_ORDER, marketSectionState);
+    }
+
     public static TerminalActionMessage createClaimMessage(TerminalHomeScreenModel screenModel,
         TerminalMarketSectionModel marketModel, TerminalMarketSectionState marketSectionState) {
         if (screenModel == null || marketModel == null || marketSectionState == null) {
@@ -40,6 +94,23 @@ public final class TerminalMarketActionMessageFactory {
             screenModel.getSessionToken(),
             screenModel.getSelectedPageId(),
             TerminalActionType.fromId("market_claim_asset").getId(),
+            marketSectionState.toPayload().encode());
+    }
+
+    private static boolean isStandardizedMarket(TerminalHomeScreenModel screenModel, TerminalMarketSectionModel marketModel,
+        TerminalMarketSectionState marketSectionState) {
+        if (screenModel == null || marketModel == null || marketSectionState == null) {
+            return false;
+        }
+        return TerminalPage.MARKET_STANDARDIZED == TerminalPage.fromId(screenModel.getSelectedPageId());
+    }
+
+    private static TerminalActionMessage createMarketActionMessage(TerminalHomeScreenModel screenModel,
+        TerminalActionType actionType, TerminalMarketSectionState marketSectionState) {
+        return new TerminalActionMessage(
+            screenModel.getSessionToken(),
+            screenModel.getSelectedPageId(),
+            actionType.getId(),
             marketSectionState.toPayload().encode());
     }
 

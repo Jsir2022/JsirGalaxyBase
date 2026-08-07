@@ -4,6 +4,25 @@
 
 ## 当前最建议先看的内容
 
+- `modern-trading-terminal-visual-gap-baseline-2026-08-08.md`
+  - 以最新 `/home/u24/图片/市场第三版.png` 为唯一视觉目标，对比当前浏览、Hover、详情三张实机图，逐项记录 UI、行情数据、交易票据与账户仓自动交割差距及最终验收清单
+- `modern-trading-terminal-redesign-v1.md`
+  - 标准商品市场向现代证券交易终端演进的产品与技术方向，定义四列行情浏览、只读 Hover、图表/盘口/订单票据和账户仓自动预留/交付模型
+- `current-product-direction-and-gap-review-2026-05-18.md`
+  - 当前产品方向、进度判断、剩余需求清单与下一阶段建议；优先用于判断 terminal、market、ServerTools 后续工作顺序
+- `market-terminal-phased-execution-plan-2026-06-14.md`
+  - 市场终端后续实施的正式阶段计划；明确为什么不能按四页机械平摊推进，而应先做共享市场壳与标准商品市场工作台
+- `market-terminal-child-pages-defect-plan-2026-06-20.md`
+  - 当前市场终端子页面实机缺陷、后端数据缺口与三轮整改计划；用于后续对照效果图推进 MARKET_STANDARDIZED / MARKET_CUSTOM / MARKET_EXCHANGE 收口
+- `market-warehouse-v1-product-boundary-draft.md`
+  - 市场仓库 v1 的制度边界草案；重点定义“仓库首先是资产状态系统”，并区分市场托管仓、企业私仓与公共仓
+- `warehouse-transfer-and-audit-boundary-v1.md`
+  - 四类库存之间允许的转移矩阵、幂等审计合同及物理物品中断恢复原则；企业仓和公共仓实现前的硬约束
+- `terminal-servertools-page-v1-acceptance-review-2026-06-06.md`
+  - 群组服 / ServerTools 终端页 v1 的验收判断和收口记录；当前结论是页面、recent transfer ticket 状态展示和默认 facade 后端测试都已接入，剩余工作主要是游戏内验收
+- `terminal-ui-redesign-toward-concept-mockup-2026-06-07.md`
+  - 终端朝效果图方向改造的整体设计、分阶段计划和逐项对图差异记录；确认继续走 BetterQuesting 风格游戏内 GUI 路线，并明确 `传送 / 群组服` 不是做 hover 细修，而是要重做成专用的三栏传送工具页
+
 ## 当前终端 GUI 迁移进度
 
 - BetterQuesting 风格 phase 1 framework 已经落到仓库自有命名空间。
@@ -17,6 +36,7 @@
 - BetterQuesting 风格 phase 7 已把 MARKET_CUSTOM 与 MARKET_EXCHANGE 迁入新壳：`TerminalCustomMarketSection` 承接 listing-first 浏览、详情、购买 / 下架 / 领取确认与 snapshot 回写，`TerminalExchangeMarketSection` 承接 quote-first 标的、规则、刷新报价与确认兑换；新壳侧已不再直接依赖旧 market builder / sync binder / dialog / session controller，旧 ModularUI terminal 仅作为 phase 8 cutover 前的过渡实现保留。
 - BetterQuesting 风格 phase 8 已把正式终端打开链 cutover 到新 `TerminalHomeScreen`：G 键与背包按钮默认发送 `OpenTerminalRequestMessage`，服务端经 `TerminalService.approveTerminalClientScreen(...)` 生成初始 snapshot 与 session token，再由 `OpenTerminalApprovedMessage` 在客户端打开新壳。
 - BetterQuesting 风格 phase 9 已删除旧 terminal ModularUI 过渡实现：旧 fallback packet、旧 GUI factory 注册、旧 terminal builder / binder / sync state / session controller / dialog 均已移除；BANK、MARKET_STANDARDIZED、MARKET_CUSTOM、MARKET_EXCHANGE 继续由新 `TerminalHomeScreen` 主链承接。
+- ServerTools 群组服传送页 v1 已出现在新壳中：`SERVER_TOOLS` 顶层页已接入导航、snapshot、网络序列化、客户端 section、warp 选择与确认弹窗，确认 warp 复用 `PlayerTeleportService.prepareWarpTeleport(...)` 与 `ServerToolsModule.dispatchTeleport(...)`；recent transfer ticket 状态展示和默认 facade 后端调用测试也已补齐，后续重点转为游戏内验收与局部密度微调。
 
 - `../README.md`
   - 项目定位、代码结构、开发原则，以及 `Reference/ServerUtilities` 的后续整合边界
@@ -36,6 +56,8 @@
   - server tools / cluster 第二阶段严格验收后的收口 prompt，聚焦修复 ticket 过期消息写回错误和重复 requestId 的终态幂等语义错误
 - `servertools-phase3-mcsm-gray-rollout-prompt-2026-04-12.md`
   - server tools / cluster 下一阶段的 MCSM 灰度联调准备执行 prompt，聚焦只用代理 / 大厅 / S2 搭出不影响在线 S1 的可启动、可观察、可继续联调灰度链
+- `servertools-phase3-gray-rollout-status-2026-05-17.md`
+  - server tools / cluster 第三阶段灰度准备实操记录；当前真实运行链为 Docker + supervisor，Entrance / Lobby / S2 已部署当前 JsirGalaxyBase jar、完成数据库前置并启动，不触碰 S1
 - `servertools-phase1-command-reference.md`
   - 第一批 server tools / cluster 命令格式、当前跨服边界、数据库表落点与网关预留说明
 - `../Reference/ServerUtilities/README.md`
@@ -78,6 +100,10 @@
   - 银行系统一期数据表与事务边界设计
 - `market-three-part-architecture.md`
   - 市场三分结构的正式边界、旧实现归位判断与下一阶段执行顺序
+- `market-warehouse-v1-product-boundary-draft.md`
+  - 市场仓库 v1 的产品边界草案，强调标准商品市场托管仓先行，并预留企业私仓 / 公共仓的制度分层
+- `warehouse-transfer-and-audit-boundary-v1.md`
+  - 市场托管仓、玩家背包、企业仓与公共仓的转移/审计合同，规定未来跨域库存实现的边界
 - `standardized-market-catalog-boundary.md`
   - 标准商品市场正式目录版本、准入边界与目录来源分层说明
 - `standardized-market-catalog-boundary-prompt-2026-04-03.md`
@@ -94,6 +120,8 @@
   - MARKET 总入口拆分阶段的收口 prompt，聚焦真实路由回归测试与 docs 索引补齐
 - `market-entry-overview.md`
   - MARKET 总入口三分后的落地说明，明确总入口只做三类市场入口与共享摘要，不再承担混合交易详情页
+- `market-terminal-phased-execution-plan-2026-06-14.md`
+  - 市场终端后续阶段计划，定义 `共享市场壳 -> 标准商品市场 -> 定制商品市场 -> 汇率市场 -> 统一收口` 的执行顺序与验收目标
 - `market-terminal-asset-first-refactor-evaluation-2026-04-05.md`
   - 市场终端下一轮重构评估，明确 asset-first 导航方向为何成立，以及哪些市场语义可以统一、哪些不能硬统一
 - `market-terminal-asset-first-refactor-prompt-2026-04-05.md`

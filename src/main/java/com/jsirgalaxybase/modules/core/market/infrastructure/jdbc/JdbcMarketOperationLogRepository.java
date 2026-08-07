@@ -19,6 +19,9 @@ import com.jsirgalaxybase.modules.core.market.port.MarketOperationLogRepository;
 
 public class JdbcMarketOperationLogRepository extends AbstractJdbcRepository implements MarketOperationLogRepository {
 
+    private static final int MESSAGE_MAX_LENGTH = 255;
+    private static final String TRUNCATION_SUFFIX = "... [truncated]";
+
     public JdbcMarketOperationLogRepository(JdbcConnectionManager connectionManager) {
         super(connectionManager);
     }
@@ -83,7 +86,7 @@ public class JdbcMarketOperationLogRepository extends AbstractJdbcRepository imp
                     } else {
                         statement.setNull(5, java.sql.Types.BIGINT);
                     }
-                    setNullableText(statement, 6, operationLog.getMessage());
+                    setNullableText(statement, 6, boundedMessage(operationLog.getMessage()));
                     statement.setTimestamp(7, java.sql.Timestamp.from(operationLog.getUpdatedAt()));
                     statement.setLong(8, operationLog.getOperationId());
                     if (statement.executeUpdate() != 1) {
@@ -220,7 +223,7 @@ public class JdbcMarketOperationLogRepository extends AbstractJdbcRepository imp
         } else {
             statement.setNull(10, java.sql.Types.BIGINT);
         }
-        setNullableText(statement, 11, operationLog.getMessage());
+        setNullableText(statement, 11, boundedMessage(operationLog.getMessage()));
         statement.setTimestamp(12, java.sql.Timestamp.from(operationLog.getCreatedAt()));
         statement.setTimestamp(13, java.sql.Timestamp.from(operationLog.getUpdatedAt()));
     }
@@ -234,5 +237,12 @@ public class JdbcMarketOperationLogRepository extends AbstractJdbcRepository imp
             resultSet.getLong("related_order_id"),
             resultSet.getLong("related_custody_id"), resultSet.getLong("related_trade_id"),
             resultSet.getString("message"), readInstant(resultSet, "created_at"), readInstant(resultSet, "updated_at"));
+    }
+
+    private String boundedMessage(String message) {
+        if (message == null || message.length() <= MESSAGE_MAX_LENGTH) {
+            return message;
+        }
+        return message.substring(0, MESSAGE_MAX_LENGTH - TRUNCATION_SUFFIX.length()) + TRUNCATION_SUFFIX;
     }
 }

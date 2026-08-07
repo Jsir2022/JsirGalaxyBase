@@ -41,6 +41,18 @@ public class TerminalHomeScreenModelTest {
     }
 
     @Test
+    public void defaultNavigationAndSnapshotsIncludeServerToolsPage() {
+        TerminalHomeScreenModel model = TerminalHomeScreenModel.placeholder().withSelectedPageId("server_tools");
+
+        assertEquals("server_tools", model.getSelectedPageId());
+        assertEquals("server_tools", model.getSelectedNavigationPageId());
+        assertEquals("server_tools", model.getSelectedSectionPageId());
+        assertEquals("server_tools", model.getSelectedNavItem().getPageId());
+        assertNotNull(model.getPageSnapshot("server_tools").getServerToolsSectionModel());
+        assertEquals("传送", model.getSelectedNavItem().getLabel());
+    }
+
+    @Test
     public void selectedPageIdRemainsSingleSourceWhenTargetingNonHomePage() {
         TerminalHomeScreenModel model = new TerminalHomeScreenModel(
             "career",

@@ -144,6 +144,36 @@ public class JdbcMarketOrderBookRepository extends AbstractJdbcRepository implem
     }
 
     @Override
+    public List<MarketOrder> findOpenOrdersByProductKeys(final List<String> productKeys) {
+        if (productKeys == null || productKeys.isEmpty()) {
+            return java.util.Collections.emptyList();
+        }
+        final List<String> keys = new ArrayList<String>();
+        for (String key : productKeys) {
+            if (key != null && !key.trim().isEmpty() && !keys.contains(key.trim())) keys.add(key.trim());
+        }
+        if (keys.isEmpty()) return java.util.Collections.emptyList();
+        return connectionManager.withConnection(new JdbcConnectionCallback<List<MarketOrder>>() {
+            @Override public List<MarketOrder> doInConnection(java.sql.Connection connection) throws SQLException {
+                StringBuilder placeholders = new StringBuilder();
+                for (int index = 0; index < keys.size(); index++) {
+                    if (index > 0) placeholders.append(',');
+                    placeholders.append('?');
+                }
+                PreparedStatement statement = connection.prepareStatement(
+                    "SELECT * FROM market_order WHERE product_key IN (" + placeholders
+                        + ") AND order_status IN ('OPEN', 'PARTIALLY_FILLED') "
+                        + "ORDER BY product_key, order_side, unit_price, created_at, order_id");
+                try {
+                    for (int index = 0; index < keys.size(); index++) statement.setString(index + 1, keys.get(index));
+                    ResultSet resultSet = statement.executeQuery();
+                    try { return mapOrders(resultSet); } finally { resultSet.close(); }
+                } finally { statement.close(); }
+            }
+        });
+    }
+
+    @Override
     public List<MarketOrder> findMatchingSellOrders(final String productKey, final long maxUnitPrice) {
         return findOrdersForMatch(
             "SELECT * FROM market_order WHERE product_key = ? AND order_side = 'SELL' AND order_status IN ('OPEN', 'PARTIALLY_FILLED') AND unit_price <= ? ORDER BY unit_price ASC, created_at ASC, order_id ASC FOR UPDATE",

@@ -1,11 +1,13 @@
 package com.jsirgalaxybase.modules.core.market.application;
 
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 import com.jsirgalaxybase.modules.core.banking.application.command.FrozenBalanceCommand;
@@ -285,7 +287,7 @@ public class StandardizedSpotMarketService {
                 }
             });
         } catch (RuntimeException exception) {
-            handleOperationFailure(processing, refs, exception);
+            handleCancellationFailure(processing, refs, exception);
             throw exception;
         }
     }
@@ -435,7 +437,7 @@ public class StandardizedSpotMarketService {
                 }
             });
         } catch (RuntimeException exception) {
-            handleOperationFailure(processing, refs, exception);
+            handleCancellationFailure(processing, refs, exception);
             throw exception;
         }
     }
@@ -491,20 +493,8 @@ public class StandardizedSpotMarketService {
                         identified.getOperationId(), Instant.now()));
                     refs.custodyId = claimingCustody.getCustodyId();
 
-                    try {
-                        claimDeliveryPort.deliver(buildClaimDeliveryRequestId(requestId), playerRef, sourceServerId,
-                            claimingCustody.getProduct(), claimingCustody.isStackable(), claimingCustody.getQuantity());
-                    } catch (MarketClaimDeliveryException exception) {
-                        if (exception.isSafeToRestoreClaimable()) {
-                            MarketCustodyInventory restored = custodyRepository.update(claimingCustody.withStateAndLinks(
-                                MarketCustodyStatus.CLAIMABLE, claimingCustody.getQuantity(),
-                                claimingCustody.getRelatedOrderId(), identified.getOperationId(), Instant.now()));
-                            operationLogRepository.update(identified.withState(MarketOperationStatus.FAILED,
-                                restored.getRelatedOrderId(), restored.getCustodyId(), 0L, exception.getMessage(),
-                                refs.recoveryMetadataKey, Instant.now()));
-                        }
-                        throw exception;
-                    }
+                    claimDeliveryPort.deliver(buildClaimDeliveryRequestId(requestId), playerRef, sourceServerId,
+                        claimingCustody.getProduct(), claimingCustody.isStackable(), claimingCustody.getQuantity());
 
                     refs.recoveryMetadataKey = MarketRecoveryMetadata.parse(refs.recoveryMetadataKey).toBuilder()
                         .putBoolean("deliveryCompleted", true)
@@ -520,7 +510,9 @@ public class StandardizedSpotMarketService {
                 }
             });
         } catch (MarketClaimDeliveryException exception) {
-            if (!exception.isSafeToRestoreClaimable()) {
+            if (exception.isSafeToRestoreClaimable()) {
+                markSafeClaimDeliveryFailure(processing, refs, exception);
+            } else {
                 handleOperationFailure(processing, refs, exception);
             }
             throw exception;
@@ -572,6 +564,14 @@ public class StandardizedSpotMarketService {
 
     public StandardizedMarketProductCatalog getProductCatalog() {
         return productCatalog;
+    }
+
+    public StandardizedMarketCatalogPage browseCatalog(String query, int pageIndex, int pageSize) {
+        if (productCatalog instanceof StandardizedMarketCatalogBrowser) {
+            return ((StandardizedMarketCatalogBrowser) productCatalog).browse(query, pageIndex, pageSize);
+        }
+        return new StandardizedMarketCatalogPage(query, pageIndex, pageSize, 0,
+            Collections.<StandardizedMarketCatalogEntry>emptyList());
     }
 
     private DepositInventoryResult replayDeposit(MarketOperationLog existing) {
@@ -962,6 +962,64 @@ public class StandardizedSpotMarketService {
             exception.getMessage(), refs.recoveryMetadataKey, Instant.now()));
     }
 
+    /**
+     * A cancel request can be rejected because the order was already filled or
+     * cancelled. That is a safe precondition failure: it must not convert the
+     * settled order or custody into an exception merely because the request was
+     * made after its lifecycle ended.
+     */
+    private void handleCancellationFailure(MarketOperationLog operation, MutableRefs refs, RuntimeException exception) {
+        if (isSafeCancellationRejection(exception)) {
+            operationLogRepository.update(operation.withState(MarketOperationStatus.FAILED, refs.orderId,
+                refs.custodyId, refs.tradeId, exception.getMessage(), refs.recoveryMetadataKey, Instant.now()));
+            return;
+        }
+        handleOperationFailure(operation, refs, exception);
+    }
+
+    private boolean isSafeCancellationRejection(RuntimeException exception) {
+        if (!(exception instanceof MarketOperationException) || exception.getMessage() == null) {
+            return false;
+        }
+        String message = exception.getMessage();
+        return "order is not cancellable in current status".equals(message)
+            || "order is not owned by playerRef".equals(message)
+            || "order is not a sell order".equals(message)
+            || "order is not a buy order".equals(message);
+    }
+
+    /**
+     * A safe delivery failure means no item entered the player's inventory. This must happen after the
+     * claim transaction has rolled back, otherwise the restored custody/log state would roll back with it.
+     */
+    private void markSafeClaimDeliveryFailure(final MarketOperationLog processing, final MutableRefs refs,
+        final MarketClaimDeliveryException exception) {
+        try {
+            transactionRunner.inTransaction(new Supplier<Void>() {
+
+                @Override
+                public Void get() {
+                    MarketCustodyInventory custody = custodyRepository.lockById(refs.custodyId);
+                    if (custody.getStatus() == MarketCustodyStatus.CLAIMING) {
+                        custody = custodyRepository.update(custody.withStateAndLinks(MarketCustodyStatus.CLAIMABLE,
+                            custody.getQuantity(), custody.getRelatedOrderId(), processing.getOperationId(),
+                            Instant.now()));
+                    }
+                    if (custody.getStatus() != MarketCustodyStatus.CLAIMABLE) {
+                        throw new MarketOperationException("safe claim recovery found custody in unexpected status: "
+                            + custody.getStatus().name());
+                    }
+                    operationLogRepository.update(processing.withState(MarketOperationStatus.FAILED,
+                        custody.getRelatedOrderId(), custody.getCustodyId(), refs.tradeId, exception.getMessage(),
+                        refs.recoveryMetadataKey, Instant.now()));
+                    return null;
+                }
+            });
+        } catch (RuntimeException recoveryFailure) {
+            handleOperationFailure(processing, refs, recoveryFailure);
+        }
+    }
+
     private boolean isRecoverableDepositCustody(MarketOperationLog operation,
         Optional<MarketCustodyInventory> existingCustody) {
         return operation.getOperationType() == MarketOperationType.INVENTORY_DEPOSIT && existingCustody.isPresent()
@@ -1049,7 +1107,15 @@ public class StandardizedSpotMarketService {
     }
 
     private String buildOrderBusinessRef(String action, Object ref) {
-        return "market:" + action + ":" + String.valueOf(ref);
+        String value = "market:" + action + ":" + String.valueOf(ref);
+        if (value.length() <= 64) {
+            return value;
+        }
+        // Bank transaction business_ref is VARCHAR(64). The originating market
+        // request id remains in operation_log and extraJson; this derives a
+        // deterministic, database-safe correlation key for the banking row.
+        return "market:" + action + ":" + UUID.nameUUIDFromBytes(
+            value.getBytes(StandardCharsets.UTF_8)).toString();
     }
 
     private long requirePositive(long value, String fieldName) {

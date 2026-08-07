@@ -1,22 +1,30 @@
 package com.jsirgalaxybase.terminal.client.component;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.Supplier;
 
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.FontRenderer;
+import net.minecraft.client.gui.Gui;
+
+import com.jsirgalaxybase.client.gui.framework.AbstractGuiPanel;
 import com.jsirgalaxybase.client.gui.framework.ButtonPanel;
 import com.jsirgalaxybase.client.gui.framework.GuiRect;
+import com.jsirgalaxybase.client.gui.framework.GuiScene;
 import com.jsirgalaxybase.client.gui.framework.LabelPanel;
 import com.jsirgalaxybase.client.gui.framework.PanelContainer;
-import com.jsirgalaxybase.client.gui.framework.TexturedCanvasPanel;
-import com.jsirgalaxybase.client.gui.framework.VerticalScrollPanel;
+import com.jsirgalaxybase.client.gui.framework.RoundedRectPainter;
 import com.jsirgalaxybase.client.gui.theme.ThemeColorKey;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalCustomMarketSectionModel;
 
+/** Custom listings use the shared browse/detail interaction, not a permanent two-pane page. */
 public final class TerminalCustomMarketSection extends PanelContainer {
 
     public interface ActionHandler {
-        void openMarketOverview();
         void selectListing(String scope, String listingId);
+        void openPublishConfirm();
         void openBuyConfirm();
         void openCancelConfirm();
         void openClaimConfirm();
@@ -25,127 +33,131 @@ public final class TerminalCustomMarketSection extends PanelContainer {
     private final TerminalPanelFactory panels;
     private final TerminalCustomMarketSectionModel model;
     private final TerminalCustomMarketSectionState state;
-    private final ActionHandler actionHandler;
-    private final TexturedCanvasPanel browserCard;
-    private final TexturedCanvasPanel detailCard;
-    private final TexturedCanvasPanel actionCard;
-    private final VerticalScrollPanel browserScroll;
-    private final VerticalScrollPanel detailScroll;
-    private final ButtonPanel backButton;
-    private final ButtonPanel buyButton;
-    private final ButtonPanel cancelButton;
-    private final ButtonPanel claimButton;
+    private final ActionHandler actions;
+    private final BrowseToolbarPanel toolbar;
+    private final MarketItemGridPanel grid;
+    private final CustomDetailPanel detail;
 
     public TerminalCustomMarketSection(TerminalPanelFactory panels, TerminalCustomMarketSectionModel model,
-        TerminalCustomMarketSectionState state, ActionHandler actionHandler) {
+        TerminalCustomMarketSectionState state, ActionHandler actions) {
         this.panels = panels;
         this.model = model == null ? TerminalCustomMarketSectionModel.placeholder() : model;
         this.state = state == null ? new TerminalCustomMarketSectionState() : state;
-        this.actionHandler = actionHandler;
-        browserCard = panels.createSurface(new GuiRect(0, 0, 0, 0), ThemeColorKey.PANEL_FILL);
-        detailCard = panels.createSurface(new GuiRect(0, 0, 0, 0), ThemeColorKey.PANEL_FILL);
-        actionCard = panels.createSurface(new GuiRect(0, 0, 0, 0), ThemeColorKey.PANEL_FILL);
-        browserScroll = panels.createScrollPanel(new GuiRect(0, 0, 0, 0), 4, 4);
-        detailScroll = panels.createScrollPanel(new GuiRect(0, 0, 0, 0), 4, 4);
-        addChild(browserCard);
-        addChild(detailCard);
-        addChild(actionCard);
-        browserCard.addChild(label("挂牌浏览 / " + this.model.getScopeLabel(), true));
-        browserCard.addChild(label(() -> this.model.getBrowserHint(), false));
-        browserCard.addChild(browserScroll);
-        addListingGroup("active", "全部挂牌", this.model.getActiveListingIds(), this.model.getActiveListingLines());
-        addListingGroup("selling", "我的出售", this.model.getSellingListingIds(), this.model.getSellingListingLines());
-        addListingGroup("pending", "我的待处理", this.model.getPendingListingIds(), this.model.getPendingListingLines());
-        backButton = panels.createButton(new GuiRect(0, 0, 0, 0), () -> "返回总入口", () -> {
-            if (actionHandler != null) actionHandler.openMarketOverview();
-        }, null);
-        browserCard.addChild(backButton);
-
-        detailCard.addChild(label("listing 摘要与资产", true));
-        detailCard.addChild(detailScroll);
-        addDetailLine("标题: " + this.model.getSelectedTitle());
-        addDetailLine("价格: " + this.model.getSelectedPrice());
-        addDetailLine("状态: " + this.model.getSelectedStatus());
-        addDetailLine("交易方: " + this.model.getSelectedCounterparty());
-        addDetailLine("物品: " + this.model.getSelectedItemIdentity());
-        addDetailLine("成交: " + this.model.getSelectedTradeSummary());
-        addDetailLine("动作: " + this.model.getSelectedActionHint());
-
-        actionCard.addChild(label("玩家动作与反馈", true));
-        actionCard.addChild(label(() -> this.model.getActionFeedback().getTitle() + " / " + this.model.getActionFeedback().getBody(), false));
-        buyButton = button("购买确认", () -> actionHandler.openBuyConfirm(), () -> Boolean.valueOf(this.model.isCanBuy()));
-        cancelButton = button("下架确认", () -> actionHandler.openCancelConfirm(), () -> Boolean.valueOf(this.model.isCanCancel()));
-        claimButton = button("领取确认", () -> actionHandler.openClaimConfirm(), () -> Boolean.valueOf(this.model.isCanClaim()));
-        actionCard.addChild(buyButton);
-        actionCard.addChild(cancelButton);
-        actionCard.addChild(claimButton);
-    }
-
-    @Override
-    public void setBounds(GuiRect bounds) {
-        super.setBounds(bounds);
-        int gap = 6;
-        int leftWidth = Math.max(210, Math.min(300, (int) (bounds.getWidth() * 0.34F)));
-        int actionHeight = Math.max(86, Math.min(110, bounds.getHeight() / 3));
-        browserCard.setBounds(new GuiRect(bounds.getX(), bounds.getY(), leftWidth, bounds.getHeight()));
-        detailCard.setBounds(new GuiRect(bounds.getX() + leftWidth + gap, bounds.getY(), bounds.getWidth() - leftWidth - gap,
-            bounds.getHeight() - actionHeight - gap));
-        actionCard.setBounds(new GuiRect(detailCard.getBounds().getX(), detailCard.getBounds().getBottom() + gap,
-            detailCard.getBounds().getWidth(), actionHeight));
-        layoutCard(browserCard);
-        browserScroll.setBounds(new GuiRect(browserCard.getBounds().getX() + 6, browserCard.getBounds().getY() + 34,
-            browserCard.getBounds().getWidth() - 12, browserCard.getBounds().getHeight() - 62));
-        backButton.setBounds(new GuiRect(browserCard.getBounds().getRight() - 104, browserCard.getBounds().getBottom() - 24, 92, 18));
-        layoutCard(detailCard);
-        detailScroll.setBounds(new GuiRect(detailCard.getBounds().getX() + 6, detailCard.getBounds().getY() + 24,
-            detailCard.getBounds().getWidth() - 12, detailCard.getBounds().getHeight() - 30));
-        layoutCard(actionCard);
-        int buttonY = actionCard.getBounds().getBottom() - 24;
-        buyButton.setBounds(new GuiRect(actionCard.getBounds().getX() + 8, buttonY, 86, 18));
-        cancelButton.setBounds(new GuiRect(actionCard.getBounds().getX() + 100, buttonY, 86, 18));
-        claimButton.setBounds(new GuiRect(actionCard.getBounds().getX() + 192, buttonY, 86, 18));
-    }
-
-    private void addListingGroup(final String scope, String title, List<String> ids, List<String> lines) {
-        browserScroll.addScrollableChild(label(title, true), 18);
-        int count = Math.max(ids.size(), lines.size());
-        for (int i = 0; i < count; i++) {
-            final String id = i < ids.size() ? ids.get(i) : "";
-            final String line = i < lines.size() ? lines.get(i) : id;
-            browserScroll.addScrollableChild(button(line, () -> {
-                state.setSelectedScope(scope);
-                state.setSelectedListingId(id);
-                if (actionHandler != null) actionHandler.selectListing(scope, id);
-            }, () -> Boolean.valueOf(id != null && !id.trim().isEmpty())), 20);
-        }
-    }
-
-    private void addDetailLine(String value) {
-        detailScroll.addScrollableChild(label(value, false), 18);
-    }
-
-    private ButtonPanel button(final String text, final Runnable action, final Supplier<Boolean> enabled) {
-        return panels.createButton(new GuiRect(0, 0, 0, 0), () -> text, action, enabled);
-    }
-
-    private LabelPanel label(final String text, boolean primary) {
-        return label(() -> text, primary);
-    }
-
-    private LabelPanel label(Supplier<String> text, boolean primary) {
-        return panels.createLabel(new GuiRect(0, 0, 0, 0), text, primary ? ThemeColorKey.TEXT_PRIMARY : ThemeColorKey.TEXT_SECONDARY, false);
-    }
-
-    private void layoutCard(PanelContainer card) {
-        GuiRect bounds = card.getBounds();
-        int row = 0;
-        for (int i = 0; i < card.getChildren().size(); i++) {
-            if (card.getChildren().get(i) instanceof VerticalScrollPanel || card.getChildren().get(i) instanceof ButtonPanel) {
-                continue;
+        this.actions = actions;
+        toolbar = new BrowseToolbarPanel();
+        grid = new MarketItemGridPanel(buildItems(), new MarketItemGridPanel.Listener() {
+            @Override public void select(MarketBrowseItemModel item) {
+                TerminalCustomMarketSection.this.state.requestDetail(item.getKey());
+                if (TerminalCustomMarketSection.this.actions != null) {
+                    TerminalCustomMarketSection.this.actions.selectListing(TerminalCustomMarketSection.this.state.getSelectedScope(), item.getKey());
+                }
             }
-            card.getChildren().get(i).setBounds(new GuiRect(bounds.getX() + 8, bounds.getY() + 8 + row * 12,
-                bounds.getWidth() - 16, 12));
-            row++;
+            @Override public void scrollOffsetChanged(int offset) { TerminalCustomMarketSection.this.state.setBrowserGridScrollOffset(offset); }
+        });
+        grid.setScrollOffset(this.state.getBrowserGridScrollOffset());
+        detail = new CustomDetailPanel();
+        addChild(toolbar); addChild(grid); addChild(detail);
+    }
+
+    @Override public void setBounds(GuiRect bounds) {
+        super.setBounds(bounds);
+        if (state.isDetailView()) {
+            toolbar.setVisible(false); grid.setVisible(false); detail.setVisible(true); detail.setBounds(bounds); return;
+        }
+        toolbar.setVisible(true); grid.setVisible(true); detail.setVisible(false);
+        toolbar.setBounds(new GuiRect(bounds.getX(), bounds.getY(), bounds.getWidth(), 27));
+        grid.setBounds(new GuiRect(bounds.getX(), bounds.getY() + 32, bounds.getWidth(), Math.max(0, bounds.getHeight() - 32)));
+    }
+
+    private List<MarketBrowseItemModel> buildItems() {
+        List<String> ids = "selling".equals(state.getSelectedScope()) ? model.getSellingListingIds()
+            : "pending".equals(state.getSelectedScope()) ? model.getPendingListingIds() : model.getActiveListingIds();
+        List<String> lines = "selling".equals(state.getSelectedScope()) ? model.getSellingListingLines()
+            : "pending".equals(state.getSelectedScope()) ? model.getPendingListingLines() : model.getActiveListingLines();
+        List<String> icons = "selling".equals(state.getSelectedScope()) ? model.getSellingListingIconRefs()
+            : "pending".equals(state.getSelectedScope()) ? model.getPendingListingIconRefs() : model.getActiveListingIconRefs();
+        List<MarketBrowseItemModel> result = new ArrayList<MarketBrowseItemModel>();
+        String query = state.getBrowserQuery().toLowerCase();
+        for (int i = 0; i < ids.size(); i++) {
+            String id = ids.get(i); if (id == null || id.trim().isEmpty()) continue;
+            String line = i < lines.size() ? lines.get(i) : "挂牌 #" + id;
+            String title = primary(line), subtitle = secondary(line);
+            if (!query.isEmpty() && !(title + " " + subtitle).toLowerCase().contains(query)) continue;
+            result.add(new MarketBrowseItemModel(id, i < icons.size() ? icons.get(i) : "", title,
+                price(line), subtitle, "--", "--", "--", "--", Collections.emptyList()));
+        }
+        return result;
+    }
+
+    private final class BrowseToolbarPanel extends AbstractGuiPanel {
+        private boolean pressed;
+        @Override public void draw(GuiScene scene, int mouseX, int mouseY, float partialTicks) {
+            GuiRect b = getBounds(); RoundedRectPainter.draw(b, 0xFF324152, 0xFF121B25);
+            FontRenderer f = Minecraft.getMinecraft().fontRenderer;
+            String[] scopes = { "全部挂牌", "我的出售", "待领取" };
+            String[] values = { "active", "selling", "pending" };
+            int buttonWidth = Math.max(44, b.getWidth() / 7);
+            for (int i = 0; i < scopes.length; i++) {
+                int x = b.getX() + 5 + i * (buttonWidth + 4); boolean selected = values[i].equals(state.getSelectedScope());
+                RoundedRectPainter.draw(new GuiRect(x, b.getY() + 4, buttonWidth, 19), selected ? 0xFF4D91D9 : 0xFF2C4052,
+                    selected ? 0xFF1E3E59 : 0xFF14222E);
+                f.drawStringWithShadow(f.trimStringToWidth(scopes[i], buttonWidth - 8), x + 4, b.getY() + 9, 0xFFE4EDF7);
+            }
+            int publishWidth = Math.max(56, b.getWidth() / 6);
+            int publishX = b.getRight() - publishWidth - 5;
+            RoundedRectPainter.draw(new GuiRect(publishX, b.getY() + 4, publishWidth, 19), 0xFF4D91D9, 0xFF173551);
+            f.drawStringWithShadow("发布手持", publishX + 7, b.getY() + 9, 0xFFE4EDF7);
+        }
+        @Override public boolean mouseClicked(GuiScene scene, int x, int y, int button) { pressed = button == 0 && contains(x, y); return pressed; }
+        @Override public boolean mouseReleased(GuiScene scene, int x, int y, int button) {
+            boolean click = pressed && button == 0 && contains(x, y); pressed = false; if (!click) return false;
+            GuiRect b = getBounds(); int buttonWidth = Math.max(44, b.getWidth() / 7);
+            String[] values = { "active", "selling", "pending" };
+            for (int i = 0; i < values.length; i++) if (new GuiRect(b.getX() + 5 + i * (buttonWidth + 4), b.getY() + 4, buttonWidth, 19).contains(x, y)) {
+                state.setSelectedScope(values[i]);
+                state.setSelectedListingId("");
+                state.returnToBrowse();
+                if (actions != null) {
+                    actions.selectListing(values[i], "");
+                }
+                return true;
+            }
+            if (x >= b.getRight() - Math.max(56, b.getWidth() / 6) - 5 && actions != null) { actions.openPublishConfirm(); return true; }
+            return false;
         }
     }
+
+    private final class CustomDetailPanel extends AbstractGuiPanel {
+        private final ButtonPanel buy = button("购买", () -> actions.openBuyConfirm(), () -> model.isCanBuy());
+        private final ButtonPanel cancel = button("下架", () -> actions.openCancelConfirm(), () -> model.isCanCancel());
+        private final ButtonPanel claim = button("领取", () -> actions.openClaimConfirm(), () -> model.isCanClaim());
+        private final ButtonPanel back = button("返回浏览", () -> { state.returnToBrowse(); setBounds(TerminalCustomMarketSection.this.getBounds()); }, () -> true);
+        private CustomDetailPanel() { addChild(buy); addChild(cancel); addChild(claim); addChild(back); }
+        @Override public void setBounds(GuiRect b) {
+            super.setBounds(b); MarketDetailLayout layout = MarketDetailLayout.within(b); int w = Math.max(1, layout.actions.getWidth() / 4 - 4);
+            back.setBounds(new GuiRect(layout.actions.getX(), layout.actions.getY() + 5, w, 20));
+            buy.setBounds(new GuiRect(back.getBounds().getRight() + 5, layout.actions.getY() + 5, w, 20));
+            cancel.setBounds(new GuiRect(buy.getBounds().getRight() + 5, layout.actions.getY() + 5, w, 20));
+            claim.setBounds(new GuiRect(cancel.getBounds().getRight() + 5, layout.actions.getY() + 5,
+                Math.max(1, layout.actions.getRight() - cancel.getBounds().getRight() - 5), 20));
+        }
+        @Override public void draw(GuiScene scene, int mx, int my, float pt) {
+            GuiRect b = getBounds(); MarketDetailLayout l = MarketDetailLayout.within(b); FontRenderer f = Minecraft.getMinecraft().fontRenderer;
+            RoundedRectPainter.draw(b, 0xFF324152, 0xFF121B25); card(l.hero); card(l.orderBook); card(l.assets);
+            TerminalMarketVisuals.drawItemIconOrBadge(l.hero.getX() + 12, l.hero.getY() + 12, 32, model.getSelectedItemIdentity(), model.getSelectedTitle());
+            text(f, model.getSelectedTitle(), l.hero.getX() + 54, l.hero.getY() + 12, 0xFFE4EDF7);
+            text(f, "价格 " + model.getSelectedPrice(), l.hero.getX() + 54, l.hero.getY() + 29, 0xFFF0C95B);
+            text(f, "状态 " + model.getSelectedStatus(), l.hero.getX() + 54, l.hero.getY() + 43, 0xFFBFCBDA);
+            text(f, "交易方", l.orderBook.getX() + 10, l.orderBook.getY() + 10, 0xFFE4EDF7);
+            text(f, model.getSelectedCounterparty(), l.orderBook.getX() + 10, l.orderBook.getY() + 26, 0xFFBFCBDA);
+            text(f, "交付 " + model.getSelectedTradeSummary(), l.orderBook.getX() + 10, l.orderBook.getY() + 42, 0xFFBFCBDA);
+            text(f, model.getDisabledReason().isEmpty() ? model.getSelectedActionHint() : model.getDisabledReason(), l.assets.getX() + 10, l.assets.getY() + 12, 0xFFBFCBDA);
+        }
+        private void card(GuiRect r) { RoundedRectPainter.draw(r, 0xFF2C3D4E, 0xFF101923); }
+    }
+    private ButtonPanel button(String label, Runnable action, Supplier<Boolean> enabled) { return panels.createButton(new GuiRect(0, 0, 0, 0), () -> label, action, enabled); }
+    private static void text(FontRenderer f, String v, int x, int y, int c) { f.drawStringWithShadow(f.trimStringToWidth(v == null ? "--" : v, 240), x, y, c); }
+    private static String primary(String v) { int i = v == null ? -1 : v.indexOf('|'); return (i < 0 ? v : v.substring(0, i)).trim(); }
+    private static String secondary(String v) { int i = v == null ? -1 : v.indexOf('|'); return i < 0 ? "挂牌" : v.substring(i + 1).trim(); }
+    private static String price(String v) { String s = secondary(v); int i = s.indexOf("价格"); return i < 0 ? "挂牌" : s.substring(i); }
 }

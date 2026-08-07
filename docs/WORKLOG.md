@@ -5,6 +5,180 @@
 这份文件用于记录 `JsirGalaxyBase` 的持续开发摘要。
 从本次开始，后续每次实际代码变更都应补一条简要 work log。
 
+### 2026-08-08 - 标准市场现代交易终端 P0-P3 第一轮落地
+
+- 主题：以 `/home/u24/图片/市场第三版.png` 为视觉基准，将标准市场从旧托管操作页改为账户仓自动交割的现代交易工作台。
+- 交易主链：新增账户库存解析接口及 Base Vault 实现。限价/即时卖出从个人 Vault 跨格聚合预留后进入既有市场托管和订单链；即时剩余量与撤单库存尝试返回 Vault。买入成交自动尝试投递 Vault，容量或交付异常继续保留既有待处理和恢复记录。旧存入/领取路由保留兼容，但不再是新 UI 的常规主流程。
+- 行情与 UI：新增批量只读行情投影和成交/订单读取索引；浏览页固定 `4 x 3`，加入真实涨跌、迷你走势、流动性、筛选和排序；Hover 收成真实行情比较卡。详情页采用横向图表、盘口和统一订单票据，页脚只保留账户仓、委托和异常待收货摘要。
+- 合同：新增统一 `MARKET_CONFIRM_ORDER` 及可兼容旧 payload 的买卖方向、订单类型、数量、限价和浏览上下文字段；服务端继续重新校验价格、余额、库存与手续费。
+- 验证：`git diff --check` 通过；Docker Gradle 全量测试通过（301 个完成，31 个按环境跳过）。详情图后续补接 `1h / 24h / 7d` 真实聚合桶切换，当前显示收盘价线与成交量；完整 OHLC 实体、数据库级全目录排序、盘口回填和最大数量快捷操作明确留作后续，不作完成宣称。
+
+### 2026-08-08 - 标准市场真实行情区间接线与重新部署
+
+- 主题：补齐第一轮复盘发现的“服务端已有三周期聚合、客户端仍固定 24h”断点。
+- 结果：标准市场详情图新增 `1h / 24h / 7d` 区间控件；浏览/刷新 payload 保留区间，服务端按区间读取真实桶，并通过兼容价格点合同回写收盘价、成交量和桶时间。区间切换不改撮合、银行、Vault 或定制/汇率市场。
+- 边界：当前仍是聚合收盘价线与成交量柱，不是完整 OHLC K 线；全目录数据库级排序、盘口点击回填和“最大”快捷数量仍未完成。
+- 验证与部署：`git diff --check`、Docker Gradle 全量测试和 `assemble` 通过（302 个测试完成，31 个按环境跳过）；仅部署 Lobby 与客户端，三处 runtime jar SHA256 均为 `54b8514b85f5f498e58b813bc1927e994262eedbc4f5612f3972d3155865fc6c`。Lobby 达到 `RUNNING` 并记录 `Done (1.723s)!`；S1/S2 未启动，客户端未启动。
+
+### 2026-08-08 - 现代交易终端最新效果图差异基线
+
+- 主题：以 `/home/u24/图片/市场第三版.png` 为标准商品市场唯一视觉目标，复盘当前浏览、Hover 和详情三张实机图。
+- 结论：终端壳、四列骨架、真实 ItemStack、Hover 与独立详情路由已经成立；主要差距为浏览仅 8 项且缺少涨跌/迷你走势、Hover 过大且缺少真实行情、详情仍是旧盘口文本和七按钮工作流，以及手动存入/领取仍暴露内部托管语义。
+- 产物：新增 `modern-trading-terminal-visual-gap-baseline-2026-08-08.md`，按 UI、行情聚合、交易 payload、账户仓自动交割四类记录差距，并给出 P0-P3 优先级和逐屏验收清单；`modern-trading-terminal-redesign-v1.md` 与文档索引已建立追溯链接。
+- 验证：仅文档变更；不修改代码、数据库或部署产物。执行 `git diff --check` 后收口。
+
+### 2026-08-07 - 个人 Base Vault 成为市场唯一物品边界
+
+- 主题：标准、定制与汇率市场统一以个人 Base Vault 为物品来源与收货账户。
+- 结果：新增只读 `VaultAssetPickerPopup`，标准市场按正式目录商品聚合选择数量，定制发布与汇率兑换选择精确 Vault 格位。标准入托管复用同一 request id 完成 `Base Vault -> AVAILABLE`，定制市场的单件托管和汇率的任务书硬币扣除继续走 Vault 服务；标准与定制领取均投递个人 Vault，满仓则保留既有待领取状态。定制/汇率页面现在也随市场快照携带只读 Vault 资产，选择器不再依赖玩家背包或当前手持。
+- 安全边界：选择器只读，市场动作重新校验 Vault 格位/商品目录/报价；版本冲突、数量不足、Vault 满仓或报价过期不会自动改读玩家背包或自动重试。
+- 验证：`git diff --check`、Docker `compileJava` 已通过；待执行市场 payload、服务与 UI 定向测试后部署 Lobby 与客户端，不触碰 S2。
+
+### 2026-07-24 - Base Vault Shift 转移：补齐客户端原版容器预测
+
+- 主题：修复个人 Base Vault 中 Shift 快速转移会使 GTNH 客户端卡死的问题。
+- 根因：服务端 `BaseVaultContainer` 已实现 Vault 与玩家背包之间的 `transferStackInSlot(...)`，但客户端占位 `ClientContainer` 沿用 `Container` 的默认空实现。服务端可以成功写入 Vault 审计与槽位，而客户端本地容器预测不执行对应搬运，造成原版槽位同步路径失配。
+- 结果：客户端容器现在镜像服务端的 Vault/玩家背包快速转移规则，并补齐原版 `onPickupFromSlot(...)` 回调；服务端同样补齐该回调和“无实际变更返回空”的原版语义。普通点击与既有 PostgreSQL 版本校验、审计、恢复链未改。
+- 安全补充：显式拒绝原版 `mode=3` 的创造模式中键复制，避免把跨服持久 Vault 槽位复制到光标而没有对应账本扣减。
+- 验证：待执行 Docker 定向编译/测试与 Lobby、客户端部署；人工验收应覆盖玩家背包到 Vault 和 Vault 到玩家背包两个方向的 Shift 操作，以及关闭后重新打开的持久性。
+
+### 2026-07-23 - Base Vault 容器化 Phase 1：原版格位交互接入跨服槽位账本
+
+- 主题：将终端“仓库”从说明 section 替换为服务器权威的原版 `Container + Slot` 保险箱页。
+- 结果：个人 Vault 以固定 `9 x 3` 格显示在上方，玩家背包和快捷栏显示在下方；左/右键、拖拽、拆分、双击合并与 Shift 转移继续由原版 Container 语义处理。Vault 格位是会话库存，完成一次真实变动后以原开仓版本进行 PostgreSQL 校验和提交；提交失败会还原本次会话与玩家背包快照，成功操作记录 `VAULT_CONTAINER_MUTATION` 审计。
+- 入口与边界：终端导航“仓库”直接打开 Forge GUI ID `41`，不再显示通用仓储说明卡。容器仅开放个人 27 格；企业/公共容量、市场 Vault 选择器、AE2 Cell Bay/Drive/Port 保持后续阶段，不与本轮原版搬运交互混合。
+- 验证：`git diff --check`、Docker `assemble`、Docker 定向 `BaseVaultServiceTest` 通过；新增容器快照提交与版本更新回归测试。按灰度约束仅准备部署 Lobby 与客户端，不触碰已知损坏的 S2 世界。
+
+### 2026-07-20 - Base Vault Phase 0：有限账户仓与市场交付边界
+
+- 主题：建立跨服持久的有限 Base Vault，作为个人、企业、公共账户的起步仓与市场交付目标。
+- 结果：新增账户、槽位与操作日志迁移；个人容量为 27 格，企业/公共为 54 格。槽位保存完整压缩 `ItemStack` NBT 并遵守原版堆叠上限。标准市场领取、定制市场领取/下架改为投递个人 Vault；Vault 满时资产保留在现有待领取状态。标准市场存入改为 Vault -> 市场托管的共享 JDBC 事务，失败整体回滚。
+- 恢复边界：每次 Vault 操作使用 request id 幂等记录；未完成操作拒绝自动重放。玩家背包只会在后续独立 Vault 页的显式存取适配器中接触，市场主页面不再允许把背包作为标准商品存入来源。
+- 验证：Docker `compileJava` 通过；定向测试通过 `BaseVaultServiceTest`、`TerminalMarketServiceTest`、`StandardizedSpotMarketServiceTest`；`git diff --check` 通过。未部署，必须先在停服窗口运行新迁移。
+
+### 2026-07-20 - 标准市场浏览：空选中状态不再丢失正式目录页
+
+- 主题：修复标准商品市场首次进入浏览模式时，数据库目录已存在但终端显示 `0 项 / 0/0` 的断链。
+- 根因：`TerminalMarketService.createSnapshot(...)` 会先读取数据库正式目录，但当玩家尚未选中商品时提前返回详情空态，未将刚读取的 `catalogPage` 与批量行情摘要附加到该 snapshot；网络层因此只能收到默认空目录。
+- 结果：目录附加收口为 `attachCatalogBrowserData(...)`，无选中商品和已选商品两条路径都回传当前搜索页、分页元数据与行情摘要。未选中仅意味着详情页为空，绝不意味着目录为空。
+- 验证：新增空选中快照保留正式目录页的回归测试；Docker Gradle 定向测试通过 `TerminalMarketSectionServiceTest`、`TerminalMarketServiceTest`、`TerminalMarketCatalogPacketTest`，`git diff --check` 通过。runtime jar 已部署至 Lobby 与客户端，SHA-256 为 `bdaea9c249eca7e4b173f7f55ecc2d67fdd3d54370e362411d385b71cc77a7f4`；数据库烟测确认正式启用目录为 8 项。
+
+### 2026-07-19 - 市场三段式浏览基础：四列目录、只读 Hover 与独立详情模式
+
+- 主题：将标准市场从常驻三栏工作台转为可被三个市场复用的“浏览 -> 对比 -> 操作”交互基础。
+- 结果：新增四列 `MarketItemGridPanel`，搜索和分页保持固定、只有网格可滚动；目录行带真实物品图标与结构化行情摘要。`CanvasScreen` 新增被动 hover layer，层级固定为正文、hover、modal popup，悬浮信息按终端边界自动翻转夹紧，滚动、点击、离开与 popup 打开都会关闭。标准市场点击目录项先沿用现有选择/快照回写，服务端确认选中后进入客户端 `DETAIL` 模式；顶栏返回回到浏览模式并保留浏览上下文。目录快照补充批量成交摘要与最多十二个真实价格点，无真实历史时明确空态。
+- 验证：新增 tooltip 定位与四列网格边界测试；更新标准市场布局测试以匹配浏览全页、详情独立页的边界。待执行 Docker Gradle 定向测试、部署 Lobby 与客户端；本轮不启动客户端，实机观感交由人工验收。
+
+### 2026-07-19 - 市场三段式整改第二阶段：标准商品详情工作台边界收口
+
+- 主题：将标准市场点击后的详情模式从临时拼装的工作区，收口为可供定制和汇率市场复用的固定预算详情工作台。
+- 结果：新增 `MarketDetailLayout`，由详情父容器统一推导 Hero、三列盘口、资产状态卡和底部交易区的边界；详情页不再拥有整页滚动。交易区将六个输入拆为两行，避免与交易 CTA 在窄高区域竞争同一行；固定动作条补齐领取与撤单，且仅在快照给出目标 custody/order 时启用。库存、待领取、订单/冻结三张卡的标题、数值和语义行分开绘制，消除数值与副文案叠字；浏览网格滚动偏移回写到 `TerminalMarketSectionState`，顶栏从详情返回浏览后可恢复查询、页码和网格位置。既有存入、限价、即时、撤单、领取确认与服务端 snapshot 链未改变。
+- 验证：新增 `MarketDetailLayoutTest` 和详情返回浏览上下文测试；Docker Gradle 定向测试通过。待构建部署 Lobby 与客户端；按约定不启动客户端，实机 UI 和点击由人工确认。
+
+### 2026-07-19 - 市场现场可用性：弹窗渲染隔离、受管演示流动性与任务书硬币目录
+
+- 主题：修复市场现场验证中暴露的图标层级、定制市场底部动作条、空经济无法验证买卖，以及汇率页把任务书硬币过度简化为单一目标的问题。
+- 结果：`CanvasScreen` 和真实 `ItemStack` 渲染器会在物品图标绘制后清理深度状态，popup 遮罩和正文不再被旧物品图层穿透；定制市场的发布/购买/下架/领取统一保留在固定高度底部操作条内。新增显式 `TaskCoinCatalog`，仅接纳 GTNH 本地语言数据确认的 15 个任务书硬币家族、每族 5 个面额（共 75 种），排除捐赠币与区块加载币；汇率页将它们作为可滚动的正式输入目录，实际报价仍由玩家手持物和服务端规则决定。新增 `market-demo-fixture.sh`，隔离没有托管或资金约束的旧视觉 demo 订单，并创建有真实 escrow/frozen-funds 的受管 Steel 流动性；当前离线 UUID 的玩家账户已单独补齐测试余额和可卖托管库存。审计把已安全失败、没有资产副作用的历史 preflight 操作作为历史计数显示，不再误报成需要恢复的未完成操作。
+- 验证：待执行 Docker Gradle 定向测试、严格市场审计与 Lobby/客户端部署；不启动客户端，实际 UI 和点击由人工确认。
+
+### 2026-07-19 - Round 4：仓库跨域转移与审计合同收口
+
+- 主题：把市场托管仓、未来企业仓与公共仓从概念性区分推进为可实现的转移/审计边界，不提前实现不成熟的企业或公共库存。
+- 结果：新增仓库转移合同，定义四类资产域、允许/禁止的转移矩阵、`InventoryTransferOperation` 必填字段、request id 幂等要求，以及 Minecraft 物品交付与数据库状态无法原子化时的 `RECOVERY_REQUIRED` 原则。现有市场托管、定制交付和汇率兑换均被明确纳入同一中断处理约束，但仍保持各自独立账本。
+- 验证：文档结构复核；未触及运行时代码、数据库或客户端。
+
+### 2026-07-15 - 汇率市场 Round 4：物理任务书硬币与银行结算的中断可审计
+
+- 主题：补齐汇率兑换中“玩家手持任务书硬币”这一非数据库资产与银行正式结算之间的中断边界。
+- 结果：兑换在移除手持物品前创建 `EXCHANGE_EXECUTION` 操作日志，并与银行结算复用同一个 request id。成功时日志记录银行交易与兑换记录；明确失败时恢复手持物品并留下已收口失败记录；启动/管理员恢复扫描若发现已经存在银行结算便完成操作，若无法确认结算则标为 `RECOVERY_REQUIRED`，附带物品、数量、meta、槽位等核对元数据，禁止系统擅自重试或静默吞没资产。
+- 验证：Docker `compileJava` 已通过；新增 `MarketRecoveryService` 单测覆盖“已结算自动收口”与“未确认物理输入升级人工核对”。不启动客户端。
+
+### 2026-07-15 - 标准市场领取恢复：安全交付失败在事务回滚后即时收口
+
+- 主题：修复标准市场领取时“背包明确未收到物品”的安全失败在 JDBC 事务回滚后仍停留于 `PROCESSING` 的状态滞后。
+- 影响范围：`StandardizedSpotMarketService`、PostgreSQL 市场集成测试与市场命令帮助。
+- 结果：背包满等 `safeToRestoreClaimable` 失败现在在领取事务回滚后另开收口事务，将托管资产确认回 `CLAIMABLE` 并将操作日志标为 `FAILED`；若此收口本身失败，才按既有规则升级为 `RECOVERY_REQUIRED`。这样玩家可用新请求重试领取，审计也不会把正常的安全失败误表示为卡住的处理中操作。市场帮助同时列出定制市场管理员 `custom recover` 入口。
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试通过 `StandardizedSpotMarketServiceTest`、`MarketPostgresIntegrationTest`、`GalaxyBaseCommandTest`，其中新增 PostgreSQL 回归覆盖安全发放失败后的 `CLAIMABLE + FAILED` 即时状态。
+
+### 2026-07-15 - 汇率市场二次确认：服务端绑定正式报价而非仅信任客户端弹窗
+
+- 主题：将终端汇率市场的二次确认从“客户端显示过 popup”补为服务端可验证的短时、一次性确认许可。
+- 结果：每次服务器生成可执行兑换快照时，会将正式兑换标的、输入物品、数量、资产对、规则版本、限额状态、结算额与汇率绑定到玩家和终端会话；确认时服务端重新读取当前 quote 并逐项校验，成功后即消费许可。手持物品、规则、限额或会话发生变化均不能沿用旧确认，必须刷新报价并重新确认。实际金额仍由 `ExchangeMarketService` 在结算前重新计算，客户端不提供可被信任的金额字段。
+- 验证：新增确认闸门单测覆盖一次性消费与报价金额/汇率变化拒绝；后续与 `TerminalServiceTest`、`ExchangeMarketServiceTest` 一起通过 Docker Gradle 定向验证。
+
+### 2026-07-15 - 定制市场交付恢复：区分安全失败与不确定交付
+
+- 主题：为定制挂牌的下架/领取交付补齐防重复派发保护，避免数据库状态与背包发放的非原子边界被静默误判。
+- 影响范围：`CustomMarketService`、`GalaxyBaseCommand`、`CustomMarketAuditLog` repository、`custom_market_audit_log` migration、市场审计脚本与定制市场服务测试。
+- 结果：终端及兼容命令入口都会在交付前先将挂牌（及成交记录）置于保护状态，并创建 `LISTING_DELIVERY` 审计记录。背包满等明确未交付错误会恢复原始 `ESCROW_HELD` 或 `BUYER_PENDING_CLAIM`；普通运行时中断或显式不确定交付被标为 `DELIVERY_UNKNOWN` 并保持 `EXCEPTION`，后续请求不能自动再次发货，必须由审计/人工恢复流程处理。管理员可用 `/jsirgalaxybase market custom recover <listingId> <restore|complete> [reason]` 显式决议：`restore` 仅在确认未交付后恢复原状态，`complete` 仅在确认已交付后收口状态，两个分支都不会再次操作背包。审计脚本将“处理中”和“不确定交付”纳入严格异常计数。
+- 验证：Docker Gradle 定向测试通过 `CustomMarketServiceTest`、`GalaxyBaseCommandTest`、`MarketPostgresIntegrationTest`、`TerminalServiceTest`、`TerminalMarketServiceTest`、`StandardizedSpotMarketServiceTest` 与 `ExchangeMarketServiceTest`；其中新增覆盖未知交付失败、交付成功后完成落库失败，以及对应的禁止自动重试。已通过部署脚本将 runtime jar `73f39d17b1ef0e54afb72711026707ef0f73adb9330e0d4677e9a9c886eb3fb2` 同步到 Lobby、S2、客户端；migration `20260715_003_add_custom_market_delivery_audit_type.sql` 已应用，Lobby 的市场烟雾测试和严格审计通过。S2 jar 已同步，但其 `World/level.dat` 与 `level.dat_old` 均为 EOF 损坏，世界启动失败，和本轮 market jar 或迁移无关。
+
+### 2026-07-15 - 市场恢复链：定制挂牌接入真实背包交付与统一审计
+
+- 主题：收口定制市场过去“只改数据库状态、不把物品交给玩家”的断链，并把它接入现有无客户端市场审计。
+- 影响范围：`CustomMarketService`、Minecraft 定制交付适配器、终端定制发布/下架/领取动作、`scripts/market-audit.sh` 与仓库边界文档。
+- 结果：终端可以将当前手持的单件物品发布为定制挂牌；卖家下架或买家领取时会先执行背包容量检查和 `ItemStack` 快照交付，再收口数据库状态。市场审计现在额外检查定制挂牌快照缺失、已售缺成交、挂牌/成交交付状态不一致与待领取/异常资产；`--strict` 对真正异常返回非零，待领取只作为运维待办列出。
+- 验证：`git diff --check`、`bash -n scripts/market-audit.sh` 通过；只读审计的标准与定制异常计数均为 `0`；Docker Gradle 定向测试通过 `CustomMarketServiceTest`、`TerminalMarketServiceTest` 与 `TerminalServiceTest`。不启动客户端，实机 UI 与点击仍交由人工验收。
+
+### 2026-07-15 - 标准市场 Round 3：确认报价补齐费用、来源与恢复语义
+
+- 主题：让标准市场的确认弹窗不再只写“确认交易”，而是展示服务端生成的真实报价摘要和资产去向。
+- 影响范围：`TerminalMarketService`、`TerminalHomeScreen`。
+- 结果：即时买入报价明确拆出本金、taker 手续费、冻结/结算总额和极限成交价；即时卖出明确拆出成交额、手续费与净到账。限价买卖、存入、即时买卖、撤单和领取确认弹窗均补充资产来源、冻结/托管去向，以及余额、库存、深度、背包发放失败等服务端拒绝或恢复条件。
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试通过 `TerminalServiceTest`、`TerminalMarketActionMessageFactoryTest`、`TerminalMarketSectionContentTest`、`TerminalMarketServiceTest`、`StandardizedSpotMarketServiceTest`。未启动客户端。
+
+### 2026-07-15 - 汇率市场 Round 4：正式结算链的无客户端审计接入
+
+- 主题：确认汇率市场不是独立的 GUI 计算，而是具有规则、限额、二次确认、银行结算和审计关联的正式链路。
+- 影响范围：`scripts/market-audit.sh`。
+- 结果：审计会检查每条 `coin_exchange_record` 对应银行交易的双方审计元数据都标明 `marketType=exchange`；这与现有兑换服务写入的兑换对、规则版本、限额状态和输入资产审计字段共同构成可追溯证据。
+- 验证：`bash -n scripts/market-audit.sh`、`scripts/market-audit.sh --strict` 通过；当前库没有历史兑换记录，因此这是结构对账验证，不替代实际兑换样本验证。
+
+### 2026-07-15 - 市场 Round 4：定制挂牌与汇率页面收口为受边界约束工作台
+
+- 主题：将定制市场和汇率市场从旧的卡片内标题、子页返回按钮及自然向下堆叠，收口为与标准市场一致的双栏工作台。
+- 影响范围：`TerminalCustomMarketSection`、`TerminalExchangeMarketSection` 与市场滚动布局测试。
+- 结果：两页均移除了重复的“返回总入口”和正文标题，统一由终端顶栏的返回、刷新、帮助、关闭控制；左侧挂牌/兑换标的列表成为各自唯一滚动区，右侧商品交付详情或正式报价、执行信息及确认按钮保持固定在页面边界内。定制市场继续使用独立挂牌/交付托管语义，汇率市场不引入商品托管状态。
+- 验证：`compileJava`、Docker Gradle 定向测试 `TerminalShellPanelsScrollTest`、`TerminalMarketActionMessageFactoryTest`、`TerminalMarketSectionServiceTest`、`StandardizedSpotMarketServiceTest` 与 `git diff --check` 通过。
+
+### 2026-07-15 - 标准商品目录：完成 8 条 GTNH 正式条目
+
+- 主题：收口历史目录迁移遗留的技术展示名，确保正式目录不再把 `product_key` 直接暴露给玩家。
+- 影响范围：新增 GTNH 元数据正式化迁移、目录制度文档和 `market-smoke-test.sh` 自检。
+- 结果：将铝锭、铜锭、银锭、铁板和钢板补为经 GTNH 2.8.4 `GregTech.lang` 元数据核验的名称与单位，并写入已有最近成交价和确定性排序；烟雾测试现在会拒绝任何仍以技术键作为展示名的启用目录条目。
+
+### 2026-07-15 - 标准商品市场 Round 3：增加无客户端状态审计
+
+- 主题：为既有托管、冻结资金、领取恢复和市场操作日志提供可重复执行的只读审计入口。
+- 影响范围：新增 `scripts/market-audit.sh` 与标准商品目录运维文档。
+- 结果：审计可检查目录正式化、开放卖单对应 `ESCROW_SELL`、开放买单冻结资金、陈旧 `CLAIMING`、异常托管和未收口操作；`--strict` 会以非零状态提示管理员干预，恢复动作仍需显式使用 `/jsirgalaxybase market recover`。
+
+### 2026-07-15 - 标准商品市场 Round 2：目录浏览器接入结构化目录与分页
+
+- 主题：将 `MARKET_STANDARDIZED` 左栏从旧的平行字符串商品列表切换到正式目录快照，并使查询和分页通过既有市场 payload 回到服务端。
+- 影响范围：`TerminalMarketSectionState`、`TerminalMarketSectionContent`、`TerminalMarketSection`、`TerminalShellPanels`、`TerminalHomeScreen` 及市场布局/内容测试。
+- 结果：
+  - 左栏优先读取 `CatalogProductModel`，使用正式商品键、registry/meta、展示名、单位、参考价和可交易状态；停用目录项不会作为可点击商品出现。
+  - 商品行使用 registry/meta 构建真实 `ItemStack` 图标引用；渲染失败时才退化为已有 badge。
+  - 搜索词、页码、上一页/下一页控制写入 `TerminalMarketSectionState -> TerminalMarketActionPayload`，并以既有 `MARKET_REFRESH` 请求服务端目录页，不引入第二条网络链。
+  - 左栏仍是标准市场唯一的 `VerticalScrollPanel`；搜索和分页器保持固定，右侧行情、资产状态和动作条保持固定布局。
+  - 更新布局测试，验证浏览器正式控件、固定分页器以及右侧无滚动边界。
+
+### 2026-07-15 - 标准商品市场 Round 1 收尾：结构化目录快照与参考价
+
+- 主题：把正式商品目录的商品行、查询和分页状态纳入终端快照/网络契约，替代 UI 只能依赖 `productKeys/productLabels` 平行字符串数组的状态。
+- 影响范围：新增 `CatalogProduct` / `CatalogProductModel`，包含商品键、registry/meta、展示名、单位、排序、启用状态、参考价与可交易状态；市场 section 快照、客户端模型和终端网络包均追加目录页数据；新增 `reference_price` 迁移与目录管理 SQL 说明。
+- 行为边界：旧字符串数组暂时保留，只用于现有 UI 兼容；Round 2 将改为直接消费结构化目录行。禁用商品仍由 JDBC 查询和目录准入边界排除，不能浏览或通过手持物快捷存入。
+- 验证：Docker Gradle `compileJava` 与定向测试通过：`StandardizedMarketCatalogServiceTest`、`TerminalMarketCatalogPacketTest`、`TerminalMarketActionPayloadTest`、`TerminalMarketSectionServiceTest`；覆盖搜索/页码、空目录、禁用准入和目录网络 round-trip。
+
+### 2026-07-14 - 标准商品市场 Round 1：正式目录与托管主链收口
+
+- 主题：把标准商品市场从 GregTech 硬编码推断准入转为管理员维护的 PostgreSQL 正式目录，并让终端浏览来源与玩家手持、订单、成交反推解耦。
+- 影响范围：新增 `standardized_market_catalog` 迁移和 JDBC 目录源；`InstitutionCoreModule` 运行时改为注入数据库目录；`StandardizedSpotMarketService` 新增目录分页能力；终端 payload 增加查询、页码和筛选上下文；部署编排在服务端替换 jar 前自动执行版本化迁移。
+- 行为边界：卖单和即时卖出仍只消耗 `AVAILABLE`；`ESCROW_SELL`、`CLAIMABLE` 和买单冻结资金继续复用现有订单、托管、银行链。手持物品仅可快捷存入已准入商品，不能再成为正式目录真相来源。
+- 验证：`git diff --check`、`bash -n` 通过；Docker Gradle `compileJava` 通过；定向单测通过 `StandardizedMarketCatalogServiceTest`、`TerminalMarketActionPayloadTest`、`TerminalMarketSectionServiceTest`、`StandardizedSpotMarketServiceTest`、`MarketPostgresIntegrationTest`、`InstitutionCoreModuleTest`、`TerminalMarketServiceTest`。
+- 后续：Round 2 用正式目录数据收口标准市场浏览器 UI，包括搜索、分页控制、紧凑商品行和结构化目录行网络 DTO；Round 3 覆盖完整交易恢复、审计与异常资产场景。
+
 ## 记录规则
 
 - 每次代码变更后，追加一条简要记录
@@ -33,6 +207,353 @@
   - 当前已定稿制度结论与后续讨论顺序
 
 ## 初次对话摘要
+
+### 2026-06-29 - 标准商品市场默认交易草稿与按钮启用链路修复
+
+- 主题：修复 `MARKET_STANDARDIZED` 已显示商品但买卖按钮不可用的问题，把紧凑交易 UI 接回现有确认 popup 与市场服务动作链
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/ui/TerminalMarketSectionService.java`、`src/test/java/com/jsirgalaxybase/terminal/ui/TerminalMarketSectionServiceTest.java`、`docs/WORKLOG.md`
+- 原因：数据库、运行时目录和终端 snapshot 已能读取 8 个标准商品，但新版紧凑 UI 不再展示价格/数量输入框；旧动作链仍要求 `LimitBuyDraft`、`LimitSellDraft`、`InstantDraft` 中存在价格和数量，导致 `即时买`、`即时卖`、`买挂牌`、`卖挂牌` 在选中商品后仍保持 disabled，没有进入 `TerminalMarketService` 的真实买卖逻辑
+- 结果：标准商品 snapshot 现在会从当前盘口和玩家 AVAILABLE 库存生成保守默认草稿：限价买默认最低卖盘价/数量 1，即时买在有卖盘时默认数量 1；限价卖默认最高买盘价/数量 1，即时卖仅在玩家有 AVAILABLE 且有买盘时默认数量 1；显式 payload 输入会被保留，不会被默认值覆盖；按钮启用条件改为基于生成后的可执行草稿和库存/盘口状态
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试通过：`TerminalMarketSectionServiceTest`、`TerminalMarketServiceTest`、`TerminalMarketActionMessageFactoryTest`、`TerminalMarketSectionStateTest`、`TerminalMarketSectionContentTest`、`StandardizedSpotMarketServiceTest`；`scripts/deploy-jgb.sh --targets lobby,s2,client` 已构建 runtime jar SHA256 `b105a92c1a77ac6df416ecab64fe2368142beff916f83e10e102f3c684c6b6c9` 并替换 Lobby、S2 与客户端 mods；Lobby `market-smoke-test.sh --target lobby` 通过，DB 有 8 个活跃商品且运行时目录准入 8/8；S2 因 `World/level.dat` 与 `level.dat_old` 读取 EOF 导致世界启动失败，未达到 `Done`，不是本轮 market jar 编译或部署失败
+
+### 2026-06-28 - 标准商品市场空列表自测与运行时目录诊断
+
+- 主题：补齐 `MARKET_STANDARDIZED` 空列表问题的可靠自测链路，区分数据库有数据、运行时目录拒绝和终端 snapshot 未刷新三类原因
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/ui/TerminalMarketService.java`、`src/main/java/com/jsirgalaxybase/modules/core/InstitutionCoreModule.java`、`src/main/java/com/jsirgalaxybase/modules/core/market/application/GregTechStandardizedMetalCatalog.java`、`scripts/market-smoke-test.sh`、`docs/WORKLOG.md`
+- 原因：实机页面已能正常显示布局，但商品列表仍为 `共 0 项`；直接看 PostgreSQL 只能证明订单/成交/仓储表存在候选 `product_key`，不能证明这些 key 被 `GregTechStandardizedMetalCatalog` 在 Forge/GT 运行时准入。此前 `appendTradableKeys(...)` 会静默丢弃目录拒绝的 key，导致“DB 有数据但页面为空”缺少日志证据
+- 结果：`TerminalMarketService` 在标准商品 snapshot 中记录来自活跃订单、成交记录、玩家订单和玩家 custody 的 DB 候选 key；如果候选 key 存在但运行时目录一个都不准入，会按 30 秒节流输出 `[market-smoke]` 诊断日志和前 12 条拒绝原因；新增 `scripts/market-smoke-test.sh --target lobby|s2`，可直接检查 DB 活跃商品、成交、仓储、服务器 `Done` 状态和最新运行时目录拒绝日志
+- 补充：`InstitutionCoreModule` 在市场运行时创建完成后会主动执行标准商品目录 smoke，不需要打开 G 也能在服务器日志里看到 `[market-smoke] Standardized market startup smoke admitted ...` 或 `rejected all ...`；脚本现在要求同时存在 DB 候选和运行时准入日志，否则不会把数据链判定为通过
+- 修复：实测发现当前 GTNH `gregtech.api.enums.Materials` 没有 `hasMetalItems()` 方法，旧目录适配器把它当作必需方法导致 8 个 DB 商品全部被拒；已改为兼容式可选检查，并以 `SubTag.METAL` 作为真实金属准入判断，同时保留更具体的反射失败信息
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试通过：`InstitutionCoreModuleTest`、`StandardizedSpotMarketServiceTest`、`TerminalMarketServiceTest`、`TerminalMarketSectionContentTest`、`TerminalShellPanelsScrollTest`、`TerminalHomeScreenLayoutTest`；`scripts/deploy-jgb.sh --targets lobby,client` 已部署 runtime jar SHA256 `8f7145db3b9bff94f62549834dd9202fdd69d740c01e4a2af87988e88b0953e7`；`scripts/market-smoke-test.sh --target lobby` 最终通过，DB 有 8 个活跃商品 key、8 类 recent trades、玩家 custody 有 `AVAILABLE/CLAIMABLE` 数据，Lobby 运行时目录准入 `8/8` 个 DB product keys
+
+### 2026-06-28 - 标准商品市场紧凑文字错位修复与分页/上架现状确认
+
+- 主题：修复 `MARKET_STANDARDIZED` 实机截图中搜索状态行和状态小卡片的文字错位，并核清当前标准商品目录、分页和上架链路的真实能力边界
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSection.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanelsScrollTest.java`、`docs/WORKLOG.md`
+- 原因：实机截图中 `服务: 在线` 与搜索占位文本容易挤压，`库存`、`可领`、`订单` 三个状态卡把标题、数值和副说明压成三行后在 GTNH 字体下仍有错位风险；同时玩家看到 `共 0 项` 后容易误解为分页第 0 页
+- 结果：搜索框改为左侧搜索占位、右侧服务状态的单行布局；三张状态卡改为两行结构，第二行直接显示 `数值 + 语义`，不再渲染第三行副说明；新增/保留布局测试约束，确保搜索状态不横向重叠、状态卡文本不纵向重叠；确认当前标准商品页没有分页按钮，`共 0 项` 表示当前发现的商品数为空，标准商品上架链路为“持有准入标准商品 -> 选中商品 -> 存入 AVAILABLE -> 卖挂牌”
+- 验证：`git diff --check` 通过；宿主机无 Java，`java -version` 为 `command not found`；当前会话普通 Docker 被 `/var/run/docker.sock` 权限阻止，sudo 被 `no new privileges` 阻止，因此未能执行 Docker Gradle 测试或部署
+
+### 2026-06-22 - 标准商品市场页内标题与返回按钮清理
+
+- 主题：继续收口 `MARKET_STANDARDIZED` 的实机像素预算，删除标准商品页内的重复标题、说明和返回按钮，让左侧浏览器与右侧交易仪表盘直接占满工作区
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSection.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanelsScrollTest.java`、`docs/WORKLOG.md`
+- 原因：实机截图中 `商品浏览`、`商品详情`、`交易动作` 标题以及 `返回 MARKET` 按钮继续挤占标准商品页内部高度，导致商品摘要、盘口、库存状态和动作按钮仍有文本错位风险；返回/帮助/刷新应归属终端顶栏，而不是重复占用市场工作区
+- 结果：标准商品页左侧浏览器移除内部标题和返回按钮，搜索/状态条直接贴近卡片顶部；右侧详情仪表盘移除内部标题和动作反馈标题，摘要/盘口/库存/动作区按剩余高度重新铺开；状态卡短标签改为 `库存`、`可领`、`订单`，降低窄卡片文字拥挤；测试新增约束，确保标准页左栏不再含按钮、右侧只保留 5 个交易动作按钮
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试通过：`TerminalShellPanelsScrollTest`、`TerminalMarketSectionContentTest`、`TerminalHomeScreenLayoutTest`、`TerminalMarketActionMessageFactoryTest`；`scripts/deploy-jgb.sh --targets lobby,client` 已构建并部署，runtime jar SHA256 为 `00ced52418da2b099bd87df5d243f3252139e28674ce76609421e95c454a3f51`，Lobby `latest.log` 到达 `Done (1.630s)!`
+
+### 2026-06-22 - 标准商品市场像素预算修复：去标题占高与右侧卡片防重叠
+
+- 主题：继续按效果图整改 `MARKET_STANDARDIZED`，优先解决标准商品页标题/说明占用工作区、右侧商品摘要/盘口/状态/动作区互相重叠的问题
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketShell.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSection.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanelsScrollTest.java`、`docs/WORKLOG.md`
+- 原因：上一轮虽然改为二栏工作台，但标准页仍保留 `TerminalMarketSection` 标题/说明和 `TerminalMarketShell.computeWorkbenchLayout(...)` 的 30px section header 预留；右侧详情区还用固定行距和若干最小高度拼接，在实际 GUI scale 下会让商品摘要、订单簿、状态卡和动作按钮互相压住
+- 结果：标准页隐藏自身标题/说明，workbench 从内容区顶部开始布局；右侧详情区改为按实际剩余高度分配摘要、订单簿、状态卡和动作区；订单簿行距按卡片高度压缩，状态卡高度不足时隐藏副标题，商品摘要图标和文字按卡片高度重新定位；未选商品时隐藏 6 个数字输入框，只保留底部动作按钮，减少空状态挤压
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试通过：`TerminalShellPanelsScrollTest`、`TerminalMarketSectionContentTest`、`TerminalHomeScreenLayoutTest`、`TerminalMarketActionMessageFactoryTest`；`scripts/deploy-jgb.sh --targets lobby,client` 已构建并部署，runtime jar SHA256 为 `35e61825bef46e9a208880544437e164d32b99b1f515b790e6a50c8cb28f4091`，Lobby `latest.log` 到达 `Done (1.548s)!`
+
+### 2026-06-21 - 标准商品市场工作台整改：二栏浏览器与右侧仪表盘
+
+- 主题：按效果图差异先集中整改 `MARKET_STANDARDIZED`，把标准商品市场从“左/中/右三块独立栏目”收口为“左商品浏览器 + 右交易仪表盘”的工作台结构
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketShell.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSection.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanelsScrollTest.java`、`docs/WORKLOG.md`
+- 原因：实机页虽然不再越界，但右侧动作栏仍像独立表单列，导致商品详情、行情、状态和交易按钮被挤碎；效果图中的标准市场应以左侧商品列表为唯一滚动区，右侧为无外部滚动的行情/资产/动作仪表盘
+- 结果：`TerminalMarketShell.computeWorkbenchLayout(...)` 改为标准市场二栏布局；左侧浏览器保留搜索/过滤外观、列表滚动和返回入口；右侧详情卡内合并商品摘要、买卖盘/最新成交、资产状态卡与底部紧凑动作条；修复商品摘要右侧指标文字和名称区域的宽度分配，避免窄宽度下互相覆盖
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试通过：`TerminalShellPanelsScrollTest`、`TerminalMarketSectionContentTest`、`TerminalHomeScreenLayoutTest`、`TerminalMarketActionMessageFactoryTest`；`scripts/deploy-jgb.sh --targets lobby,client` 已构建并部署，runtime jar SHA256 为 `4724ecd36d9f9ffab9a388fa71fab66506bb1958d0a5d23c48f8f58897c8e1e1`，Lobby `latest.log` 到达 `Done (1.692s)!`
+
+### 2026-06-21 - 记录市场终端效果图差异复盘
+
+- 主题：把 `/home/u24/图片/市场.png` 效果图与当前四张实机市场页面的差异沉淀为独立文档，作为后续子页面重构的对照基准
+- 影响范围：`docs/market-terminal-effect-gap-review-2026-06-21.md`、`docs/WORKLOG.md`
+- 原因：当前 MARKET 总入口已接近方向，但标准商品、定制商品、汇率市场仍存在工作台结构、信息密度、真实物品图标、动作区边界和低价值说明文字等差距，需要先固定问题清单，避免继续零碎 patch
+- 结果：新增独立差异复盘，按 MARKET、MARKET_STANDARDIZED、MARKET_CUSTOM、MARKET_EXCHANGE 分别记录与效果图差距，并拆分 UI 层问题、可能后端字段缺口和后续执行顺序
+- 验证：文档变更，无编译验证
+
+### 2026-06-21 - 终端视觉系统三次收口：比例圆角、顶栏容器约束与低价值文案清理
+
+- 主题：按实机截图继续修复终端公共壳层，解决圆角不自然、顶栏按钮超出 title bar、导航栏标签/图标可读性不足，以及 MARKET 入口存在低价值说明文案的问题
+- 影响范围：`src/main/java/com/jsirgalaxybase/client/gui/framework/RoundedRectPainter.java`、`src/main/java/com/jsirgalaxybase/terminal/client/screen/TerminalHomeLayout.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanels.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalPanelFactory.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalIconPainter.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketShell.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSectionContent.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanelsScrollTest.java`、`src/test/java/com/jsirgalaxybase/terminal/client/screen/TerminalHomeScreenLayoutTest.java`
+- 原因：上一轮已有圆角和图标方向，但圆角只是固定 2px 切角，放大后不够自然；顶栏按钮使用固定最小尺寸，可能反过来超过 title bar 高度；左侧导航受配置和最大宽度限制仍偏窄；MARKET 入口页仍显示“列表每 30 秒自动刷新”和“先选市场类型”这类页面说明，信息价值低
+- 结果：`RoundedRectPainter` 改为按控件短边乘固定 ratio 计算半径，并逐行绘制圆角实体/边框；顶栏按钮改为按父容器高度扣内边距后夹紧，从右向左布局，新增紧凑 title bar 子控件不越界测试；导航栏默认宽度和最小宽度上调，避免短标签裁剪；图标改为固定点阵模板再按控件尺寸缩放，替代临时线段拼图；MARKET 总入口 lead 改为规则摘要，移除 30 秒刷新页脚，帮助卡改为交易规则提示
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试通过：`TerminalMarketSectionContentTest`、`TerminalShellPanelsScrollTest`、`TerminalHomeScreenLayoutTest`、`TerminalMarketActionMessageFactoryTest`、`TerminalServiceTest`、`TerminalMarketServiceTest`；`scripts/deploy-jgb.sh --targets lobby,client` 已构建并部署，runtime jar SHA256 为 `5f9384e79529bd87c984bedc6f307f8b81a520ca0381c2c2c51a4644ed22c0d1`，Lobby `latest.log` 到达 `Done (1.460s)!`
+
+### 2026-06-21 - 终端视觉系统二次收口：圆角、导航宽度与图标可读性
+
+- 主题：根据实机截图修复终端壳层视觉问题，重点解决左侧导航图标成块、标签裁剪、顶栏按钮过大和面板方角问题
+- 影响范围：`src/main/java/com/jsirgalaxybase/client/gui/framework/RoundedRectPainter.java`、`src/main/java/com/jsirgalaxybase/client/gui/framework/TexturedCanvasPanel.java`、`src/main/java/com/jsirgalaxybase/client/gui/framework/ButtonPanel.java`、`src/main/java/com/jsirgalaxybase/terminal/client/screen/TerminalHomeLayout.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalPanelFactory.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanels.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalIconPainter.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalIconButtonPanel.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketVisuals.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSection.java`、`src/test/java/com/jsirgalaxybase/terminal/client/screen/TerminalHomeScreenLayoutTest.java`
+- 原因：上一轮深色主题和图标体系已经接近方向，但实机下导航栏仍过窄，短标签被裁剪；顶栏图标按钮按栏高放大，显得拥挤并接近越界；导航图标使用填充块绘制，小尺寸下会变成白色块；通用面板和按钮仍是硬直角，和效果图的圆角质感差距明显
+- 结果：新增 `RoundedRectPainter`，将通用面板、按钮、图标按钮和市场卡片切换为像素伪圆角；导航栏默认宽度提升到可容纳图标 + 两字标签，新增回归测试防止退回窄栏；顶栏图标按钮缩小为紧凑规格，信号图标同步缩小；导航/顶栏图标改为细线像素绘制，减少白块感
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试通过：`TerminalMarketSectionContentTest`、`TerminalShellPanelsScrollTest`、`TerminalHomeScreenLayoutTest`、`TerminalMarketActionMessageFactoryTest`、`TerminalServiceTest`、`TerminalMarketServiceTest`；`scripts/deploy-jgb.sh --targets lobby,client` 已构建并部署，runtime jar SHA256 为 `965525fa6425aa00eb904e68c5bafca2fb479f576d6ca30e818b4fa4b0c6149f`，Lobby `latest.log` 到达 `Done (1.598s)!`
+
+### 2026-06-21 - 终端视觉系统收口：深色主题、顶栏图标按钮与导航图标
+
+- 主题：从市场单页修补上升到终端壳层视觉系统，按效果图方向统一配色、导航图标和右上角图标按钮
+- 影响范围：`src/main/java/com/jsirgalaxybase/client/gui/theme/TerminalThemeRegistry.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalIconKind.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalIconPainter.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalIconButtonPanel.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalPanelFactory.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanels.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/screen/TerminalHomeScreen.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanelsScrollTest.java`
+- 原因：市场总入口已基本解决越界和重叠，但终端壳层仍是文字按钮和浅蓝灰面板，和效果图中的深色玻璃面板、图标导航、右上角帮助/刷新/返回/关闭图标差距明显；市场说明卡内部的“查看说明”按钮也会和说明文字抢空间
+- 结果：新增像素图标绘制器和图标按钮组件；左侧导航改为图标 + 文本，支持首页、职业、公共、市场、传送、银行图标；顶栏右侧改为信号、刷新、帮助、返回、关闭图标按钮；市场说明卡去掉内部按钮，只保留摘要，详细说明统一走顶栏帮助；主题色改为更深的蓝黑面板、暗卡片和蓝色按钮体系
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试通过：`TerminalMarketSectionContentTest`、`TerminalShellPanelsScrollTest`、`TerminalHomeScreenLayoutTest`、`TerminalMarketActionMessageFactoryTest`、`TerminalServiceTest`、`TerminalMarketServiceTest`；`scripts/deploy-jgb.sh --targets lobby,client` 已构建并部署，runtime jar SHA256 为 `d499e4fb7b4f1958a9bb344726d443a79e2c383b8b90de5690a789bd329000b0`，Lobby `latest.log` 到达 `Done (1.684s)!`
+
+### 2026-06-21 - 市场终端 Round 3 复盘修复：非列表区去滚动与固定工作台
+
+- 主题：按实机反馈继续收口市场 UI，可变列表保留独立滚动，其他核心信息区必须在终端边界内固定显示
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketShell.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalCustomMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalExchangeMarketSection.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanelsScrollTest.java`
+- 原因：上一轮虽然解决了明显出界，但总入口卡仍会文字/按钮抢空间，标准商品、定制商品和汇率市场的详情/动作区仍以滚动容器承载普通信息，导致玩家必须滚动才能看完非列表内容，不符合效果图的工作台式信息密度
+- 结果：MARKET 入口卡图标和文本槽位压缩，避免 CTA 覆盖正文；标准商品页改为左商品浏览器滚动 + 中行情/仓储固定栏 + 右交易动作固定栏；定制市场改为左挂牌列表滚动 + 右商品详情/反馈/动作固定栏；汇率市场改为左兑换目标/参数 + 右汇率详情/执行固定栏；真实物品图标链路继续保留，无法解析时才退回绘制 badge
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试通过：`TerminalMarketSectionContentTest`、`TerminalShellPanelsScrollTest`、`TerminalHomeScreenLayoutTest`、`TerminalMarketActionMessageFactoryTest`、`TerminalServiceTest`、`TerminalMarketServiceTest`；`scripts/deploy-jgb.sh --targets lobby,client` 已构建并部署，runtime jar SHA256 为 `d4b3d8f698ff8b1876df9b360c743c7b334812fe22c0de0099b5ea930aa062a1`，Lobby `latest.log` 到达 `Done (1.357s)!`
+
+### 2026-06-21 - 市场终端 Round 3 收口：真实物品图标链路
+
+- 主题：继续收口市场终端视觉密度，补齐标准商品、定制挂牌、汇率报价中“只画色块、不显示真实物品”的核心缺口
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketVisuals.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalCustomMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalExchangeMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/viewmodel/TerminalCustomMarketSectionModel.java`、`src/main/java/com/jsirgalaxybase/terminal/TerminalCustomMarketSectionSnapshot.java`、`src/main/java/com/jsirgalaxybase/terminal/ui/TerminalCustomMarketSnapshot.java`、`src/main/java/com/jsirgalaxybase/terminal/ui/TerminalMarketService.java`、`src/main/java/com/jsirgalaxybase/terminal/ui/TerminalMarketSectionService.java`、`src/main/java/com/jsirgalaxybase/terminal/network/OpenTerminalApprovedMessage.java`、`src/main/java/com/jsirgalaxybase/terminal/network/TerminalSnapshotMessage.java`
+- 原因：效果图的市场页以物品图标作为浏览与详情的主要视觉锚点；此前标准商品和定制市场虽然有 badge，但没有真正解析 `ItemStack`，定制 listing 行甚至没有把每行 item identity 传到客户端
+- 结果：`TerminalMarketVisuals` 支持从 `modid:item:meta`、`modid:item@meta`、`modid:item#meta` 等 iconRef 渲染真实 MC 物品图标，失败时退回原有 badge；标准商品列表/详情使用 productKey 渲染；定制市场 snapshot/model/network 增加 active/selling/pending listing icon refs，列表和详情均尝试渲染真实物品；汇率报价 hero 使用当前手持物品 id 渲染输入资产，目标资产仍保留货币图标
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试通过：`TerminalMarketSectionContentTest`、`TerminalShellPanelsScrollTest`、`TerminalHomeScreenLayoutTest`、`TerminalMarketActionMessageFactoryTest`、`TerminalServiceTest`、`TerminalMarketServiceTest`；`scripts/deploy-jgb.sh --targets lobby,client` 已构建并部署，runtime jar SHA256 为 `7cb747129fc524ed231d10564940b5c63bc00fdc71729530d0b49e30582bc378`，Lobby `latest.log` 到达 `Done (1.545s)!`
+
+### 2026-06-20 - 市场终端 Round 3：视觉密度与物品感增强
+
+- 主题：继续对照市场效果图优化 MARKET 总入口、标准商品、定制商品、汇率市场的视觉表达，优先解决“栏目紧张、图标少、缺少物品感”的实机观感问题
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketVisuals.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalCustomMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalExchangeMarketSection.java`、`docs/WORKLOG.md`
+- 原因：当前市场功能链路已经基本存在，但客户端 snapshot 尚未携带完整 `ItemStack` 图标字段，页面仍偏文字面板，和效果图中的物品浏览器、listing 卡、汇率卡、状态卡相比缺少视觉锚点
+- 结果：新增 `TerminalMarketVisuals` 作为轻量市场视觉 helper，统一绘制市场图标、物品 badge、货币 badge 和状态点；MARKET 入口卡图标与文字/按钮边界重新排布；标准商品浏览器条目、商品摘要和状态卡加入物品/状态视觉锚点并放松行高；定制市场 listing 改成带物品 badge 的可选卡片，详情页加入商品 hero；汇率市场目标列表和报价详情加入货币/汇率视觉卡
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试通过：`TerminalMarketSectionContentTest`、`TerminalShellPanelsScrollTest`、`TerminalHomeScreenLayoutTest`、`TerminalMarketActionMessageFactoryTest`
+
+### 2026-06-20 - 市场终端 Round 2 复盘修复：仅裁剪网络尾部 padding，避免列表错位
+
+- 主题：复盘 Round 2 代码后修复 viewmodel padding 过滤策略，避免 custom listing 与 exchange target 的并行数组在异常空字段下错位
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/viewmodel/TerminalCustomMarketSectionModel.java`、`src/main/java/com/jsirgalaxybase/terminal/client/viewmodel/TerminalExchangeMarketSectionModel.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSectionContentTest.java`、`docs/WORKLOG.md`
+- 原因：Round 2 初版为解决固定长度网络数组补空导致的假空行，采用了删除所有空字符串的 compact 策略；该策略能处理正常尾部 padding，但如果未来并行数组中间出现空字段，可能导致 `ids/lines` 或 `codes/labels` 下标错位
+- 结果：过滤策略改为只裁剪末尾 padding，保留中间空字段的下标位置；新增测试覆盖“尾部 padding 被清理”和“中间空字段不触发错位”两种情况
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试通过：`TerminalMarketSectionContentTest`、`TerminalShellPanelsScrollTest`、`TerminalHomeScreenLayoutTest`、`TerminalMarketActionMessageFactoryTest`、`TerminalServiceTest`、`TerminalMarketServiceTest`、`TerminalExchangeQuoteViewTest`；`scripts/deploy-jgb.sh --targets lobby,client` 已重新部署，runtime jar SHA256 为 `d0be046a9e13840b3898845d2045a40f36ec5341840e167e39b99510b2b55d2d`，Lobby `latest.log` 到达 `Done (1.433s)!`
+
+### 2026-06-20 - 市场终端 Round 2：空态、数据映射与 disabled reason 收口
+
+- 主题：执行市场终端子页面整改计划 Round 2，区分后端无数据和 UI 表达问题，先把空态、数据来源说明和动作禁用原因收清楚
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSectionContent.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalCustomMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalExchangeMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/viewmodel/TerminalCustomMarketSectionModel.java`、`src/main/java/com/jsirgalaxybase/terminal/client/viewmodel/TerminalExchangeMarketSectionModel.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSectionContentTest.java`、`docs/market-terminal-child-pages-defect-plan-2026-06-20.md`、`docs/WORKLOG.md`
+- 原因：实机市场子页仍容易把“后端没有商品/listing/quote”表现成未完成 UI；同时 custom listing 网络数组会被固定长度 padding，客户端此前会把空字符串当成空列表行渲染，造成大面积假骨架；exchange 未选择标的、无手持、规则禁兑等状态也缺少清晰禁用原因
+- 结果：标准商品市场新增空目录/未选商品原因推导，浏览器无商品时显示正式空态，交易动作提示改为说明“没有可交易标准商品/先选商品”；custom/exchange viewmodel 过滤网络 padding 空字符串，custom 详情追加不可执行原因并统计真实 listing 数，exchange quote 追加不可执行原因并处理无可选标的；文档记录了标准商品目录、行情、custom listing、exchange quote 的实际数据来源和后端缺口
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试通过：`TerminalMarketSectionContentTest`、`TerminalShellPanelsScrollTest`、`TerminalHomeScreenLayoutTest`、`TerminalMarketActionMessageFactoryTest`、`TerminalServiceTest`、`TerminalMarketServiceTest`、`TerminalExchangeQuoteViewTest`；`scripts/deploy-jgb.sh --targets lobby,client` 已构建并部署，runtime jar SHA256 为 `fd9986a5ad90c156a11f7865bba192d4982b3a9e2bcf25ce87e9350a03f86418`，Lobby `latest.log` 到达 `Done (1.916s)!`
+
+### 2026-06-20 - 市场终端 Round 1 复盘修复：紧凑边界与空 handler 防御
+
+- 主题：复盘 Round 1 代码后修复已发现的确定性纰漏，重点补极小 GUI scale 边界和空 action handler 防御
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketShell.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalCustomMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalExchangeMarketSection.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanelsScrollTest.java`、`docs/WORKLOG.md`
+- 原因：复盘发现 `TerminalCustomMarketSection` 的购买/下架/领取按钮 action 没有显式空 handler 防御；同时 custom/exchange 在极小逻辑尺寸下仍保留固定按钮宽度和堆叠最小高度，理论上可能导致按钮或子卡片越过父容器；`TerminalMarketShell` 也存在用 `Math.max(180/140)` 把布局高度撑出父容器的边界风险
+- 结果：custom 动作按钮统一通过安全包装执行；custom/exchange 的堆叠高度、返回按钮宽度、底部动作按钮宽度和内部滚动区高度都改为按父容器实际尺寸收敛；`TerminalMarketShell` 不再用固定最小可用高度撑开市场布局；新增紧凑尺寸回归测试，覆盖 overview、standardized、custom、exchange 在小逻辑 bounds 下直接子控件不越界
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试通过：`TerminalShellPanelsScrollTest`、`TerminalMarketSectionContentTest`、`TerminalHomeScreenLayoutTest`、`TerminalMarketActionMessageFactoryTest`；`scripts/deploy-jgb.sh --targets lobby,client` 已重新部署，runtime jar SHA256 为 `0619b87bd734b1f7854c085d56ec7d8e26de1faf2b72c8450cfc95cabecca70d`，Lobby `latest.log` 到达 `Done (1.581s)!`
+
+### 2026-06-20 - 市场终端 Round 1：子页面结构重排与边界收口
+
+- 主题：执行 `market-terminal-child-pages-defect-plan-2026-06-20.md` 的 Round 1，先修市场子页面结构与边界，不扩后端数据和制度模型
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketShell.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalCustomMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalExchangeMarketSection.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanelsScrollTest.java`、`docs/WORKLOG.md`
+- 原因：MARKET 总入口虽然已经接近效果图方向，但三个子页面仍表现为通用面板拼接：标准商品市场是三块独立竖栏，定制市场和汇率市场的动作区容易漂浮或贴边，入口卡和共享状态也仍有文字/按钮重叠风险
+- 结果：MARKET 总入口卡片内部改成固定图标/标题/摘要/状态/CTA 纵向关系，状态/帮助卡只显示可容纳内容；标准商品市场改成左商品浏览器 + 右侧上下组合工作台，右侧上方承接商品详情/盘口/状态，下方承接交易动作；定制商品市场收成左挂牌浏览器 + 右详情/动作；汇率市场收成左兑换参数 + 右报价详情/动作；自定义和汇率页面不再使用独立底部动作卡，按钮按右侧工作区宽度收进终端内部
+- 验证：`git diff --check` 通过；按 Docker Gradle 路径执行定向测试通过：`TerminalShellPanelsScrollTest`、`TerminalMarketSectionContentTest`、`TerminalHomeScreenLayoutTest`、`TerminalMarketActionMessageFactoryTest`；`scripts/deploy-jgb.sh --targets lobby,client` 已构建并部署，runtime jar SHA256 为 `5c004f2e74f8614c7c847bc722a91ff441873cbbc74532d905d05bb6f9ba94cf`，Lobby `latest.log` 到达 `Done (1.516s)!`
+
+### 2026-06-20 - 记录市场终端子页面缺陷与三轮整改计划
+
+- 主题：把当前实机截图中已经确认的市场子页面缺陷、后端数据缺口和后续三轮整改计划沉淀为正式文档
+- 影响范围：`docs/market-terminal-child-pages-defect-plan-2026-06-20.md`、`docs/WORKLOG.md`
+- 原因：MARKET 总入口已经比早期说明页明显改善，但 `MARKET_STANDARDIZED`、`MARKET_CUSTOM`、`MARKET_EXCHANGE` 仍然存在结构不像效果图、内容/按钮越界或贴边、空数据状态不专业、后端数据缺口与 UI 问题混在一起的问题；如果继续零散 patch，容易反复在截图反馈中修局部而不收敛
+- 结果：新增缺陷与计划文档，明确当前问题分为总入口重叠风险、标准商品市场工作台结构错误、定制商品市场 listing-first 表达不足、汇率市场 quote-first 表达不足，以及标准商品目录/行情、定制挂牌、汇率报价等数据缺口；后续按三轮推进：Round 1 子页面结构重排与边界收口，Round 2 空态/数据映射/后端缺口识别，Round 3 视觉密度/交互动作/统一验收
+- 验证：本轮为产品与缺陷文档收口，无代码与测试变更
+
+### 2026-06-20 - 市场终端布局修正：GUI scale 窄屏误判与子市场外溢
+
+- 主题：继续对照市场效果图修正实机布局，优先解决“明明窗口很宽但市场页仍竖排/外溢”的结构问题
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketShell.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanels.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalCustomMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalExchangeMarketSection.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanelsScrollTest.java`、`docs/WORKLOG.md`
+- 原因：GTNH GUI scale 会把实际屏幕宽度换算成更小的逻辑宽度，原先 `500/520` 的堆叠阈值会把大窗口误判成窄屏，导致 MARKET 总入口三卡变成纵向大条、标准商品工作台退回上下/拥挤结构；同时 `MARKET_CUSTOM` 和 `MARKET_EXCHANGE` 还被 `TerminalShellPanels` 外层滚动二次包裹，局部页面高度容易超出终端边界
+- 结果：市场专用布局的堆叠阈值下调到更保守的逻辑宽度；标准商品页三栏宽度比例收紧，避免右侧动作栏挤压中栏；定制商品和汇率市场不再被外层 `VerticalScrollPanel` 包裹，改为和标准商品页一样由页面内部管理滚动；补充布局测试，覆盖 460 逻辑宽度下 MARKET 总入口仍保持三入口同排，以及 custom/exchange 不出现外层滚动壳
+- 验证：`git diff --check` 通过；当前 Codex 沙箱无法访问 Docker socket，宿主机也没有 Java，因此本轮未能执行 Gradle/JUnit 与部署，需在允许 Docker 的环境下重跑 `TerminalShellPanelsScrollTest` 后再灰度
+
+### 2026-06-15 - 市场终端重构：总入口改三主卡，标准商品页改专用工作台
+
+- 主题：把 `MARKET` 和 `MARKET_STANDARDIZED` 从 generic section 结构真正拉回到效果图方向，不再继续做文字段落和卡片堆叠式微调
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketShell.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanelsScrollTest.java`、`docs/WORKLOG.md`
+- 原因：上一轮虽然已经把市场页和标准商品页从语义上分开，但实际实机仍然表现为“总入口纵向堆块”和“标准商品页上下大框”；问题本质不是文案，而是顶层布局骨架仍然在沿用通用终端 section
+- 结果：`MARKET` 根页现改成“三张主入口卡 + 下方状态卡/帮助卡 + 底部刷新脚注”的专用总入口；`MARKET_STANDARDIZED` 现改成三栏工作台：左栏商品浏览，中栏商品摘要/订单簿/状态卡，右栏交易动作块与最近反馈，局部滚动只保留在各自工作区内部；同时 `TerminalMarketShell` 重算了市场页的总入口和标准商品页主布局比例
+- 验证：`git diff --check` 通过；宿主机无 Java，按仓库 Docker Gradle 路径执行定向测试：`TerminalMarketSectionContentTest`、`TerminalShellPanelsScrollTest`、`TerminalHomeScreenLayoutTest`、`TerminalMarketActionMessageFactoryTest` 通过
+
+### 2026-06-15 - 市场终端结构收口：市场共享骨架 + 标准商品工作台
+
+- 主题：不再继续做 MARKET 零碎 UI patch，而是把 Phase 1 和 Phase 2 收口成可复用的市场页骨架，并让 `MARKET_STANDARDIZED` 真正落在这套骨架上
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketShell.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSectionContent.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanels.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSectionContentTest.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanelsScrollTest.java`、`docs/WORKLOG.md`
+- 原因：当前 `MARKET` 根页和 `MARKET_STANDARDIZED` 虽然都能用，但仍然过于依赖 generic terminal section 表达；缺的不是一个按钮，而是市场页自己的顶栏上下文、入口布局和工作台布局抽象
+- 结果：新增轻量 `TerminalMarketShell` 作为市场共享骨架，统一承载市场页顶栏上下文、MARKET 根页入口布局和标准商品页三栏工作台布局；`MARKET` 根页从“四卡说明区”收口成“一条共享状态 + 三张主入口卡 + 帮助按钮”；`MARKET_STANDARDIZED` 继续保持正式三栏，但标题、卡片职责和滚动边界都改成更明确的交易工作台语义；全程未改服务端字段、业务链或 terminal 主路由
+- 验证：`git diff --check` 通过；宿主机无 Java，按仓库 Docker Gradle 路径执行定向测试：`TerminalMarketSectionContentTest`、`TerminalShellPanelsScrollTest`、`TerminalHomeScreenLayoutTest`、`TerminalMarketActionMessageFactoryTest` 通过
+
+### 2026-06-14 - 市场终端 Phase 2：标准商品市场工作台收口
+
+- 主题：把 `MARKET_STANDARDIZED` 从“已有功能页”继续收口成标准商品市场正式工作台，不扩后端业务模型
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSectionContent.java`、`src/main/java/com/jsirgalaxybase/terminal/client/screen/TerminalHomeScreen.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSectionContentTest.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSectionStateTest.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanelsScrollTest.java`、`docs/WORKLOG.md`
+- 原因：当前标准商品市场已经具备真实动作主链，但页面仍偏“功能集合页”，商品浏览、详情层级、动作 enable 条件和最近反馈没有完全收口成顺手的玩家工作流
+- 结果：标准商品市场现已按三栏工作台进一步收口：左栏改成更明确的商品目录浏览器并弱化说明字段；中栏按“当前商品 -> 核心行情 -> 个人状态 -> 我的订单 -> CLAIMABLE -> 规则提示”重排；右栏改成交易操作台，分别为存入、限价买、限价卖、即时买、即时卖提供更明确的预览与输入引导，同时继续复用现有 popup 确认链与 snapshot 回写；市场页帮助 popup 也补上标准商品页专属说明
+- 验证：`git diff --check` 通过；宿主机无 Java，按仓库 Docker Gradle 路径执行定向测试：`TerminalMarketSectionContentTest`、`TerminalMarketSectionStateTest`、`TerminalShellPanelsScrollTest`、`TerminalHomeScreenLayoutTest`、`TerminalMarketActionMessageFactoryTest` 通过
+
+### 2026-06-14 - 市场终端 Phase 1：MARKET 总入口与共享壳收口
+
+- 主题：把 `MARKET` 根页从说明型混排 section 收口成真正的三市场入口页，并顺手固定市场共享壳层的首轮约定
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSectionContent.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanels.java`、`src/main/java/com/jsirgalaxybase/terminal/client/screen/TerminalHomeScreen.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSectionContentTest.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanelsScrollTest.java`、`docs/WORKLOG.md`
+- 原因：当前 `MARKET` 根页虽然已有三类市场路由，但 UI 仍更像“说明页 + 字段堆叠”，玩家首屏看到的是解释文本而不是市场分流入口，同时顶栏帮助/刷新和页面主体之间也缺少市场专属约束
+- 结果：`MARKET` 根页已改成“共享状态条 + 帮助入口 + 标准/定制/汇率三张入口卡”的专用入口布局，不再在根页混排交易正文；市场页顶栏现对 `MARKET` / `MARKET_STANDARDIZED` / `MARKET_CUSTOM` / `MARKET_EXCHANGE` 统一使用更紧凑的市场上下文文案，并把刷新提升到顶栏小按钮；帮助说明改为通过共享 `帮助` 按钮和市场页 popup 承接，明确 `MARKET` 根页只负责分流与轻量状态，工作页正文继续留给各自子市场
+- 验证：`git diff --check` 通过；宿主机无 Java，按仓库 Docker Gradle 路径执行定向测试：`TerminalMarketSectionContentTest`、`TerminalShellPanelsScrollTest`、`TerminalHomeScreenLayoutTest`、`TerminalHomeScreenModelTest`、`TerminalMarketActionMessageFactoryTest` 通过
+
+### 2026-06-14 - 新增市场终端分阶段执行计划
+
+- 主题：把当前已确认的市场终端方向收口成一份正式阶段计划，便于后续持续开发、AI 交接和验收追溯
+- 影响范围：`docs/market-terminal-phased-execution-plan-2026-06-14.md`、`docs/README.md`、`docs/WORKLOG.md`
+- 原因：当前已经明确 MARKET 根页不能再做成说明页，标准商品市场、定制商品市场、汇率市场也不应按统一大桶继续演化；如果不先钉执行顺序，后续很容易在“是不是一页一个阶段”上反复摇摆
+- 结果：新增一份正式计划文档，明确采用 `Phase 1 共享市场壳与 MARKET 总入口 -> Phase 2 标准商品市场 -> Phase 3 定制商品市场 -> Phase 4 汇率市场 -> Phase 5 统一收口` 的顺序，并把每阶段的目标、范围、非目标、产出物和验收标准写清
+- 验证：本轮为产品文档收口，无代码与测试变更
+
+### 2026-06-14 - 新增市场仓库 v1 制度边界草案
+
+- 主题：在市场终端概念方向基本确认后，先把“仓库到底是什么”从模糊的页面想象，收口成正式制度边界草案
+- 影响范围：`docs/market-warehouse-v1-product-boundary-draft.md`、`docs/README.md`、`docs/WORKLOG.md`
+- 原因：当前市场系统已经在向服务器核心玩法内核演化；如果不先定义仓库边界，后续很容易把市场托管仓、企业私仓、公共仓和普通大箱子 GUI 混成一团，最终反过来破坏三市场与银行结算的制度模型
+- 结果：新增 `市场仓库 v1 产品边界草案`，明确仓库首先是资产状态系统，v1 只优先落标准商品市场托管仓；同时把现实模型拆成 `市场托管仓 / 企业私有仓 / 公共仓` 三类，并强调企业仓与公共仓可以和市场发生流转，但不应直接与市场托管仓混成同一个库存概念
+- 验证：本轮为产品文档收口，无代码与测试变更
+
+### 2026-06-14 - 标准商品市场终端窄修复：银行快照回写顺序与即时成交残单语义
+
+- 主题：对“标准商品市场终端收口”后的两个一致性问题做窄修复，不扩市场功能、不改 ServerTools
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/TerminalService.java`、`src/main/java/com/jsirgalaxybase/terminal/ui/TerminalMarketService.java`、`src/test/java/com/jsirgalaxybase/terminal/TerminalServiceTest.java`、`src/test/java/com/jsirgalaxybase/terminal/ui/TerminalMarketServiceTest.java`、`docs/WORKLOG.md`
+- 原因：一是标准商品市场动作完成后，终端快照仍可能先读取旧银行页摘要，导致余额显示落后于本次资金变动；二是即时买入/卖出部分成交后，如果“剩余自动撤回”失败，终端会把整次操作误报成笼统失败，掩盖“已真实部分成交且残单可能仍然挂着”的事实
+- 结果：`TerminalService.buildTerminalSnapshot(...)` 现已先执行 market action 再生成 bank snapshot，保证市场动作后的银行摘要读取的是最新状态；`TerminalMarketService` 现把即时买入/卖出的“部分成交但残余撤回失败”单独转成 warning 反馈，明确展示已成交数量、`orderId`、剩余未撤数量、可能仍处于开放/托管状态以及原始撤回失败原因，引导玩家去“我的订单”继续处理
+- 验证：`git diff --check` 通过；宿主机 `java` 不可用，按仓库已验证 Docker Gradle 路径执行定向测试：`TerminalServiceTest`、`TerminalMarketServiceTest`、`StandardizedSpotMarketServiceTest` 通过
+- 备注：首次 Docker Gradle 运行命中过往进程持有的 workspace `.gradle` 锁；随后改用仓库脚本同款挂载参数（独立 `GRADLE_USER_HOME` + `--project-cache-dir` + `--no-daemon`）重跑通过
+
+### 2026-06-14 - ServerTools 传送页按最终效果图方向做一轮产品化收口
+
+- 主题：在传送链已验证可用后，继续按最终效果图方向把 `SERVER_TOOLS` 页面收口到更接近成品的状态，不扩后端动作范围
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalServerToolsSection.java`、`docs/WORKLOG.md`
+- 原因：当前页面主体结构已经稳定，但仍存在两类产品缺口：一是文档要求中的“已知服务器目录”在实际 UI 中不可见；二是“最近传送状态”只突出单条结果，没有把已有 recent ticket 列表转成可读历史摘要
+- 结果：左侧传送点卡片顶部新增紧凑服务器目录摘要，明确当前服与已知目录；右侧最近状态卡新增历史条数与紧凑历史摘要；中栏布局随之调整但仍保持列表/详情两块都在终端内滚动；本轮继续保持 warp-only 终端范围，不把 home/back/spawn/rtp/tpa 扩进页面
+- 验证：`git diff --check` 通过；`./scripts/build-mod.sh --task assemble` 通过；Docker Gradle 定向测试 `TerminalServiceTest`、`TerminalShellPanelsScrollTest`、`TerminalHomeScreenLayoutTest` 通过
+
+### 2026-06-13 - 修复 ServerTools 传送页内容越过终端边界
+
+- 主题：修复 `SERVER_TOOLS` 三段式传送页中列表栏和右侧详情栏越过终端底边的问题，并恢复页面内部滚动
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalServerToolsSection.java`、`docs/terminal-servertools-overflow-bug-2026-06-13.md`、`docs/WORKLOG.md`
+- 原因：上一轮为了压缩视觉结构，把右侧详情区从滚动 viewport 改成了直接堆叠，同时 `setBounds` 仍用固定最小高度撑开 section；在实际 Minecraft GUI 高度不足时，中栏和右栏会突破父容器底边，按钮和状态卡被挤到终端外
+- 结果：`SERVER_TOOLS` 外层布局只使用父容器真实高度，不再用最小高度撑开；中栏传送点列表继续保留独立 `VerticalScrollPanel`，底部自动刷新提示按剩余高度参与布局；右侧详情、最近状态、反馈、风险提示和确认按钮重新进入同一个内部 `VerticalScrollPanel`，内容多时在终端内部滚轮浏览而不是向外溢出
+- 验证：`./scripts/build-mod.sh --task assemble` 通过；`scripts/deploy-gray-chain.sh --jar build/libs/jsirgalaxybase-ed7e2cf-main+ed7e2cfb16-dirty.jar --targets lobby,client` 已部署，jar SHA256 `d1486cc48da02a260d6f75db00bc8a56a8e5f6c19582619007e494ff54d2b365`；Lobby 日志到达 `Done (1.424s)!`
+
+### 2026-06-09 - 修正 ServerTools 页被误判窄屏并补右侧工作台滚动
+
+- 主题：针对实际游戏截图中 `SERVER_TOOLS` 仍退回“上列表 / 下详情”的两段堆叠问题，继续收口传送页布局判定和内部滚动
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalServerToolsSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanels.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanelsScrollTest.java`、`docs/WORKLOG.md`
+- 原因：虽然上一轮已经把页面朝效果图重组，但 Minecraft GUI 坐标下的宽度阈值仍然过高，导致常见 GUI scale 下被误判成窄屏并回退到上下堆叠；同时右侧工作台没有独立滚动容器，长内容只能把页面往下顶
+- 结果：`SERVER_TOOLS` 窄屏阈值已明显下调，常见宽度下优先保持“左导航 + 中列表 + 右工作台”的三段结构；右侧工作台改成独立 `VerticalScrollPanel`，超长详情/状态可直接滚轮浏览；顶栏对 `SERVER_TOOLS` 也不再拼接长串 detail，只保留更紧凑的传送路径上下文
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试 `TerminalShellPanelsScrollTest`、`TerminalHomeScreenLayoutTest`、`TerminalServiceTest` 通过
+
+### 2026-06-09 - 开始把 ServerTools 传送页收口成成品化工作台
+
+- 主题：把 `SERVER_TOOLS` 页面从“后端已通但仍偏工程拼装”的 v1 形态，推进成更接近目标效果图的专用传送工作台
+- 影响范围：`docs/terminal-ui-redesign-toward-concept-mockup-2026-06-07.md`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalServerToolsSection.java`、`scripts/lib/deploy-common.sh`
+- 原因：当前 `warp` 主链和终端确认链已可用，但与效果图相比，主要差距已不在后端，而在于右侧仍像三张平行卡片、中栏列表还不够产品化、页面缺少图标化层级锚点
+- 结果：文档已明确新增两条判断：
+  - 右侧应收口为一个连续工作区，而不是 `detail/recent/action` 三张并列卡
+  - 现阶段应优先采用轻量绘制的图标化表达，不等待新的素材或纹理资源链
+  同时代码开始按该方向重做 `TerminalServerToolsSection`，保留现有 warp 后端调用链，仅重组页面工作区与视觉层级；部署脚本实测时出现 `lobby` 已经 `Done` 但仍被误判失败，因此把 gray-chain 的 `RUNNING` / `Done` 等待窗口进一步放宽，减少 GTNH 慢启动时的假失败
+
+### 2026-06-08 - 终端改成顶部锚定并强制现网比例回落到更小值
+
+- 主题：继续收口终端共享壳层，解决“左栏与内容区缝隙仍大”和“实际游戏里终端看起来仍接近满屏”两个直接可见问题
+- 影响范围：`src/main/java/com/jsirgalaxybase/config/ModConfiguration.java`、`src/main/java/com/jsirgalaxybase/terminal/client/screen/TerminalHomeLayout.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanels.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalPanelFactory.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalLayoutMetrics.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalHomeSection.java`、`src/test/java/com/jsirgalaxybase/terminal/client/screen/TerminalHomeScreenLayoutTest.java`、`docs/WORKLOG.md`
+- 原因：虽然上一版已经删除普通页底栏并压缩了字号，但客户端与灰链配置文件仍保留旧的 `0.88 / 0.72 / 0.12`，叠加布局仍在用“伪居中”算法，导致用户实际看到的终端尺寸和位置几乎没有肉眼差异
+- 结果：终端默认比例进一步下调到 `width=0.72 / height=0.50 / nav=0.07`；`TerminalHomeLayout` 改成显式顶部锚定，并同步降低最大宽高上限、内边距、导航最大宽度和正文区 gap；左栏继续去外框，仅保留与内容区之间的细竖线；终端共享文本、按钮和 section 内边距再缩一档；部署后直接把客户端、Lobby、S2 的现网 `jsirgalaxybase.cfg` 同步写成新的更小比例，避免旧配置继续覆盖视觉结果
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试 `TerminalHomeScreenLayoutTest`、`TerminalShellPanelsScrollTest`、`TerminalServiceTest` 通过；`scripts/deploy-jgb.sh --targets lobby,s2,client` 已完成构建与部署，最新运行 jar 哈希 `2c72f7f3750fb5392483e64f36dba9d58e73941b128d562cc4beaeffffad144f`
+
+### 2026-06-08 - 终端壳层改为常显左栏与上方 75% 工作台
+
+- 主题：把终端壳层从“居中弹窗 + hover 导航”收口到更接近目标图的“常显左栏 + 紧凑顶栏 + 上方固定工作台”，并继续压缩 `SERVER_TOOLS` 页的内容竞争
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/screen/TerminalHomeLayout.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanels.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalServerToolsSection.java`、`src/test/java/com/jsirgalaxybase/terminal/client/screen/TerminalHomeScreenLayoutTest.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanelsScrollTest.java`、`docs/WORKLOG.md`
+- 原因：实际游戏内终端仍明显偏离目标图，核心问题不再是单页 spacing，而是壳层仍保留 hover 导航和居中弹窗比例，导致下方物品栏不可稳定保留、导航形态不对、`传送` 页主体空间不够完整
+- 结果：`TerminalHomeLayout` 现改为更接近屏幕 75% 高度的上方锚定布局，并显式预留底部热键栏可见空间；导航轨默认常显，不再依赖 `EdgeRevealNavigationPanel`；顶栏压缩为更紧凑的单行状态带；`SERVER_TOOLS` 页取消底部 footer 竞争，把空间让给左侧传送点列表和右侧详情/状态/确认区，同时把列表改成单一主卡片并补上底部自动刷新提示
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试 `TerminalHomeScreenLayoutTest`、`TerminalShellPanelsScrollTest`、`TerminalServiceTest` 通过；`assemble` 首次尝试被远端 TLS handshake 中断，重试后成功
+
+### 2026-06-08 - 增加灰链与客户端一键部署脚本
+
+- 主题：把反复手工执行的 `build -> 替换 jar -> 重启 lobby/s2 -> 校验 hash/状态` 收口为可重复脚本，减少后续终端与 ServerTools 开发中的部署噪音
+- 影响范围：`scripts/lib/deploy-common.sh`、`scripts/build-mod.sh`、`scripts/deploy-gray-chain.sh`、`scripts/deploy-jgb.sh`、`docs/WORKLOG.md`
+- 原因：当前 `JsirGalaxyBase` 的验证节奏高度依赖灰链 `Lobby/S2` 和 Prism 客户端实例；如果每次都靠人工逐步部署，不仅重复，而且容易漏掉 hash 一致性、日志 `Done` 校验和旧 jar 清理
+- 结果：新增三层脚本链：
+  - `scripts/build-mod.sh`：用已验证的 Docker Gradle 路径构建运行 jar
+  - `scripts/deploy-gray-chain.sh`：备份并清理旧 `jsirgalaxybase*.jar`，替换 `lobby/s2/client`，重启灰链服，校验 `RUNNING`、`Done` 和哈希一致性
+  - `scripts/deploy-jgb.sh`：总控脚本，串联 build/deploy，并支持可选 `--launch-client`
+- 验证：`bash -n` 通过；`--dry-run` 串联通过；`scripts/deploy-jgb.sh --skip-build --targets lobby,s2,client` 已真实运行成功，完成 `lobby/s2/client` 同步与哈希校验，不触碰 `S1`
+
+### 2026-06-08 - 终端继续压缩到更接近效果图的密度
+
+- 主题：继续收口终端壳层，把“物品栏可见、左栏更窄、字号更小、普通页无底栏”落成共享终端行为
+- 影响范围：`src/main/java/com/jsirgalaxybase/client/gui/framework/LabelPanel.java`、`src/main/java/com/jsirgalaxybase/client/gui/framework/ButtonPanel.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalPanelFactory.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalLayoutMetrics.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanels.java`、`src/main/java/com/jsirgalaxybase/terminal/client/screen/TerminalHomeLayout.java`、`src/test/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanelsScrollTest.java`、`src/test/java/com/jsirgalaxybase/terminal/client/screen/TerminalHomeScreenLayoutTest.java`、`docs/WORKLOG.md`
+- 原因：上一轮虽然已经改成常显左栏和上方工作台，但实际游戏内仍然偏大；普通页底部 `刷新分区 / 关闭终端` 仍然浪费空间，导航与文字密度也还明显高于目标效果图
+- 结果：普通页底部 footer 已删除；壳层比例、上方锚定和左侧导航宽度进一步收紧；终端共享 `LabelPanel` 与 `ButtonPanel` 增加缩放能力，并由 `TerminalPanelFactory` 默认启用更小的终端字号；`TerminalLayoutMetrics` 同步下调行高、按钮高和内边距，使同样区域内可容纳更多内容
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试 `TerminalHomeScreenLayoutTest`、`TerminalShellPanelsScrollTest`、`TerminalServiceTest` 通过；`scripts/deploy-jgb.sh --targets lobby,s2,client` 已真实构建并完成新 jar 部署
+
+### 2026-06-08 - 终端壳层高度和传送页栏宽继续整改
+
+- 主题：针对实际游戏内仍然偏满屏的问题，继续压低终端整体高度、扩大底部热键栏预留，并收窄 `SERVER_TOOLS` 传送页中栏
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/screen/TerminalHomeLayout.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalServerToolsSection.java`、`src/test/java/com/jsirgalaxybase/terminal/client/screen/TerminalHomeScreenLayoutTest.java`、`docs/WORKLOG.md`
+- 原因：前一版虽然已经删除底部 footer 和缩小字号，但当前布局高度比例仍然偏大，`SERVER_TOOLS` 中栏也占用过多横向空间，右侧详情区没有充分接近目标图
+- 结果：默认终端高度比例从偏大的 0.79 级别压到 0.68，并提高底部预留空间；导航轨最大宽度进一步收紧；传送页中栏从约 38% 收到约 34%，卡片 gap、padding、传送点行高和右侧详情/状态/action 分区高度全部压缩，给右侧内容更多横向空间
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试 `TerminalHomeScreenLayoutTest`、`TerminalShellPanelsScrollTest`、`TerminalServiceTest` 通过；`scripts/deploy-jgb.sh --targets lobby,s2,client` 已真实构建并部署，jar 哈希 `82191c0dea739f2002d7170ffb963cb8db90772909482a8ea6b7845991c791f3`
+
+### 2026-06-07 - 记录传送页与效果图逐项对比后的产品结论更新
+
+- 主题：把 `传送 / 群组服` 当前运行页面与目标效果图做逐项对比，并把“问题到底是什么”从模糊的 UI 不满意收口成可执行的产品结论
+- 影响范围：`docs/terminal-ui-redesign-toward-concept-mockup-2026-06-07.md`、`docs/terminal-servertools-page-v1-acceptance-review-2026-06-06.md`、`docs/README.md`、`docs/WORKLOG.md`
+- 原因：当前页面虽然已经接通真实 warp 后端，也已经能在终端中进入 `传送` 页，但和目标图相比，核心差距并不是 hover 行为或单个 spacing，而是页面仍沿用 generic section/scroll 模型，导致信息架构、主次动作和内容分区都不对
+- 结果：文档中已明确记录六类关键差距：`信息架构不对`、`导航形态不对`、`warp 列表不是稳定中栏`、`右栏详情不是结构化面板`、`主次动作关系错误`、`整体仍像系统说明页而非玩家工具页`；同时把后续方向明确改成“保持后端链不变，但把 `传送 / 群组服` 重做成常驻窄导航 + 中栏列表 + 右栏详情/状态/确认按钮的专用传送工具页”，不再把下一轮定义成单纯 hover 或密度微调
+
+### 2026-06-07 - 记录终端朝效果图方向的整体 UI 改造设计与阶段计划
+
+- 主题：在 `Lobby <-> S2` 的真实 warp 链路已经验证通过后，把当前终端工作的主阻塞从“传送是否可用”正式切换为“界面是否好用”，并沉淀一份面向效果图方向的整体设计与实施计划
+- 影响范围：`docs/terminal-ui-redesign-toward-concept-mockup-2026-06-07.md`、`docs/README.md`、`docs/WORKLOG.md`
+- 原因：当前 BetterQuesting 风格终端在功能迁移上已经覆盖银行、市场、群组服传送等正式页面，但实际游戏内使用仍然存在导航过重、顶栏浪费高度、传送页信息层级混杂等问题；需要先确定“继续坚持当前游戏内 GUI 路线，但重做交互结构”的产品决策，再开始阶段性实施
+- 结果：新增一份正式设计文档，明确不回退到纯 web 路线、不重开 BetterQuesting 风格技术选型，而是把终端重做拆成四段：`Phase 1 导航壳重做`、`Phase 2 顶栏与全局状态重做`、`Phase 3 传送页专项重做`、`Phase 4 肉眼观察收口`；其中当前后端基线已确认为 `Lobby <-> S2` warp 主链可用，下一轮执行应从导航壳开始
+
+### 2026-06-06 - 验收 ServerTools 群组服终端页 v1 并产出收口 Prompt
+
+- 主题：回顾当前工作树中已出现的 `SERVER_TOOLS` 终端页面实现，判断它是否已经接入真实 ServerTools warp 后端，并把剩余缺口收口成下一轮执行 prompt
+- 影响范围：`docs/terminal-servertools-page-v1-acceptance-review-2026-06-06.md`、`docs/README.md`、`docs/WORKLOG.md`
+- 原因：当前方向已经确认要推进群组服工具和市场产品化；检查代码时发现 ServerTools 终端页并非缺失，而是已有 v1 实现，需要避免后续开发 AI 从零重写
+- 结果：确认 `TerminalPage.SERVER_TOOLS`、`SERVER_TOOLS_REFRESH / SELECT_WARP / CONFIRM_WARP`、snapshot / payload / viewmodel / network / client section 已接入；默认服务端 facade 会读取 `ServerToolsModule`、warp 列表和 server directory，确认 warp 复用 `PlayerTeleportService.prepareWarpTeleport(...)` 与 `ServerToolsModule.dispatchTeleport(...)`；剩余缺口收口为 recent transfer ticket 状态展示、默认 facade 后端调用测试、游戏内鼠标浏览验证和 UI 密度复测
+- 验证：本轮前半段测试曾被数据盘满和 Gradle 缓存锁阻塞；清理环境后，`compileTestJava` 成功，`TerminalServiceTest`、`TerminalHomeScreenModelTest`、`TerminalPageTest`、`ClusterTeleportServiceTest`、`PlayerArrivalRestoreServiceTest`、`TerminalHomeScreenLayoutTest`、`TerminalShellPanelsScrollTest` 均通过；临时 `galaxy-dev-run` 测试容器已清理，未触碰正式游戏服务器进程
+
+### 2026-06-06 - 收口 ServerTools 终端页 recent transfer 状态与默认 facade 测试
+
+- 主题：把群组服终端页 v1 验收中确认的两项代码缺口直接补齐，不重写现有页面结构
+- 影响范围：`src/main/java/com/jsirgalaxybase/modules/cluster/port/TeleportTicketRepository.java`、`src/main/java/com/jsirgalaxybase/modules/cluster/infrastructure/jdbc/JdbcTeleportTicketRepository.java`、`src/main/java/com/jsirgalaxybase/terminal/TerminalService.java`、`src/main/java/com/jsirgalaxybase/terminal/TerminalServerToolsSectionSnapshot.java`、`src/main/java/com/jsirgalaxybase/terminal/client/viewmodel/TerminalServerToolsSectionModel.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalServerToolsSection.java`、`src/main/java/com/jsirgalaxybase/terminal/network/OpenTerminalApprovedMessage.java`、`src/main/java/com/jsirgalaxybase/terminal/network/TerminalSnapshotMessage.java`、`src/test/java/com/jsirgalaxybase/terminal/TerminalServiceTest.java`、`src/test/java/com/jsirgalaxybase/modules/cluster/application/ClusterTeleportServiceTest.java`、`src/test/java/com/jsirgalaxybase/modules/cluster/application/PlayerArrivalRestoreServiceTest.java`、`docs/terminal-servertools-page-v1-acceptance-review-2026-06-06.md`
+- 原因：`SERVER_TOOLS` 页面已接入真实 warp 主链，但此前还缺少最近传送票据状态展示，以及默认 facade 是否真正走 `prepareWarpTeleport(...)` / `dispatchTeleport(...)` 的可测证明
+- 结果：新增 `findRecentForPlayer(...)` 仓储入口并接入 JDBC；ServerTools terminal snapshot 现在可显示最近 transfer ticket 状态行；`TerminalService` 增加 runtime bridge seam，默认 facade 的本服完成、跨服派发、runtime 不可用和后端异常路径均已补单测证明；当前剩余收口仅为游戏内点击验收与必要的局部密度微调
+
+### 2026-05-18 - 记录当前产品方向、进度判断与剩余需求清单
+
+- 主题：把当前共识从“继续单点 UI 打磨”收口为“终端作为全面智能控制台”，并明确下一阶段优先推进群组服工具页面和市场功能/页面产品化
+- 影响范围：`docs/current-product-direction-and-gap-review-2026-05-18.md`、`docs/README.md`、`docs/WORKLOG.md`
+- 原因：终端新壳可用性已经明显改善，ServerTools 跨服 warp 已完成真实 Lobby <-> S2 验证，后续重点需要转向把 ServerTools 和三类市场变成终端中的正式玩家工作流
+- 结果：新增当前方向与缺口评审文档，明确 terminal foundation、ServerTools/cluster、market 三条线的已完成进度、剩余需求、推荐执行阶段和需要用户确认的产品决策；同时标注旧 Phase 7 交接文档与 2026-05-17 灰度状态记录中的过期状态点
+
+### 2026-05-18 - 完成 ServerTools 跨服 warp 真实灰度验证
+
+- 主题：用游戏内 `/jgbst warp ...` 对 Lobby 与 S2 之间的跨服传送闭环做真实验证，并收口超时问题
+- 影响范围：`src/main/java/com/jsirgalaxybase/modules/cluster/application/ClusterTeleportService.java`、Velocity gray chain 配置、`docs/servertools-phase3-gray-rollout-status-2026-05-17.md`、`docs/WORKLOG.md`
+- 原因：此前灰度链已启动，但还未实际验证玩家级跨服传送；第一次实测暴露出 transfer ticket TTL 与代理 read timeout 对 GTNH 切服耗时不够宽容
+- 结果：`/jgbst warp list` 可列出系统 warp；`/jgbst warp s2test` 完成 Lobby 到 S2；`/jgbst warp lobbytest` 完成 S2 回 Lobby；相关 `cluster_transfer_ticket` 进入 `COMPLETED`；后续 ServerTools 可进入终端页面产品化阶段
+
+### 2026-05-17 - 增加 servertools 命名空间 warp 入口
+
+- 主题：为 ServerTools 增加不与 GTNH 整合包裸 `/warp` 冲突的命名空间入口，优先打通跨服 warp 灰度测试
+- 影响范围：`src/main/java/com/jsirgalaxybase/modules/servertools/command/`、`src/main/java/com/jsirgalaxybase/modules/servertools/ServerToolsModule.java`、`src/main/java/com/jsirgalaxybase/command/GalaxyBaseCommand.java`、`src/test/java/com/jsirgalaxybase/modules/servertools/command/JgbServerToolsCommandTest.java`、`src/test/java/com/jsirgalaxybase/command/GalaxyBaseCommandTest.java`、`docs/servertools-phase1-command-reference.md`、`docs/WORKLOG.md`
+- 原因：灰度实测 `/warp s2test` 与 `/warp lobbytest` 被整合包内其他模组接走，未进入 JsirGalaxyBase 的 `WarpCommand`，导致 `cluster_transfer_ticket` 没有新增记录
+- 结果：新增 `/jgbst warp list`、`/jgbst warp <name>`，别名保留 `/jst` 与 `/jsirst`；主命令新增 `/jsirgalaxybase servertools warp ...` 与 `/jsirgalaxybase st warp ...`；裸 `/warp` 仍保留兼容注册，但文档改为以命名空间入口作为验收命令；新入口统一转入 `ServerToolsCommandHandler`，复用 `PlayerTeleportService.prepareWarpTeleport` 与现有 cluster dispatch，不复制传送业务逻辑
+- 验证：本机无 Java/JDK，容器内 `compileJava` 在拉取 `ModularUI2:2.3.45-1.7.10` 时因远端 TLS handshake 被断开，未进入 Java 编译阶段；已补最小命令路由测试与手动游戏内/SQL 验证步骤，后续可在依赖缓存可用时重跑 `docker compose -f /media/u24/data/gtnh/docker/projects/docker-compose.yml run --rm -e GRADLE_USER_HOME=/tmp/gradle-home galaxy-dev ./gradlew compileJava --no-configuration-cache -PforceToolchainVersion=17`
+
+### 2026-05-17 - 完成 servertools / cluster Phase 3 灰度链部署准备
+
+- 主题：按第三阶段灰度联调目标，把 Entrance / Lobby / S2 准备到可启动、可观察、可继续做真实跨服联调的状态，同时不触碰在线 S1
+- 影响范围：`docs/servertools-phase3-gray-rollout-status-2026-05-17.md`、`docs/README.md`、`docs/WORKLOG.md`、`/media/u24/data/gtnh/data/Galaxy_GTNH_Lobby/**`、`/media/u24/data/gtnh/data/Galaxy_GTNH284_S2/**`、`/media/u24/data/gtnh/docker/projects/.env`、`galaxy-base` PostgreSQL schema、`galaxy-gtnh` 容器内 supervisor 当前配置
+- 原因：原 phase 3 prompt 仍按 MCSM 路径描述，但当前机器真实运行链已经是 Docker + supervisor；灰度链此前已有旧 jar 和配置残留，但未真正启动，数据库也没有基础 schema，会阻塞 Lobby / S2 进入 JsirGalaxyBase banking / market / cluster runtime
+- 结果：确认当前运行目录为 `/media/u24/data/gtnh/data` 并挂载到容器 `/gtnh/GroupServer`；将当前 `build/libs/jsirgalaxybase-ed7e2cf.jar` 部署到 Lobby 与 S2，旧 `7545ce9` jar 移入各自 `mods_disabled`；用项目 DDL 初始化空库后再执行既有 `scripts/db-migrate.sh` 完成全部版本化迁移；把 PostgreSQL 角色密码对齐到既有 server cfg；在不重启 S1 的前提下通过 supervisor 启动 Entrance、Lobby、S2，并把持久 `.env` 同步为灰度链启用状态；最终 Entrance 监听 `25566`，Lobby 监听 `25564`，S2 监听 `25567`，Lobby / S2 日志均出现 JsirGalaxyBase banking、market、cluster runtime prepared 和 Minecraft `Done`
+- 验证：`docker compose ... galaxy-dev ./gradlew assemble --no-configuration-cache -PforceToolchainVersion=17` 成功；部署 jar 与构建 jar SHA256 均为 `02dcd79439cb7e8fa7896299d047d637e3d9dd3bddd7d7b54fdff8beca98e065`；host TCP probes 到 `127.0.0.1:25564` / `25566` / `25567` 成功；`galaxy-gtnh` supervisor 中 S1 uptime 未重置且 S1 的 JsirGalaxyBase 文件未改动
 
 ### 2026-04-10 - 把 ServerUtilities 的后续整合边界写入现有架构文档
 
@@ -1481,3 +2002,100 @@
   - 已实际执行并通过：`./gradlew test --tests com.jsirgalaxybase.terminal.TerminalOpenCutoverTest --tests com.jsirgalaxybase.terminal.TerminalServiceTest --no-configuration-cache -PforceToolchainVersion=17`
   - 已实际执行并通过：`./gradlew assemble --no-configuration-cache -PforceToolchainVersion=17`
   - 本地体验环境：检测到已有 `runServer` / `runClient` 进程在运行，未杀用户进程；`ss -ltnp | grep 25100` 显示 `127.0.0.1:25100` 已监听，server 日志有 `Done`、banking prepared 与 `Market runtime prepared`，client 日志有 `Registered terminal client entry handlers` 且已连接 `127.0.0.1:25100`
+
+### 2026-06-07 - Terminal ServerTools 收口：传送页改为三栏工具页
+
+- 主题：把 `SERVER_TOOLS` 从 generic section 风格收口为 workflow-first 的专用传送工具页，不改真实 warp 后端主链
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalServerToolsSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanels.java`、`src/main/java/com/jsirgalaxybase/terminal/client/screen/TerminalHomeScreen.java`、`src/main/java/com/jsirgalaxybase/terminal/TerminalService.java`、`src/main/java/com/jsirgalaxybase/terminal/TerminalServerToolsSectionSnapshot.java`、`src/main/java/com/jsirgalaxybase/terminal/client/viewmodel/TerminalServerToolsSectionModel.java`、相关序列化与测试、`docs/WORKLOG.md`
+- 原因：当前 `传送 / 群组服` 页已接通真实 warp 链，但页面仍是混合 section/scroll 形态；warp 列表、说明、状态与按钮竞争同一正文区，不符合三栏传送工具页目标
+- 结果：
+  - `SERVER_TOOLS` 正文切到专用布局：左侧保留窄导航轨，主体改为服务器目录卡 + warp 列表卡 + 右侧详情/最近状态/风险/主 CTA 三段结构
+  - warp 列表改为稳定 item 几何，支持主名、副文案、状态标签与选中高亮，不再依赖普通文本段落
+  - 右栏详情改为结构化字段：当前服务器、目标服务器、目标坐标、传送说明；最近传送状态单独成卡
+  - 顶部状态栏为 `SERVER_TOOLS` 增加紧凑刷新按钮；底部 footer 不再给该页放同级刷新按钮，只保留弱化关闭入口
+  - ServerTools snapshot/model 追加每个 warp 的副文案/状态标签，以及右栏和最近状态所需的结构字段；网络序列化按现有 server-tools nullable block 后续追加
+  - 传送确认 popup 继续走现有确认弹窗，服务端仍复用 `PlayerTeleportService.prepareWarpTeleport(...)` 和 `ServerToolsModule.dispatchTeleport(...)`
+
+### 2026-06-14 - Terminal 标准商品市场收口：补齐存入/卖出/即时成交/撤单工作流
+
+- 主题：把 `MARKET_STANDARDIZED` 从“买单 + 文本说明”页收口成标准商品市场正式工作页，不改三市场架构、不重写标准市场后端
+- 影响范围：`src/main/java/com/jsirgalaxybase/terminal/TerminalActionType.java`、`src/main/java/com/jsirgalaxybase/terminal/TerminalMarketActionPayload.java`、`src/main/java/com/jsirgalaxybase/terminal/TerminalMarketSectionSnapshot.java`、`src/main/java/com/jsirgalaxybase/terminal/TerminalMarketActionMessageFactory.java`、`src/main/java/com/jsirgalaxybase/terminal/TerminalService.java`、`src/main/java/com/jsirgalaxybase/terminal/network/OpenTerminalApprovedMessage.java`、`src/main/java/com/jsirgalaxybase/terminal/network/TerminalSnapshotMessage.java`、`src/main/java/com/jsirgalaxybase/terminal/ui/TerminalMarketSectionService.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSection.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSectionContent.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalMarketSectionState.java`、`src/main/java/com/jsirgalaxybase/terminal/client/component/TerminalShellPanels.java`、`src/main/java/com/jsirgalaxybase/terminal/client/screen/TerminalHomeScreen.java`、`src/main/java/com/jsirgalaxybase/terminal/client/viewmodel/TerminalMarketSectionModel.java`、相关测试、`docs/WORKLOG.md`
+- 原因：标准市场后端已具备 `depositInventory(...)`、`createSellOrder(...)`、`cancelSellOrder(...)`、`createBuyOrder(...)`、`cancelBuyOrder(...)` 等能力，但终端页此前只露出限价买单和 claim，无法完成玩家实际交易闭环
+- 结果：
+  - 标准市场新增正式 action：`MARKET_CONFIRM_DEPOSIT_HELD`、`MARKET_CONFIRM_LIMIT_SELL`、`MARKET_CONFIRM_INSTANT_BUY`、`MARKET_CONFIRM_INSTANT_SELL`、`MARKET_CANCEL_ORDER`
+  - `TerminalMarketActionPayload` 扩展为兼容旧 4 段和新 9 段编码，保留 `selectedProductKey` / 买单字段，同时追加卖单、即时买卖、撤单所需字段
+  - `TerminalMarketSectionService` 与 `TerminalService` 补齐标准市场动作闭环，继续复用 `TerminalMarketService` 已有真实链路：存入、限价卖单、即时买入、即时卖出、撤单、claim 全部通过 action -> snapshot 回写
+  - 标准市场 snapshot/model 追加盘口数量、仓储提示、动作预览、订单 id/可撤销标记、卖单/即时交易 drafts 与 `depositEnabled`，网络序列化同步扩展
+  - `TerminalShellPanels` 对 `MARKET_STANDARDIZED` 取消外层 generic scroll wrapper，正文直接挂专用 section；`TerminalMarketSection` 改成稳定三栏：左侧商品与仓储、中间盘口/订单/CLAIMABLE、右侧存入/限价买卖/即时买卖动作区
+  - 高风险动作统一走确认 popup：存入、限价卖单、即时买入、即时卖出、撤单；原有限价买单和 claim popup 继续保留
+  - `CLAIMABLE` 与“我的订单”从纯文本摘要改为可操作区：claim 行可直接弹确认，订单行可直接发起撤单确认
+  - 已实际执行并通过：`git diff --check`
+  - 已实际执行并通过：`docker compose -f /media/u24/data/gtnh/docker/projects/docker-compose.yml run --rm -e GRADLE_USER_HOME=/tmp/gradle-home galaxy-dev ./gradlew test --tests com.jsirgalaxybase.terminal.TerminalServiceTest --tests com.jsirgalaxybase.terminal.TerminalMarketActionMessageFactoryTest --tests com.jsirgalaxybase.terminal.client.component.TerminalShellPanelsScrollTest --tests com.jsirgalaxybase.terminal.client.component.TerminalMarketSectionContentTest --tests com.jsirgalaxybase.modules.core.market.application.StandardizedSpotMarketServiceTest --no-configuration-cache -PforceToolchainVersion=17`
+  - 已实际执行并通过：`docker compose -f /media/u24/data/gtnh/docker/projects/docker-compose.yml run --rm -e GRADLE_USER_HOME=/tmp/gradle-home galaxy-dev ./gradlew test --tests com.jsirgalaxybase.terminal.client.screen.TerminalHomeScreenLayoutTest --tests com.jsirgalaxybase.terminal.client.component.TerminalShellPanelsScrollTest --tests com.jsirgalaxybase.terminal.TerminalServiceTest --tests com.jsirgalaxybase.terminal.TerminalMarketActionMessageFactoryTest --tests com.jsirgalaxybase.terminal.client.component.TerminalMarketSectionContentTest --no-configuration-cache -PforceToolchainVersion=17`
+  - 本机仍无 `java`，本轮验证全部通过仓库既有 Docker Gradle 路径完成
+### 2026-07-20 - Standard market hover lifecycle and visual liquidity fixture
+
+- Fixed the GUI lifecycle fault where a browse hover overlay could survive `initGui()` after a product click rebuilt the terminal into standardized-market `DETAIL` mode. Root rebuild and GUI close now clear transient hover overlays before the new route is drawn.
+- Expanded `scripts/market-demo-fixture.sh` to a managed v2 fixture. It seeds every enabled formal standardized product with escrow-backed sell liquidity, frozen-funds-backed buy liquidity, and recent real `market_trade_record` samples for 24-hour volume and hover/detail price history. The fixture is idempotent by product/version and does not mutate player accounts, player custody, or player orders.
+- Fixed the standardized buy-order banking correlation overflow: a terminal request id could be valid in the market log yet become too long after `market:buy-freeze:` was prepended for the bank `business_ref VARCHAR(64)`. Long references now use a deterministic UUID-derived compact key, while the full request id remains in the market operation log and bank audit JSON.
+- Cancel requests against an order that is already filled/cancelled are now recorded as safe `FAILED` precondition rejections. They no longer rewrite settled orders or custody to `EXCEPTION`; migration `20260720_001_repair_safe_cancel_rejections.sql` repairs the two affected historical cancel logs and their settled order.
+- 验证：`git diff --check`、`StandardizedSpotMarketServiceTest`、`TerminalMarketServiceTest`、`TerminalMarketSectionServiceTest`、`MarketItemGridPanelTest` 与 `HoverOverlayPositionerTest` 均通过。无客户端烟测确认严格市场审计异常数为 `0`，正式目录为 8 项、活跃买单 9、卖单 13、24 小时成交 81，8 个商品每项都有至少 10 个真实价格点。runtime jar `1737f92895c92d7d179efee7751c60f228b926da3259c163479bcb76114fd85c` 已部署至 Lobby 与客户端，Lobby 进程为 `RUNNING`。
+
+### 2026-07-20 - 市场三段式整改 Phase 3：定制与汇率市场接入共用浏览/详情骨架
+
+- 定制市场和汇率市场迁移到共用 `BROWSE -> DETAIL` 客户端状态：浏览使用四列网格，详情单独占用工作区；市场语义仍分别保持挂牌交付链与任务书硬币正式报价链。
+- 定制市场保留全部挂牌、我的出售、待领取三个服务器权威范围。切换范围会清空旧选择并请求对应 scope 的新 snapshot，避免本地状态变化而网格继续显示旧范围。
+- 汇率市场按完整 `TaskCoinCatalog` 浏览所有任务书硬币，点击仅选择用于展示的目录币种；兑换执行继续由服务端验证玩家实际手持物、报价有效期和限额，不能通过浏览选择绕过 gate。
+- 新增 `MarketBrowseDetailController`，统一保存查询、页码、网格滚动位置与当前选择；空 snapshot 会彻底重置该临时状态。更新终端布局测试，使其校验新 browse/detail surface 的边界契约，而非已移除的双常驻面板。
+- 验证：`git diff --check`；Docker Gradle 定向通过 `TerminalServiceTest`、`TerminalMarketActionMessageFactoryTest`、`TerminalMarketSectionContentTest`、`TerminalShellPanelsScrollTest`、`MarketItemGridPanelTest`；`assemble` 通过。未启动客户端或做截图验收。
+
+### 2026-07-20 - 银河仓储网络 v1：AE2 实体仓储方向确认
+
+- 确认未来个人、企业和公共仓优先复用 GTNH AE2 的真实存储元件、容量、频道、供电和网络拓扑；JGB 不实现无限虚拟背包，也不复制 ME 单元的物品余额。
+- JGB 的责任收口为仓库账户、权限、登记端口、资产域转移、审计、恢复与容量健康摘要；标准市场托管继续是独立数据库结算账本。
+- 新增 `docs/warehouse-ae2-integration-v1.md`，定义 `Warehouse Port -> Warehouse Controller -> 已登记 AE2 网络` 的受控接入模型，以及市场托管桥、物品边界与分阶段实施顺序。
+
+### 2026-07-20 - 银河仓储网络 Phase 0：账户绑定 AE2 Drive 调查
+
+- 根据 AE2 Unofficial 源码确认，未来 JGB 仓储的准确模型调整为“账户绑定的
+  `Warehouse Drive` + 真实 AE2 Storage Cell”，而不是 JGB 虚拟仓或仅靠 Port
+  接入任意 ME 网络。
+- `Warehouse Drive` 将以 AE2 `IChestOrDrive` / `ICellContainer` 的方式作为真实
+  Grid Host 接线；AE2 自动纳入其 Cell，JGB 不复制物品内容、不另造终端。
+- JGB 管理 Drive 归属、Cell Bay 数、插拔/拆卸锁、端口交割、审计与恢复；市场
+  托管继续为独立数据库资产域。
+- 记录关键边界：接入同一 AE 网络后的原生终端读写需依赖 AE2 Security 的
+  `INJECT` / `EXTRACT` 权限；企业/公共仓 v1 不承诺在普通 AE 线缆上实施逐物品
+  JGB 权限过滤。详细调查、风险与 Phase 0 尖峰清单见
+  `docs/warehouse-ae2-integration-v1.md`。
+
+### 2026-07-20 - 银河仓储网络 Phase 0：Base Vault 起步保险箱补充
+
+- 明确玩家无 AE2 元件时仍需要一个账户绑定的基础存储：`Base Vault`，体验类似
+  末影箱但由 JGB 的 PostgreSQL 槽位账本保存，初始固定 27 格，完整保留
+  `ItemStack` NBT，支持跨灰度服、企业/公共账户权限、幂等交付与恢复。
+- Base Vault 是有限的 `BASE_VAULT` 资产域，承担市场 `CLAIMABLE`、定制交付和
+  离线奖励的安全第一落点；满仓时资产留在来源域/PENDING 状态，绝不丢失或重复发放。
+- Base Vault 不接入 AE2 Storage Grid；真实 AE2 Cell 容量仍由账户绑定
+  `Warehouse Drive` 提供。后续通过受审计 Port 在 Base Vault、AE2 Drive 与市场
+  托管之间迁移，避免形成无成本无限 ME 存储。
+## 2026-07-24 - Base Vault native container polish
+
+- Compressed the personal Base Vault container to the natural 9 x 3 chest-plus-player-inventory proportion, removing redundant Vault/player-inventory headings and the persistent Shift instruction.
+- Kept the Galaxy Terminal visual skin but simplified the header to `银河终端` plus capacity, matching the spatial hierarchy of an Ender Chest rather than a terminal documentation page.
+- Added a compact header return button that closes the container and reopens the Galaxy Terminal through the existing terminal approval route.
+
+### 2026-08-07 - Base Vault audited server sort
+
+- Added a Vault-only sort request and header control. It never registers the persistent Vault with Inventory Bogo Sorter and never mutates player inventory, cursor or drops.
+- `BaseVaultService` now locks the personal account, deterministically groups/merges full-NBT-identical stacks using `registry-meta-nbt-v1`, and commits changed slots atomically.
+- Added `warehouse_operation_slot_change` migration. Every changed sort slot records before/after compressed ItemStack snapshots and version values under its `VAULT_SORT` operation for recovery and audit review.
+- Generalized the same audited sort contract to `ENTERPRISE` and `PUBLIC` Base Vault accounts, each with its fixed 54-slot capacity. Their GUI opening remains blocked until enterprise/public authority checks exist; the service path is available to those future authorized controllers now.
+- Validation: `git diff --check`, Docker `testClasses`, and targeted Docker tests for `BaseVaultServiceTest` / `VaultSortPlannerTest` pass. The 54-slot enterprise/public test performs a real reorder and asserts two audited slot deltas per account type. No server, client, or database deployment was performed.
+- Deployment follow-up: migration `20260807_001_add_base_vault_sort_audit.sql` applied successfully and runtime jar SHA256 `c19e783cde05a651868c6bf72ec123b57dc40ce7c4977c4fbb630d3afbed538d` was copied to Lobby, S2 and the GTNH client. Lobby reached `RUNNING` and logged `Done`. S2 received the same jar but remains `EXITED` because both `World/level.dat` and `level.dat_old` are corrupt; no world recovery or rollback was attempted.
+- Vault UI follow-up: replaced the header's text-only `S` sort control with an icon-only three-row sort glyph and a hover label (`整理保险箱`), keeping the action auditable and visually compact.
+### 2026-08-07 - 现代交易终端改造方案
+
+- 主题：将标准市场从手动托管操作页收口为以账户仓自动交割为基础的现代交易终端。
+- 决策：个人 Base Vault 是当前账户仓；未来已授权 AE 仓优先、Base Vault 回退。卖单确认时内部锁定账户仓物品进入市场托管，买入后自动投递账户仓；只有投递失败才显示待领取恢复动作。`AVAILABLE`、`ESCROW_SELL`、`CLAIMABLE` 与冻结资金保留为审计状态，不再作为玩家日常操作步骤。
+- UI 方向：四列浏览卡必须显示真实价格波动；Hover 提供只读行情摘要；点击后进入含真实 K 线/成交量、盘口和可编辑买卖交易单的独立详情页。详见 `docs/modern-trading-terminal-redesign-v1.md`。

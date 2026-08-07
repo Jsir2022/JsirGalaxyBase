@@ -54,9 +54,23 @@ public class MarketRecoveryService {
             MarketOperationStatus.RECOVERY_REQUIRED), limit);
         List<MarketOperationLog> escalated = new ArrayList<MarketOperationLog>();
         for (MarketOperationLog candidate : candidates) {
+            if (candidate.getStatus() == MarketOperationStatus.RECOVERY_REQUIRED
+                && !supportsAutomaticReconciliation(candidate.getOperationType())) {
+                // Generic manual-recovery records are already quarantined. Reprocessing them
+                // would only rewrite their audit message on every server start.
+                continue;
+            }
             escalated.add(recoverCandidate(candidate));
         }
         return escalated;
+    }
+
+    private boolean supportsAutomaticReconciliation(MarketOperationType operationType) {
+        return operationType == MarketOperationType.BUY_ORDER_CREATE
+            || operationType == MarketOperationType.BUY_ORDER_CANCEL
+            || operationType == MarketOperationType.CLAIMABLE_ASSET_CLAIM
+            || operationType == MarketOperationType.INVENTORY_DEPOSIT
+            || operationType == MarketOperationType.EXCHANGE_EXECUTION;
     }
 
     private MarketOperationLog recoverCandidate(MarketOperationLog candidate) {
@@ -70,7 +84,37 @@ public class MarketRecoveryService {
         if (candidate.getOperationType() == MarketOperationType.INVENTORY_DEPOSIT) {
             return recoverDepositOperation(candidate);
         }
+        if (candidate.getOperationType() == MarketOperationType.EXCHANGE_EXECUTION) {
+            return recoverExchangeOperation(candidate);
+        }
         return escalateGeneric(candidate);
+    }
+
+    private MarketOperationLog recoverExchangeOperation(final MarketOperationLog candidate) {
+        return transactionRunner.inTransaction(new Supplier<MarketOperationLog>() {
+
+            @Override
+            public MarketOperationLog get() {
+                MarketRecoveryMetadata metadata = MarketRecoveryMetadata.parse(candidate.getRecoveryMetadataKey());
+                if ("RESTORED_AFTER_FAILURE".equals(metadata.get("physicalInputState"))) {
+                    return operationLogRepository.update(candidate.withState(MarketOperationStatus.COMPLETED,
+                        0L, 0L, 0L,
+                        "exchange recovery confirmed the failed settlement restored the physical input",
+                        metadata.toKey(), Instant.now()));
+                }
+                if (settlementFacade != null && settlementFacade.hasBankTransactionForRequest(candidate.getRequestId())) {
+                    return operationLogRepository.update(candidate.withState(MarketOperationStatus.COMPLETED,
+                        0L, 0L, candidate.getRelatedTradeId(),
+                        "exchange recovery confirmed the formal bank settlement; physical input was consumed",
+                        metadata.toBuilder().put("physicalInputState", "REMOVED").build().toKey(), Instant.now()));
+                }
+                return operationLogRepository.update(candidate.withState(MarketOperationStatus.RECOVERY_REQUIRED,
+                    0L, 0L, 0L,
+                    "exchange recovery cannot confirm bank settlement; reconcile the recorded physical input before retrying",
+                    metadata.toBuilder().put("physicalInputState", "UNKNOWN_AFTER_INTERRUPT").build().toKey(),
+                    Instant.now()));
+            }
+        });
     }
 
     private MarketOperationLog recoverDepositOperation(final MarketOperationLog candidate) {
