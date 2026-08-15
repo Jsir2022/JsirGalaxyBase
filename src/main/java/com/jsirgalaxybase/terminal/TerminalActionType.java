@@ -6,6 +6,7 @@ public enum TerminalActionType {
     VAULT_OPEN("vault_open"),
     REFRESH_PAGE("refresh_page"),
     MARKET_REFRESH("market_refresh"),
+    MARKET_REFRESH_HISTORY("market_refresh_history"),
     MARKET_CONFIRM_DEPOSIT_HELD("market_confirm_deposit_held"),
     MARKET_CONFIRM_LIMIT_BUY("market_confirm_limit_buy"),
     MARKET_CONFIRM_LIMIT_SELL("market_confirm_limit_sell"),

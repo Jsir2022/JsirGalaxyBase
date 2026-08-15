@@ -100,11 +100,10 @@ public class TerminalMarketServiceTest {
         Method method = TerminalMarketService.class.getDeclaredMethod(
             "normalizeSelectedProductKey",
             String.class,
-            List.class,
-            findHeldMarketItemClass());
+            List.class);
         method.setAccessible(true);
 
-        Object normalized = method.invoke(TerminalMarketService.INSTANCE, "", Arrays.asList("product-a", "product-b"), null);
+        Object normalized = method.invoke(TerminalMarketService.INSTANCE, "", Arrays.asList("product-a", "product-b"));
 
         assertEquals(null, normalized);
     }
@@ -152,7 +151,7 @@ public class TerminalMarketServiceTest {
         assertTrue(feedback.getTitle().contains("剩余撤回失败"));
         assertTrue(feedback.getBody().contains("已真实成交 6"));
         assertTrue(feedback.getBody().contains("orderId=51"));
-        assertTrue(feedback.getBody().contains("ESCROW"));
+        assertTrue(feedback.getBody().contains("锁定库存"));
         assertTrue(feedback.getBody().contains("escrow rollback failed"));
     }
 
@@ -337,12 +336,4 @@ public class TerminalMarketServiceTest {
         throw new IllegalStateException("ExchangeContext class not found");
     }
 
-    private Class<?> findHeldMarketItemClass() {
-        for (Class<?> candidate : TerminalMarketService.class.getDeclaredClasses()) {
-            if ("HeldMarketItem".equals(candidate.getSimpleName())) {
-                return candidate;
-            }
-        }
-        throw new IllegalStateException("HeldMarketItem class not found");
-    }
 }

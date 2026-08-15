@@ -30,6 +30,9 @@ Read-only operational audit for the standardized and custom markets. It reports:
   - custom delivery operations that are still processing or have an uncertain result.
   - exchange records whose transaction audit metadata is not marked as exchange.
   - interrupted exchange input operations that require a physical inventory reconciliation.
+  - incomplete Base Vault operations, including their recorded slot-change count.
+  - Base Vault accounts whose configured capacity differs from the account-type contract.
+  - Base Vault slots whose index falls outside their owning account capacity.
 
 --strict exits non-zero when any anomaly is found. --player narrows custody and
 operation reports to one player UUID/reference without changing global checks.
@@ -222,7 +225,55 @@ ORDER BY updated_at ASC, operation_id ASC
 LIMIT 30;
 "
 
-anomalies=$((formal_count + sell_custody_gap + buy_funds_gap + stale_claiming + exception_custody + pending_operations + custom_snapshot_gap + custom_sold_trade_gap + custom_listing_state_gap + custom_trade_state_gap + custom_exception_deliveries + custom_delivery_processing + custom_delivery_unknown + exchange_metadata_gap))
+echo
+echo "== Base Vault audit =="
+vault_account_filter=""
+if [[ -n "$PLAYER_REF" ]]; then
+    vault_account_filter=" AND a.account_ref = '$escaped_player'"
+fi
+vault_incomplete_operations="$(psql_value "SELECT count(*) FROM warehouse_operation_log o JOIN warehouse_account a ON a.account_id = o.account_id WHERE o.operation_status IN ('CREATED', 'PROCESSING', 'RECOVERY_REQUIRED')$vault_account_filter;")"
+vault_stale_processing="$(psql_value "SELECT count(*) FROM warehouse_operation_log o JOIN warehouse_account a ON a.account_id = o.account_id WHERE o.operation_status = 'PROCESSING' AND o.updated_at < now() - interval '10 minutes'$vault_account_filter;")"
+vault_capacity_mismatches="$(psql_value "SELECT count(*) FROM warehouse_account a WHERE ((a.account_type = 'PERSONAL' AND a.base_slot_count <> 27) OR (a.account_type IN ('ENTERPRISE', 'PUBLIC') AND a.base_slot_count <> 54) OR a.account_type NOT IN ('PERSONAL', 'ENTERPRISE', 'PUBLIC'))$vault_account_filter;")"
+vault_out_of_range_slots="$(psql_value "SELECT count(*) FROM warehouse_slot s JOIN warehouse_account a ON a.account_id = s.account_id WHERE (s.slot_index < 0 OR s.slot_index >= a.base_slot_count)$vault_account_filter;")"
+printf 'incomplete_vault_operations=%s\n' "$vault_incomplete_operations"
+printf 'stale_vault_processing_operations=%s\n' "$vault_stale_processing"
+printf 'vault_account_capacity_mismatches=%s\n' "$vault_capacity_mismatches"
+printf 'vault_slots_outside_account_capacity=%s\n' "$vault_out_of_range_slots"
+
+echo
+echo "== Base Vault actionable records =="
+psql_table "
+SELECT o.operation_id, o.request_id, a.account_type, a.account_ref, o.operation_type,
+       o.source_domain, o.target_domain, o.quantity, o.operation_status,
+       count(c.slot_index) AS recorded_slot_changes, o.message, o.updated_at
+FROM warehouse_operation_log o
+JOIN warehouse_account a ON a.account_id = o.account_id
+LEFT JOIN warehouse_operation_slot_change c ON c.operation_id = o.operation_id
+WHERE o.operation_status IN ('CREATED', 'PROCESSING', 'RECOVERY_REQUIRED')$vault_account_filter
+GROUP BY o.operation_id, a.account_type, a.account_ref
+ORDER BY o.updated_at ASC, o.operation_id ASC
+LIMIT 30;
+"
+psql_table "
+SELECT a.account_id, a.account_type, a.account_ref, a.base_slot_count, a.vault_status, a.updated_at
+FROM warehouse_account a
+WHERE ((a.account_type = 'PERSONAL' AND a.base_slot_count <> 27)
+    OR (a.account_type IN ('ENTERPRISE', 'PUBLIC') AND a.base_slot_count <> 54)
+    OR a.account_type NOT IN ('PERSONAL', 'ENTERPRISE', 'PUBLIC'))$vault_account_filter
+ORDER BY a.account_id
+LIMIT 30;
+"
+psql_table "
+SELECT a.account_type, a.account_ref, a.base_slot_count, s.slot_index,
+       s.item_id, s.stack_size, s.version, s.updated_at
+FROM warehouse_slot s
+JOIN warehouse_account a ON a.account_id = s.account_id
+WHERE (s.slot_index < 0 OR s.slot_index >= a.base_slot_count)$vault_account_filter
+ORDER BY a.account_id, s.slot_index
+LIMIT 30;
+"
+
+anomalies=$((formal_count + sell_custody_gap + buy_funds_gap + stale_claiming + exception_custody + pending_operations + custom_snapshot_gap + custom_sold_trade_gap + custom_listing_state_gap + custom_trade_state_gap + custom_exception_deliveries + custom_delivery_processing + custom_delivery_unknown + exchange_metadata_gap + vault_incomplete_operations + vault_capacity_mismatches + vault_out_of_range_slots))
 if [[ "$STRICT" == true && "$anomalies" -gt 0 ]]; then
     echo "FAIL: market audit found $anomalies anomaly count(s)." >&2
     exit 3

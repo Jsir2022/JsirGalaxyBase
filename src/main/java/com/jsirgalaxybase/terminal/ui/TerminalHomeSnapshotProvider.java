@@ -43,7 +43,7 @@ public final class TerminalHomeSnapshotProvider {
         TerminalHomeSnapshot snapshot = create(player);
         return new String[] {
             snapshot.getMarketSummary(),
-            "汇率市场已接兼容入口：/jsirgalaxybase market quote hand 与 /jsirgalaxybase market exchange hand。",
+            "汇率市场由银河终端 UI 提供浏览、报价与确认兑换。",
             "当前只落了汇率市场 v1 固定规则层；标准商品市场订单簿、托管库存、撮合和恢复仍在各自后续阶段。",
             "当前规则按 Dreamcraft Coin 物品本身识别，属于 source-blind 汇率报价首轮实现。"
         };

@@ -6,7 +6,7 @@ public enum TerminalPage {
     CAREER("career", 1, "职业", "职业页", "职业与资格", "资格、阶段与进阶方向"),
     PUBLIC_SERVICE("public_service", 2, "公共", "公共页", "公共任务与服务", "任务、福利与服务入口"),
     MARKET("market", 3, "市场", "总入口", "市场总入口", "标准商品 / 定制商品 / 汇率市场入口"),
-    MARKET_STANDARDIZED("market_standardized", 4, "标市", "标准商品页", "标准商品市场", "统一目录、订单簿、托管库存与 CLAIMABLE"),
+    MARKET_STANDARDIZED("market_standardized", 4, "标市", "标准商品页", "标准商品市场", "统一目录、订单簿、账户仓与待收货"),
     MARKET_CUSTOM("market_custom", 5, "定制", "定制商品页", "定制商品市场", "单件挂牌、浏览、购买、pending 与 claim 入口"),
     MARKET_EXCHANGE("market_exchange", 6, "汇率", "汇率市场页", "汇率市场", "quote / exchange 兼容入口与规则边界说明"),
     SERVER_TOOLS("server_tools", 7, "传送", "群组服", "群组服传送", "展示服务器目录、系统 warp 与最近传送反馈"),

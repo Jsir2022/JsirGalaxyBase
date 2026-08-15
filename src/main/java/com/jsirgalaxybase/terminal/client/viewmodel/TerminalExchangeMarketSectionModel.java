@@ -5,6 +5,7 @@ import java.util.Collections;
 import java.util.List;
 
 import com.jsirgalaxybase.terminal.ui.TerminalNotificationSeverity;
+import com.jsirgalaxybase.terminal.TerminalMarketBrowseEntry;
 
 public final class TerminalExchangeMarketSectionModel {
 
@@ -13,6 +14,7 @@ public final class TerminalExchangeMarketSectionModel {
     private final List<String> targetCodes;
     private final List<String> targetLabels;
     private final String selectedTargetCode;
+    private final String selectedCoinCode;
     private final String selectedTargetTitle;
     private final String selectedTargetSummary;
     private final String heldSummary;
@@ -33,9 +35,29 @@ public final class TerminalExchangeMarketSectionModel {
     private final String executionHint;
     private final boolean executable;
     private final ActionFeedbackModel actionFeedback;
+    private List<TerminalMarketBrowseEntry> browseEntries;
+    private String browseQuery;
+    private int browsePageIndex;
+    private int browsePageSize;
+    private int browseTotalEntries;
+    private boolean hasPreviousPage;
+    private boolean hasNextPage;
 
     public TerminalExchangeMarketSectionModel(String serviceState, String browserHint, List<String> targetCodes,
         List<String> targetLabels, String selectedTargetCode, String selectedTargetTitle,
+        String selectedTargetSummary, String heldSummary, String inputRegistryName, String pairCode,
+        String inputAssetCode, String outputAssetCode, String ruleVersion, String limitStatus, String reasonCode,
+        String notes, String inputQuantity, String nominalFaceValue, String effectiveExchangeValue,
+        String contributionValue, String discountStatus, String rateDisplay, String executionHint,
+        boolean executable, ActionFeedbackModel actionFeedback) {
+        this(serviceState, browserHint, targetCodes, targetLabels, selectedTargetCode, "", selectedTargetTitle,
+            selectedTargetSummary, heldSummary, inputRegistryName, pairCode, inputAssetCode, outputAssetCode,
+            ruleVersion, limitStatus, reasonCode, notes, inputQuantity, nominalFaceValue, effectiveExchangeValue,
+            contributionValue, discountStatus, rateDisplay, executionHint, executable, actionFeedback);
+    }
+
+    public TerminalExchangeMarketSectionModel(String serviceState, String browserHint, List<String> targetCodes,
+        List<String> targetLabels, String selectedTargetCode, String selectedCoinCode, String selectedTargetTitle,
         String selectedTargetSummary, String heldSummary, String inputRegistryName, String pairCode,
         String inputAssetCode, String outputAssetCode, String ruleVersion, String limitStatus, String reasonCode,
         String notes, String inputQuantity, String nominalFaceValue, String effectiveExchangeValue,
@@ -46,9 +68,10 @@ public final class TerminalExchangeMarketSectionModel {
         this.targetCodes = freeze(targetCodes, Collections.<String>emptyList());
         this.targetLabels = freeze(targetLabels, Collections.<String>emptyList());
         this.selectedTargetCode = normalize(selectedTargetCode, "");
+        this.selectedCoinCode = normalize(selectedCoinCode, "");
         this.selectedTargetTitle = normalize(selectedTargetTitle, "未选择兑换标的");
         this.selectedTargetSummary = normalize(selectedTargetSummary, "请选择标的后查看报价。");
-        this.heldSummary = normalize(heldSummary, "当前未检测到手持物品");
+        this.heldSummary = normalize(heldSummary, "当前未选择 Base Vault 资产");
         this.inputRegistryName = normalize(inputRegistryName, "--");
         this.pairCode = normalize(pairCode, "--");
         this.inputAssetCode = normalize(inputAssetCode, "--");
@@ -66,18 +89,42 @@ public final class TerminalExchangeMarketSectionModel {
         this.executionHint = normalize(executionHint, "当前不能继续执行兑换。");
         this.executable = executable;
         this.actionFeedback = actionFeedback == null ? ActionFeedbackModel.placeholder() : actionFeedback;
+        this.browseEntries = Collections.emptyList();
+        this.browseQuery = "";
+        this.browsePageIndex = 0;
+        this.browsePageSize = 12;
+        this.browseTotalEntries = 0;
+        this.hasPreviousPage = false;
+        this.hasNextPage = false;
+    }
+
+    public TerminalExchangeMarketSectionModel withBrowsePage(List<TerminalMarketBrowseEntry> entries, String query,
+        int pageIndex, int pageSize, int totalEntries, boolean previous, boolean next) {
+        TerminalExchangeMarketSectionModel copy = new TerminalExchangeMarketSectionModel(serviceState, browserHint,
+            targetCodes, targetLabels, selectedTargetCode, selectedCoinCode, selectedTargetTitle, selectedTargetSummary, heldSummary,
+            inputRegistryName, pairCode, inputAssetCode, outputAssetCode, ruleVersion, limitStatus, reasonCode, notes,
+            inputQuantity, nominalFaceValue, effectiveExchangeValue, contributionValue, discountStatus, rateDisplay,
+            executionHint, executable, actionFeedback);
+        copy.browseEntries = freeze(entries, Collections.<TerminalMarketBrowseEntry>emptyList());
+        copy.browseQuery = normalize(query, "");
+        copy.browsePageIndex = Math.max(0, pageIndex);
+        copy.browsePageSize = Math.max(1, pageSize);
+        copy.browseTotalEntries = Math.max(0, totalEntries);
+        copy.hasPreviousPage = previous;
+        copy.hasNextPage = next;
+        return copy;
     }
 
     public static TerminalExchangeMarketSectionModel placeholder() {
         return new TerminalExchangeMarketSectionModel(
-            "汇率市场 section 已接入",
-            "quote-first 页面等待服务端 snapshot。",
+            "汇率市场已接入",
+            "正在等待服务器返回汇率市场数据。",
             Collections.<String>emptyList(),
             Collections.<String>emptyList(),
             "",
             "未选择兑换标的",
             "请选择标的后查看报价。",
-            "当前未检测到手持物品",
+            "当前未选择 Base Vault 资产",
             "--",
             "--",
             "--",
@@ -102,6 +149,7 @@ public final class TerminalExchangeMarketSectionModel {
     public List<String> getTargetCodes() { return targetCodes; }
     public List<String> getTargetLabels() { return targetLabels; }
     public String getSelectedTargetCode() { return selectedTargetCode; }
+    public String getSelectedCoinCode() { return selectedCoinCode; }
     public String getSelectedTargetTitle() { return selectedTargetTitle; }
     public String getSelectedTargetSummary() { return selectedTargetSummary; }
     public String getHeldSummary() { return heldSummary; }
@@ -111,6 +159,22 @@ public final class TerminalExchangeMarketSectionModel {
     public String getOutputAssetCode() { return outputAssetCode; }
     public String getRuleVersion() { return ruleVersion; }
     public String getLimitStatus() { return limitStatus; }
+    public String getLimitStatusDisplay() {
+        String normalized = limitStatus == null ? "" : limitStatus.trim().toUpperCase(java.util.Locale.ROOT);
+        if ("ACTIVE".equals(normalized) || "AVAILABLE".equals(normalized) || "OK".equals(normalized)) {
+            return "可兑换";
+        }
+        if ("EXPIRED".equals(normalized)) {
+            return "报价已过期";
+        }
+        if ("LIMIT_EXCEEDED".equals(normalized)) {
+            return "超出兑换限额";
+        }
+        if ("UNAVAILABLE".equals(normalized) || normalized.isEmpty() || "--".equals(normalized)) {
+            return "暂不可兑换";
+        }
+        return "状态待确认";
+    }
     public String getReasonCode() { return reasonCode; }
     public String getNotes() { return notes; }
     public String getInputQuantity() { return inputQuantity; }
@@ -122,6 +186,13 @@ public final class TerminalExchangeMarketSectionModel {
     public String getExecutionHint() { return executionHint; }
     public boolean isExecutable() { return executable; }
     public ActionFeedbackModel getActionFeedback() { return actionFeedback; }
+    public List<TerminalMarketBrowseEntry> getBrowseEntries() { return browseEntries; }
+    public String getBrowseQuery() { return browseQuery; }
+    public int getBrowsePageIndex() { return browsePageIndex; }
+    public int getBrowsePageSize() { return browsePageSize; }
+    public int getBrowseTotalEntries() { return browseTotalEntries; }
+    public boolean hasPreviousPage() { return hasPreviousPage; }
+    public boolean hasNextPage() { return hasNextPage; }
     public boolean hasTargetOptions() { return !targetCodes.isEmpty(); }
     public boolean hasSelectedTarget() { return !selectedTargetCode.isEmpty(); }
     public boolean hasFormalQuote() { return !"--".equals(pairCode); }

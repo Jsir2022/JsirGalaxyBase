@@ -14,8 +14,11 @@ import com.jsirgalaxybase.terminal.TerminalExchangeMarketActionPayload;
 import com.jsirgalaxybase.terminal.TerminalExchangeMarketSectionSnapshot;
 import com.jsirgalaxybase.terminal.TerminalMarketActionPayload;
 import com.jsirgalaxybase.terminal.TerminalMarketSectionSnapshot;
+import com.jsirgalaxybase.terminal.TerminalMarketBrowseEntry;
 import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketCatalogEntry;
 import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketAdmissionDecision;
+import com.jsirgalaxybase.modules.core.market.application.CustomMarketService;
+import com.jsirgalaxybase.modules.core.market.application.TaskCoinCatalog;
 import com.jsirgalaxybase.modules.core.vault.application.BaseVaultService;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultSlot;
 
@@ -36,7 +39,7 @@ public final class TerminalMarketSectionService {
         TerminalActionFeedback effectiveFeedback = actionFeedback == null
             ? defaultFeedback(selectedPage, snapshot)
             : actionFeedback;
-        return new TerminalMarketSectionSnapshot(
+        TerminalMarketSectionSnapshot result = new TerminalMarketSectionSnapshot(
             selectedPage == null ? TerminalPage.MARKET.getId() : selectedPage.getId(),
             snapshot.serviceState,
             snapshot.browserHint,
@@ -102,6 +105,18 @@ public final class TerminalMarketSectionService {
             snapshot.catalogPage.hasPreviousPage(),
                 snapshot.catalogPage.hasNextPage())
             .withVaultAssets(toVaultAssets(player));
+        if (selectedPage == TerminalPage.MARKET_STANDARDIZED && draftPayload.isHistoryMode()) {
+            TerminalMarketService.OrderHistorySnapshot history =
+                TerminalMarketService.INSTANCE.createOrderHistorySnapshot(player, draftPayload);
+            result.withHistoryPage(
+                toList(history.getLines()),
+                toList(history.getIds()),
+                toList(history.getCancelableFlags()),
+                history.getTotalEntries(),
+                history.getPageIndex(),
+                history.getPageSize());
+        }
+        return result;
     }
 
     public TerminalActionFeedback submitLimitBuy(EntityPlayer player, TerminalMarketActionPayload payload) {
@@ -160,11 +175,11 @@ public final class TerminalMarketSectionService {
         TerminalCustomMarketSnapshot snapshot = TerminalMarketService.INSTANCE.createCustomSnapshot(
             player,
             toCustomScope(customPayload.getSelectedScope()),
-            customPayload.getSelectedListingId());
+            customPayload.getSelectedListingId(), customPayload.getQuery(), customPayload.getPageIndex());
         TerminalActionFeedback feedback = actionFeedback == null
             ? TerminalActionFeedback.info("定制商品市场状态", snapshot.selectedActionHint, 3200L)
             : actionFeedback;
-        return new TerminalCustomMarketSectionSnapshot(
+        TerminalCustomMarketSectionSnapshot section = new TerminalCustomMarketSectionSnapshot(
             snapshot.serviceState,
             snapshot.browserHint,
             snapshot.scopeLabel,
@@ -192,6 +207,11 @@ public final class TerminalMarketSectionService {
                 feedback.getTitle(),
                 feedback.getBody(),
                 feedback.getSeverity().name()));
+        return section.withBrowsePage(buildCustomBrowseEntries(snapshot),
+            customPayload.getQuery(), Math.max(0, customPayload.getPageIndex()), 12,
+            snapshot.browseTotalEntries,
+            customPayload.getPageIndex() > 0,
+            (Math.max(0, customPayload.getPageIndex()) + 1) * 12 < snapshot.browseTotalEntries);
     }
 
     public TerminalExchangeMarketSectionSnapshot createExchangeSnapshot(EntityPlayer player,
@@ -199,16 +219,18 @@ public final class TerminalMarketSectionService {
         TerminalExchangeMarketActionPayload exchangePayload = payload == null ? TerminalExchangeMarketActionPayload.empty() : payload;
         TerminalExchangeMarketSnapshot snapshot = TerminalMarketService.INSTANCE.createExchangeSnapshot(
             player,
-            exchangePayload.getSelectedTargetCode(), exchangePayload.getSelectedVaultSlot());
+            exchangePayload.getSelectedTargetCode(), exchangePayload.getSelectedCoinCode(),
+            exchangePayload.getSelectedVaultSlot());
         TerminalActionFeedback feedback = actionFeedback == null
             ? TerminalActionFeedback.info("汇率市场状态", snapshot.executionHint, 3200L)
             : actionFeedback;
-        return new TerminalExchangeMarketSectionSnapshot(
+        TerminalExchangeMarketSectionSnapshot section = new TerminalExchangeMarketSectionSnapshot(
             snapshot.serviceState,
             snapshot.browserHint,
             toList(snapshot.targetCodes),
             toList(snapshot.targetLabels),
             snapshot.selectedTargetCode,
+            snapshot.selectedCoinCode,
             snapshot.selectedTargetTitle,
             snapshot.selectedTargetSummary,
             snapshot.heldSummary,
@@ -232,6 +254,10 @@ public final class TerminalMarketSectionService {
                 feedback.getTitle(),
                 feedback.getBody(),
                 feedback.getSeverity().name()));
+        return section.withBrowsePage(buildExchangeBrowseEntries(snapshot, exchangePayload.getQuery(), exchangePayload.getPageIndex()),
+            exchangePayload.getQuery(), Math.max(0, exchangePayload.getPageIndex()), 12,
+            exchangeBrowseTotal(snapshot, exchangePayload.getQuery()), exchangePayload.getPageIndex() > 0,
+            hasExchangeNextPage(snapshot, exchangePayload.getQuery(), exchangePayload.getPageIndex()));
     }
 
     public TerminalActionFeedback purchaseCustomListing(EntityPlayer player, TerminalCustomMarketActionPayload payload) {
@@ -288,7 +314,7 @@ public final class TerminalMarketSectionService {
             hasAskLiquidity(snapshot) ? "1" : "");
         String instantSellQuantity = chooseCurrentOrDefault(current.getInstantSellQuantityText(),
             hasAvailableStock(snapshot) && hasBidLiquidity(snapshot) ? "1" : "");
-        return new TerminalMarketActionPayload(
+        TerminalMarketActionPayload defaults = new TerminalMarketActionPayload(
             snapshot.selectedProductKey,
             limitBuyPrice,
             limitBuyQuantity,
@@ -302,6 +328,12 @@ public final class TerminalMarketSectionService {
             String.valueOf(current.getBrowserPage()),
             current.getBrowserFilter(),
             current.getVaultDepositQuantityText());
+        return defaults
+            .withOrderTicket(current.getOrderSide(), current.getOrderType(), current.getOrderQuantityText(),
+                current.getOrderLimitPriceText(), current.getChartRange(), current.getBrowserSort())
+            .withHistory(current.getHistoryProductScope(), current.getHistorySide(), current.getHistoryStatus(),
+                current.getHistoryTime(), current.getHistoryQuery(), current.getHistoryPage(),
+                current.getHistoryPageSize());
     }
 
     private static boolean hasSelectedProduct(TerminalMarketSnapshot snapshot) {
@@ -448,7 +480,8 @@ public final class TerminalMarketSectionService {
         List<TerminalMarketSectionSnapshot.PricePoint> points =
             new ArrayList<TerminalMarketSectionSnapshot.PricePoint>();
         for (TerminalMarketSnapshot.MarketPricePoint point : summary.pricePoints) {
-            points.add(new TerminalMarketSectionSnapshot.PricePoint(point.price, point.quantity, point.epochSeconds));
+            points.add(new TerminalMarketSectionSnapshot.PricePoint(point.open, point.high, point.low, point.price,
+                point.quantity, point.turnover, point.epochSeconds, point.source));
         }
         return new TerminalMarketSectionSnapshot.CatalogMarketSummary(summary.latestTrade, summary.bestBid,
             summary.bestAsk, summary.volume24h, summary.available, summary.escrow, summary.claimable,
@@ -498,6 +531,64 @@ public final class TerminalMarketSectionService {
         return 0;
     }
 
+    private List<TerminalMarketBrowseEntry> buildCustomBrowseEntries(TerminalCustomMarketSnapshot snapshot) {
+        List<TerminalMarketBrowseEntry> entries = new ArrayList<TerminalMarketBrowseEntry>();
+        for (CustomMarketService.ListingView view : snapshot.browseListingViews) {
+            if (view == null || view.getListing() == null || view.getSnapshot() == null) continue;
+            String title = view.getSnapshot().getDisplayName();
+            String status = view.getListing().getListingStatus() + " / " + view.getListing().getDeliveryStatus();
+            String itemIdentity = view.getSnapshot().getItemId() + "@" + view.getSnapshot().getMeta()
+                + " x" + Math.max(1, view.getSnapshot().getStackSize());
+            entries.add(new TerminalMarketBrowseEntry(String.valueOf(view.getListing().getListingId()), itemIdentity, title,
+                status, String.valueOf(view.getListing().getAskingPrice()), snapshot.scopeLabel));
+        }
+        return entries;
+    }
+
+    private List<String> customIds(TerminalCustomMarketSnapshot s, String scope) {
+        return "selling".equalsIgnoreCase(scope) ? toList(s.sellingListingIds)
+            : "pending".equalsIgnoreCase(scope) ? toList(s.pendingListingIds) : toList(s.activeListingIds);
+    }
+    private List<String> customLines(TerminalCustomMarketSnapshot s, String scope) {
+        return "selling".equalsIgnoreCase(scope) ? toList(s.sellingListingLines)
+            : "pending".equalsIgnoreCase(scope) ? toList(s.pendingListingLines) : toList(s.activeListingLines);
+    }
+    private List<String> customIcons(TerminalCustomMarketSnapshot s, String scope) {
+        return "selling".equalsIgnoreCase(scope) ? toList(s.sellingListingIconRefs)
+            : "pending".equalsIgnoreCase(scope) ? toList(s.pendingListingIconRefs) : toList(s.activeListingIconRefs);
+    }
+
+    private List<TerminalMarketBrowseEntry> buildExchangeBrowseEntries(TerminalExchangeMarketSnapshot snapshot,
+        String query, int page) {
+        String filter = normalizedBrowseQuery(query);
+        List<TerminalMarketBrowseEntry> all = new ArrayList<TerminalMarketBrowseEntry>();
+        for (TaskCoinCatalog.Entry entry : snapshot.catalogEntries) {
+            String searchable = entry.getDisplayName() + " " + entry.getFamilyCode() + " " + entry.getTier();
+            if (!filter.isEmpty() && !searchable.toLowerCase(java.util.Locale.ROOT).contains(filter)) continue;
+            all.add(new TerminalMarketBrowseEntry(entry.getRegistryName(), entry.getRegistryName(), entry.getDisplayName(),
+                entry.getFamilyCode() + " / " + entry.getTier(), String.valueOf(entry.getFaceValue()), "个人仓兑换"));
+        }
+        return browsePage(all, Math.max(0, page), 12);
+    }
+
+    private int exchangeBrowseTotal(TerminalExchangeMarketSnapshot snapshot, String query) {
+        String filter = normalizedBrowseQuery(query); int count = 0;
+        for (TaskCoinCatalog.Entry entry : snapshot.catalogEntries) {
+            String searchable = entry.getDisplayName() + " " + entry.getFamilyCode() + " " + entry.getTier();
+            if (filter.isEmpty() || searchable.toLowerCase(java.util.Locale.ROOT).contains(filter)) count++;
+        }
+        return count;
+    }
+
+    private boolean hasExchangeNextPage(TerminalExchangeMarketSnapshot snapshot, String query, int page) {
+        return (Math.max(0, page) + 1) * 12 < exchangeBrowseTotal(snapshot, query);
+    }
+    private List<TerminalMarketBrowseEntry> browsePage(List<TerminalMarketBrowseEntry> all, int page, int size) {
+        int start = Math.min(all.size(), Math.max(0, page) * size); int end = Math.min(all.size(), start + size);
+        return new ArrayList<TerminalMarketBrowseEntry>(all.subList(start, end));
+    }
+    private String normalizedBrowseQuery(String query) { return query == null ? "" : query.trim().toLowerCase(java.util.Locale.ROOT); }
+
     private static final class SectionMarketSnapshotRequest implements TerminalMarketSnapshotRequest {
 
         private final TerminalMarketActionPayload payload;
@@ -519,6 +610,9 @@ public final class TerminalMarketSectionService {
 
         @Override
         public String getBrowserFilter() { return payload.getBrowserFilter(); }
+
+        @Override
+        public String getBrowserSort() { return payload.getBrowserSort(); }
 
         @Override
         public String getChartRange() { return payload.getChartRange(); }

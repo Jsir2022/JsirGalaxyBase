@@ -128,6 +128,14 @@ public class JdbcMarketTradeRecordRepository extends AbstractJdbcRepository impl
     }
 
     @Override
+    public MarketTradeRecord findLatestByProductKeyBefore(final String productKey, final Instant before) {
+        List<MarketTradeRecord> records = findTrades(
+            "SELECT * FROM market_trade_record WHERE product_key = ? AND created_at < ? ORDER BY created_at DESC, trade_id DESC LIMIT ?",
+            productKey, before, 1);
+        return records.isEmpty() ? null : records.get(0);
+    }
+
+    @Override
     public List<MarketTradeRecord> findByProductKeysSince(final List<String> productKeys, final Instant since,
         final int limit) {
         if (productKeys == null || productKeys.isEmpty()) {

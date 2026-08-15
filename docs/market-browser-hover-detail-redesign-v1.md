@@ -37,6 +37,19 @@ The market-specific services retain their own business rules. This redesign does
 - Custom listings show their listing price, counterparty and delivery state. Exchange pairs show the real quote, rule version, limit status and held-input match. Neither page borrows the standardized market's order book, custody labels or price chart when the underlying service does not provide those facts.
 - Shared `MarketBrowseDetailController` keeps browse query, page, scroll position and selected key local to the client. Returning from detail restores browse context; route changes and snapshot rebuilds do not leave a detail-only hover overlay behind.
 
+## Phase 3 server-authoritative browse completion
+
+- `MARKET_CUSTOM` and `MARKET_EXCHANGE` now receive a structured `TerminalMarketBrowseEntry` page from the server. The client renders rows only; it no longer parses listing strings as the primary source or locally rebuilds the task-coin catalog.
+- Custom page context (`scope`, query, page and selected listing) and exchange page context (query, page and selected coin) remain in their existing action payloads. The selected exchange coin is presentation context only: final quote and execution continue to validate the actual selected Base Vault slot server-side.
+- The shared packet format carries row identity, item identity, title, subtitle, primary value, status and page boundaries for both non-standard markets. This retains their distinct business semantics while giving all three markets the same browse/detail transport contract.
+
+## Phase 3 semantic hardening
+
+- The shared browse model now carries a market kind. Standardized cards retain real intraday price, order-book and custody fields. Custom listing cards instead show listing price, counterparty or delivery context and listing state. Exchange cards show a task-coin face value, family/tier and Vault-execution eligibility. Neither non-standard market renders invented bid/ask, custody labels or historical charts.
+- Hover follows the same boundary: a custom listing hover is a passive listing summary, and an exchange hover is a passive coin/quote eligibility summary. Both close before route changes and never survive into detail mode.
+- Custom browse exposes the existing scopes and a price field alongside the publish command so publishing is not a visual dead end. Selecting a scope performs a server refresh without accidentally requesting a detail route for an empty listing id.
+- The custom browse adapter is still backed by the legacy service snapshot arrays for compatibility. Replacing those arrays at their source with a dedicated listing query projection is retained as the next server-side cleanup; the client no longer treats them as its primary UI contract.
+
 ## Acceptance criteria
 
 - Four fixed columns at terminal target width; no permanent detail column during browse.
@@ -44,3 +57,11 @@ The market-specific services retain their own business rules. This redesign does
 - Hover never crosses the terminal bounds or appears above a modal confirmation.
 - Empty or one-point history explicitly states that historical pricing is unavailable.
 - Detail mode uses the existing confirmed server selection before presenting trading actions.
+
+## Refresh and response ordering closeout
+
+- Every new terminal action carries a client request sequence. The server echoes it on the resulting snapshot; old packets without the appended field remain decodable as sequence `0` during the compatibility window.
+- The client applies snapshots monotonically. A delayed browse, quote or automatic-refresh response cannot replace a newer page selection or detail response.
+- Automatic refresh is presentation refresh only. Exchange refresh does not silently create a new formal quote; quote generation remains an explicit player action with its existing server gate.
+- While a market input owns focus, a modal confirmation is open, or the client has left the page, automatic refresh must not rebuild the working surface. This protects typed quantity, price, scope and selected-asset context.
+- Player-facing text must describe products, account warehouse inventory, pending delivery and quote availability. Protocol class names and internal custody states remain audit vocabulary only.

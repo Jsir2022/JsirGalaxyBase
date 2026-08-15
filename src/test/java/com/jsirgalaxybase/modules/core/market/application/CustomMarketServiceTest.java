@@ -25,6 +25,7 @@ import com.jsirgalaxybase.modules.core.market.application.command.CancelCustomMa
 import com.jsirgalaxybase.modules.core.market.application.command.ClaimCustomMarketListingCommand;
 import com.jsirgalaxybase.modules.core.market.application.command.PublishCustomMarketListingCommand;
 import com.jsirgalaxybase.modules.core.market.application.command.PurchaseCustomMarketListingCommand;
+import com.jsirgalaxybase.modules.core.market.application.CustomMarketBrowsePage;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketAuditLog;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketAuditType;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketDeliveryResolution;
@@ -45,6 +46,29 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 
 public class CustomMarketServiceTest {
+
+    @Test
+    public void purchaseRejectsReadOnlyUiDemoBeforeSettlement() {
+        FakeCustomMarketListingRepository listingRepository = new FakeCustomMarketListingRepository();
+        FakeMarketSettlementFacade settlementFacade = new FakeMarketSettlementFacade();
+        CustomMarketService service = createService(listingRepository,
+            new FakeCustomMarketItemSnapshotRepository(), new FakeCustomMarketTradeRecordRepository(),
+            new FakeCustomMarketAuditLogRepository(), settlementFacade);
+        CustomMarketListing listing = listingRepository.save(new CustomMarketListing(
+            0L, "CUSTOM_MARKET_UI_DEMO", null, 1200L, "STARCOIN",
+            CustomMarketListingStatus.ACTIVE, CustomMarketDeliveryStatus.ESCROW_HELD,
+            CustomMarketService.UI_DEMO_SOURCE_SERVER_ID, Instant.now(), Instant.now()));
+
+        try {
+            service.purchaseListing(new PurchaseCustomMarketListingCommand(
+                "req-custom-demo-buy", "buyer-b", "test-server", listing.getListingId()));
+            fail("expected UI demo listing to remain read-only");
+        } catch (MarketOperationException expected) {
+            assertTrue(expected.getMessage().contains("read-only"));
+        }
+        assertTrue(settlementFacade.freezeCommands.isEmpty());
+        assertTrue(settlementFacade.settleCommands.isEmpty());
+    }
 
     @Test
     public void publishListingStoresDedicatedSnapshotAndBrowseableListing() {
@@ -518,6 +542,33 @@ public class CustomMarketServiceTest {
                 }
             }
             return clip(matches, limit);
+        }
+
+        @Override
+        public CustomMarketBrowsePage findBrowsePage(String scope, String playerRef, String query, int offset,
+            int limit) {
+            List<CustomMarketListing> matches = new ArrayList<CustomMarketListing>();
+            for (CustomMarketListing listing : listingsById.values()) {
+                boolean match;
+                if ("selling".equals(scope)) {
+                    match = playerRef.equals(listing.getSellerPlayerRef())
+                        && listing.getDeliveryStatus() == CustomMarketDeliveryStatus.ESCROW_HELD;
+                } else if ("pending".equals(scope)) {
+                    match = listing.getDeliveryStatus() == CustomMarketDeliveryStatus.BUYER_PENDING_CLAIM
+                        && (playerRef.equals(listing.getSellerPlayerRef()) || playerRef.equals(listing.getBuyerPlayerRef()));
+                } else {
+                    match = listing.getListingStatus() == CustomMarketListingStatus.ACTIVE;
+                }
+                if (match) matches.add(listing);
+            }
+            java.util.Collections.sort(matches, new java.util.Comparator<CustomMarketListing>() {
+                @Override public int compare(CustomMarketListing left, CustomMarketListing right) {
+                    return Long.compare(right.getListingId(), left.getListingId());
+                }
+            });
+            int start = Math.min(matches.size(), Math.max(0, offset));
+            int end = Math.min(matches.size(), start + Math.max(1, limit));
+            return new CustomMarketBrowsePage(matches.subList(start, end), matches.size());
         }
 
         private List<CustomMarketListing> clip(List<CustomMarketListing> listings, int limit) {

@@ -59,6 +59,24 @@ public class TerminalMarketSectionServiceTest {
     }
 
     @Test
+    public void standardizedDraftDefaultsPreserveHistoryQueryContext() {
+        TerminalMarketActionPayload payload = new TerminalMarketActionPayload(
+            PRODUCT_KEY, "", "", "", "", "", "", "", "")
+                .withHistory("CURRENT", "SELL", "OPEN", "WEEK", "steel", 3, 7);
+
+        TerminalMarketActionPayload draft = TerminalMarketSectionService.applyStandardizedDraftDefaults(payload,
+            snapshot("5", new String[] { "104" }, new String[] { "100" }, "64", "32", "102 STARCOIN"));
+
+        assertEquals("CURRENT", draft.getHistoryProductScope());
+        assertEquals("SELL", draft.getHistorySide());
+        assertEquals("OPEN", draft.getHistoryStatus());
+        assertEquals("WEEK", draft.getHistoryTime());
+        assertEquals("steel", draft.getHistoryQuery());
+        assertEquals(3, draft.getHistoryPage());
+        assertEquals(7, draft.getHistoryPageSize());
+    }
+
+    @Test
     public void emptySelectionStillCarriesTheCurrentFormalCatalogPage() {
         StandardizedMarketCatalogEntry entry = new StandardizedMarketCatalogEntry(
             new StandardizedMarketProduct("minecraft:iron_ingot", 0), "metal", "iron", "iron-ingot");

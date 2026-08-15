@@ -176,9 +176,21 @@ final class TerminalMarketSnapshot {
     }
 
     static final class MarketPricePoint {
-        final long price; final long quantity; final long epochSeconds;
+        final long open; final long high; final long low; final long price;
+        final long quantity; final long turnover; final long epochSeconds;
+        final String source;
         MarketPricePoint(long price, long quantity, long epochSeconds) {
-            this.price = price; this.quantity = quantity; this.epochSeconds = epochSeconds;
+            this(price, price, price, price, quantity, price * quantity, epochSeconds, "TRADE");
+        }
+        MarketPricePoint(long open, long high, long low, long close, long quantity, long turnover,
+            long epochSeconds) {
+            this(open, high, low, close, quantity, turnover, epochSeconds, "TRADE");
+        }
+        MarketPricePoint(long open, long high, long low, long close, long quantity, long turnover,
+            long epochSeconds, String source) {
+            this.open = open; this.high = high; this.low = low; this.price = close;
+            this.quantity = quantity; this.turnover = turnover; this.epochSeconds = epochSeconds;
+            this.source = source == null ? "TRADE" : source;
         }
     }
 }

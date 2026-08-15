@@ -35,7 +35,7 @@ public class MarketItemGridPanelTest {
     @Test
     public void compactMarketTextKeepsCurrencyOutOfDenseCards() {
         MarketBrowseItemModel item = new MarketBrowseItemModel("steel", "minecraft:iron_ingot", "Steel Ingot",
-            "102 STARCOIN", "可交易", "101 STARCOIN", "103 STARCOIN", "1240", "320", "64", "8", "-1.6%",
+            "102 STARCOIN", "可交易", "102 STARCOIN", "101 STARCOIN", "103 STARCOIN", "1240", "320", "64", "8", "-1.6%",
             Collections.<TerminalMarketSectionModel.PricePointModel>emptyList());
 
         assertEquals("102", item.getCompactLatestPrice());

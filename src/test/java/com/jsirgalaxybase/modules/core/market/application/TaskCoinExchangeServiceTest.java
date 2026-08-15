@@ -71,7 +71,7 @@ public class TaskCoinExchangeServiceTest {
             service.previewRegistryQuote("player-a", "minecraft:stick", 1);
             fail("expected non-task-coin asset to be rejected");
         } catch (MarketExchangeException expected) {
-            assertEquals("当前手持物品不属于汇率市场支持的任务书硬币资产对", expected.getMessage());
+            assertEquals("当前 Base Vault 资产不属于汇率市场支持的任务书硬币资产对", expected.getMessage());
         }
     }
 

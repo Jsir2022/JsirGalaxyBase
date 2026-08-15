@@ -1,6 +1,7 @@
 package com.jsirgalaxybase.modules.core.vault.application;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -20,8 +21,10 @@ import com.jsirgalaxybase.modules.core.vault.domain.VaultAccountType;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultOperation;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultOperationStatus;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultOperationSlotChange;
+import com.jsirgalaxybase.modules.core.vault.domain.VaultPermission;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultSlot;
 import com.jsirgalaxybase.modules.core.vault.port.BaseVaultRepository;
+import com.jsirgalaxybase.modules.core.vault.port.VaultAuthorityPort;
 
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -193,6 +196,48 @@ public class BaseVaultServiceTest {
             assertEquals(1, sorted.getView().getSlots().get(1).getStack().getItemDamage());
             assertEquals(2, repository.getOperationSlotChanges(sorted.getOperation().getOperationId()).size());
         }
+    }
+
+    @Test
+    public void personalVaultAccessIsLimitedToItsOwner() {
+        BaseVaultService service = new BaseVaultService(new InMemoryRepository(), new DirectTransactionRunner());
+        VaultAccessService access = new VaultAccessService(service);
+
+        assertEquals(27, access.view("player-a", VaultAccountType.PERSONAL, "player-a")
+            .getSlots().size());
+        assertFalse(access.canAccess("player-b", VaultAccountType.PERSONAL, "player-a", VaultPermission.VIEW));
+        try {
+            access.view("player-b", VaultAccountType.PERSONAL, "player-a");
+            org.junit.Assert.fail("another player must not read a personal Vault");
+        } catch (VaultAccessDeniedException expected) {
+            assertTrue(expected.getMessage().contains("access denied"));
+        }
+    }
+
+    @Test
+    public void organizationVaultsDefaultToDenyAndRequireExplicitRolePermission() {
+        BaseVaultService service = new BaseVaultService(new InMemoryRepository(), new DirectTransactionRunner());
+        VaultAccessService denied = new VaultAccessService(service);
+        assertFalse(denied.canAccess("member-a", VaultAccountType.ENTERPRISE, "enterprise-a",
+            VaultPermission.DEPOSIT));
+        assertFalse(denied.canAccess("member-a", VaultAccountType.PUBLIC, "public-a",
+            VaultPermission.WITHDRAW));
+
+        VaultAuthorityPort authority = new VaultAuthorityPort() {
+            @Override
+            public boolean hasPermission(String actorRef, VaultAccountType accountType, String accountRef,
+                VaultPermission permission) {
+                return "member-a".equals(actorRef) && "enterprise-a".equals(accountRef)
+                    && (permission == VaultPermission.VIEW || permission == VaultPermission.SORT);
+            }
+        };
+        VaultAccessService allowed = new VaultAccessService(service, authority);
+        assertEquals(54, allowed.view("member-a", VaultAccountType.ENTERPRISE, "enterprise-a")
+            .getSlots().size());
+        assertTrue(allowed.canAccess("member-a", VaultAccountType.ENTERPRISE, "enterprise-a",
+            VaultPermission.SORT));
+        assertFalse(allowed.canAccess("member-a", VaultAccountType.ENTERPRISE, "enterprise-a",
+            VaultPermission.WITHDRAW));
     }
 
     private static int count(BaseVaultService.VaultView view, net.minecraft.item.Item item) {

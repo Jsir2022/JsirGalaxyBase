@@ -11,18 +11,25 @@ import com.jsirgalaxybase.client.gui.framework.GuiRect;
 import com.jsirgalaxybase.client.gui.framework.ModalPopupPanel;
 import com.jsirgalaxybase.client.gui.framework.PanelContainer;
 import com.jsirgalaxybase.terminal.TerminalActionType;
+import com.jsirgalaxybase.terminal.TerminalHudOverlayHandler;
 import com.jsirgalaxybase.terminal.TerminalBankActionMessageFactory;
 import com.jsirgalaxybase.terminal.TerminalMarketActionMessageFactory;
 import com.jsirgalaxybase.terminal.TerminalMarketActionPayload;
 import com.jsirgalaxybase.terminal.TerminalServerToolsActionPayload;
 import com.jsirgalaxybase.terminal.client.component.TerminalBankSectionState;
+import com.jsirgalaxybase.terminal.client.component.CustomListingPricePopup;
 import com.jsirgalaxybase.terminal.client.component.TerminalMarketSectionState;
+import com.jsirgalaxybase.terminal.client.component.MarketLiveRefreshController;
+import com.jsirgalaxybase.terminal.client.component.MarketOrderEntryPopup;
 import com.jsirgalaxybase.terminal.client.component.TerminalPanelFactory;
 import com.jsirgalaxybase.terminal.client.component.TerminalPopupFactory;
 import com.jsirgalaxybase.terminal.client.component.TerminalServerToolsSectionState;
 import com.jsirgalaxybase.terminal.client.component.TerminalShellPanels;
 import com.jsirgalaxybase.terminal.client.component.VaultAssetPickerPopup;
+import com.jsirgalaxybase.terminal.client.TerminalResponseSequenceGate;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalBankSectionModel;
+import com.jsirgalaxybase.terminal.client.viewmodel.TerminalCustomMarketSectionModel;
+import com.jsirgalaxybase.terminal.client.viewmodel.TerminalExchangeMarketSectionModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalHomeScreenModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalServerToolsSectionModel;
@@ -36,6 +43,10 @@ public class TerminalHomeScreen extends CanvasScreen {
     private final TerminalBankSectionState bankSectionState = new TerminalBankSectionState();
     private final TerminalMarketSectionState marketSectionState = new TerminalMarketSectionState();
     private final TerminalServerToolsSectionState serverToolsSectionState = new TerminalServerToolsSectionState();
+    private final MarketLiveRefreshController marketLiveRefreshController = new MarketLiveRefreshController();
+    private TerminalHomeScreenModel deferredLiveMarketModel;
+    private long deferredLiveMarketSequence;
+    private final TerminalResponseSequenceGate responseSequenceGate = new TerminalResponseSequenceGate();
 
     public TerminalHomeScreen(GuiScreen parentScreen, TerminalHomeScreenModel model) {
         super(parentScreen);
@@ -46,12 +57,86 @@ public class TerminalHomeScreen extends CanvasScreen {
     }
 
     public void applyModel(TerminalHomeScreenModel model) {
-        this.model = model == null ? TerminalHomeScreenModel.placeholder() : model;
+        applyModel(model, 0L);
+    }
+
+    public void applyModel(TerminalHomeScreenModel model, long requestSequence) {
+        if (!responseSequenceGate.shouldAccept(requestSequence)) {
+            marketLiveRefreshController.onSnapshotReceived();
+            return;
+        }
+        if (marketLiveRefreshController.isPending() && hasOpenPopup()) {
+            // Never rebuild a confirmation dialog under the player while a background refresh arrives.
+            deferredLiveMarketModel = model == null ? TerminalHomeScreenModel.placeholder() : model;
+            deferredLiveMarketSequence = requestSequence;
+            marketLiveRefreshController.onSnapshotReceived();
+            return;
+        }
+        applyModelNow(model, requestSequence);
+    }
+
+    private void applyModelNow(TerminalHomeScreenModel model, long requestSequence) {
+        if (!responseSequenceGate.shouldAccept(requestSequence)) {
+            marketLiveRefreshController.onSnapshotReceived();
+            return;
+        }
+        TerminalHomeScreenModel incoming = model == null ? TerminalHomeScreenModel.placeholder() : model;
+        if (!acceptsIncomingMarketSnapshot(incoming)) {
+            marketLiveRefreshController.onSnapshotReceived();
+            return;
+        }
+        this.model = incoming;
+        responseSequenceGate.markApplied(requestSequence);
         syncBankSectionStateFromModel(this.model);
         syncMarketSectionStateFromModel(this.model);
         syncServerToolsSectionStateFromModel(this.model);
+        marketLiveRefreshController.onSnapshotReceived();
         closePopup();
         initGui();
+    }
+
+    private boolean acceptsIncomingMarketSnapshot(TerminalHomeScreenModel incoming) {
+        if (incoming == null) {
+            return true;
+        }
+        TerminalPage page = TerminalPage.fromId(incoming.getSelectedPageId());
+        TerminalHomeScreenModel.PageSnapshotModel marketSnapshot = incoming.getPageSnapshot("market");
+        if (page == TerminalPage.MARKET_STANDARDIZED) {
+            TerminalMarketSectionModel standardizedModel = marketSnapshot == null
+                ? null : marketSnapshot.getMarketSectionModel();
+            return marketSectionState.acceptsModel(standardizedModel);
+        }
+        if (page == TerminalPage.MARKET_CUSTOM) {
+            TerminalCustomMarketSectionModel customModel = marketSnapshot == null
+                ? null : marketSnapshot.getCustomMarketSectionModel();
+            return marketSectionState.getCustomState().acceptsModel(customModel);
+        }
+        if (page != TerminalPage.MARKET_EXCHANGE) {
+            return true;
+        }
+        TerminalExchangeMarketSectionModel exchangeModel = marketSnapshot == null
+            ? null : marketSnapshot.getExchangeMarketSectionModel();
+        return marketSectionState.getExchangeState().acceptsModel(exchangeModel);
+    }
+
+    @Override
+    public void closePopup() {
+        super.closePopup();
+        if (deferredLiveMarketModel != null) {
+            TerminalHomeScreenModel deferredModel = deferredLiveMarketModel;
+            long deferredSequence = deferredLiveMarketSequence;
+            deferredLiveMarketModel = null;
+            deferredLiveMarketSequence = 0L;
+            applyModelNow(deferredModel, deferredSequence);
+        }
+    }
+
+    @Override
+    public void updateScreen() {
+        super.updateScreen();
+        if (marketLiveRefreshController.tick(canAutoRefreshCurrentMarket())) {
+            sendCurrentMarketRefresh();
+        }
     }
 
     @Override
@@ -205,6 +290,22 @@ public class TerminalHomeScreen extends CanvasScreen {
                 }
 
                 @Override
+                public void openStandardizedHistory() {
+                    marketSectionState.openStandardizedHistory();
+                    initGui();
+                    refreshStandardizedHistory();
+                }
+
+                @Override
+                public void refreshStandardizedHistory() {
+                    sendActionToServer(new TerminalActionMessage(
+                        model.getSessionToken(),
+                        model.getSelectedPageId(),
+                        TerminalActionType.MARKET_REFRESH_HISTORY.getId(),
+                        marketSectionState.toHistoryPayload().encodeHistory()));
+                }
+
+                @Override
                 public void openClaimConfirm(String custodyId) {
                     openClaimConfirmPopup(custodyId);
                 }
@@ -212,6 +313,17 @@ public class TerminalHomeScreen extends CanvasScreen {
                 @Override
                 public void selectCustomListing(String scope, String listingId) {
                     selectCustomListingForRefresh(scope, listingId);
+                }
+
+                @Override
+                public void refreshCustomBrowse() {
+                    selectCustomListingForRefresh(marketSectionState.getCustomState().getSelectedScope(), "");
+                }
+
+                @Override
+                public void changeCustomBrowsePage(int pageIndex) {
+                    marketSectionState.getCustomState().setBrowserPage(pageIndex);
+                    selectCustomListingForRefresh(marketSectionState.getCustomState().getSelectedScope(), "");
                 }
 
                 @Override
@@ -237,6 +349,19 @@ public class TerminalHomeScreen extends CanvasScreen {
                 @Override
                 public void selectExchangeTarget(String targetCode) {
                     selectExchangeTargetForRefresh(targetCode);
+                }
+
+                @Override
+                public void refreshExchangeBrowse() {
+                    marketSectionState.getExchangeState().returnToBrowse();
+                    sendActionToServer(new TerminalActionMessage(model.getSessionToken(), TerminalPage.MARKET_EXCHANGE.getId(),
+                        TerminalActionType.MARKET_REFRESH.getId(), marketSectionState.getExchangeState().toPayload().encode()));
+                }
+
+                @Override
+                public void changeExchangeBrowsePage(int pageIndex) {
+                    marketSectionState.getExchangeState().setBrowserPage(pageIndex);
+                    refreshExchangeBrowse();
                 }
 
                 @Override
@@ -302,8 +427,23 @@ public class TerminalHomeScreen extends CanvasScreen {
 
     private void handleShellBack() {
         TerminalPage selected = TerminalPage.fromId(model.getSelectedPageId());
+        if (selected == TerminalPage.MARKET_STANDARDIZED && marketSectionState.isStandardizedHistoryView()) {
+            marketSectionState.returnToStandardizedDetail();
+            initGui();
+            return;
+        }
         if (selected == TerminalPage.MARKET_STANDARDIZED && marketSectionState.isStandardizedDetailView()) {
             marketSectionState.returnToStandardizedBrowse();
+            initGui();
+            return;
+        }
+        if (selected == TerminalPage.MARKET_CUSTOM && marketSectionState.getCustomState().isDetailView()) {
+            marketSectionState.getCustomState().returnToBrowse();
+            initGui();
+            return;
+        }
+        if (selected == TerminalPage.MARKET_EXCHANGE && marketSectionState.getExchangeState().isDetailView()) {
+            marketSectionState.getExchangeState().returnToBrowse();
             initGui();
             return;
         }
@@ -312,6 +452,14 @@ public class TerminalHomeScreen extends CanvasScreen {
             return;
         }
         closeScreen();
+    }
+
+    @Override
+    public void drawScreen(int mouseX, int mouseY, float partialTicks) {
+        super.drawScreen(mouseX, mouseY, partialTicks);
+        if (!hasOpenPopup()) {
+            TerminalHudOverlayHandler.INSTANCE.drawTerminalNotifications(mc.fontRenderer, width, height);
+        }
     }
 
     private void requestRefresh() {
@@ -388,7 +536,7 @@ public class TerminalHomeScreen extends CanvasScreen {
             width,
             height,
             "确认提交玩家转账",
-            "确认后将按当前银行页表单内容发起真实玩家转账，并在服务端处理后回写新的银行 snapshot。",
+            "确认后将按当前表单发起玩家转账，并在服务端处理完成后刷新银行页面。",
             Arrays.asList(
                 "目标玩家: " + bankSectionState.getTargetPlayerName(),
                 "转账金额: " + bankSectionState.getAmountText() + " STARCOIN",
@@ -439,11 +587,17 @@ public class TerminalHomeScreen extends CanvasScreen {
 
     private void selectCustomListingForRefresh(String scope, String listingId) {
         marketSectionState.getCustomState().setSelectedScope(scope);
-        marketSectionState.getCustomState().requestDetail(listingId);
+        if (listingId != null && !listingId.trim().isEmpty()) {
+            marketSectionState.getCustomState().requestDetail(listingId);
+        } else {
+            marketSectionState.getCustomState().returnToBrowse();
+        }
         sendActionToServer(new TerminalActionMessage(
             model.getSessionToken(),
             TerminalPage.MARKET_CUSTOM.getId(),
-            TerminalActionType.MARKET_CUSTOM_SELECT_LISTING.getId(),
+            listingId == null || listingId.trim().isEmpty()
+                ? TerminalActionType.MARKET_CUSTOM_REFRESH.getId()
+                : TerminalActionType.MARKET_CUSTOM_SELECT_LISTING.getId(),
             marketSectionState.getCustomState().toPayload().encode()));
     }
 
@@ -473,9 +627,41 @@ public class TerminalHomeScreen extends CanvasScreen {
             || TerminalPage.MARKET_STANDARDIZED != TerminalPage.fromId(model.getSelectedPageId())) {
             return;
         }
+        marketLiveRefreshController.reset();
+        sendStandardizedMarketRefresh();
+    }
+
+    private boolean canAutoRefreshCurrentMarket() {
+        TerminalPage page = TerminalPage.fromId(model.getSelectedPageId());
+        return isMarketSectionSelected()
+            && (page == TerminalPage.MARKET_STANDARDIZED
+                || page == TerminalPage.MARKET_CUSTOM
+                || page == TerminalPage.MARKET_EXCHANGE)
+            && !hasOpenPopup()
+            && !marketSectionState.hasFocusedField();
+    }
+
+    private void sendCurrentMarketRefresh() {
+        TerminalPage page = TerminalPage.fromId(model.getSelectedPageId());
+        if (page == TerminalPage.MARKET_CUSTOM) {
+            sendActionToServer(new TerminalActionMessage(
+                model.getSessionToken(), page.getId(), TerminalActionType.MARKET_CUSTOM_REFRESH.getId(),
+                marketSectionState.getCustomState().toPayload().encode()));
+            return;
+        }
+        if (page == TerminalPage.MARKET_EXCHANGE) {
+            sendActionToServer(new TerminalActionMessage(
+                model.getSessionToken(), page.getId(), TerminalActionType.MARKET_REFRESH.getId(),
+                marketSectionState.getExchangeState().toPayload().encode()));
+            return;
+        }
+        sendStandardizedMarketRefresh();
+    }
+
+    private void sendStandardizedMarketRefresh() {
         sendActionToServer(new TerminalActionMessage(
             model.getSessionToken(),
-            model.getSelectedPageId(),
+            TerminalPage.MARKET_STANDARDIZED.getId(),
             TerminalActionType.MARKET_REFRESH.getId(),
             marketSectionState.toBrowsePayload().encodeUnifiedOrder()));
     }
@@ -489,7 +675,7 @@ public class TerminalHomeScreen extends CanvasScreen {
             width,
             height,
             "确认提交标准商品限价买单",
-            "确认后将按当前标准商品详情与表单内容提交真实买单，并通过 TerminalSnapshotMessage 回写新的标准市场 snapshot。",
+            "确认后将按当前商品、价格和数量提交买单，并在服务端处理完成后刷新市场页面。",
             Arrays.asList(
                 "商品: " + marketModel.getSelectedProductName(),
                 "价格: " + marketSectionState.getLimitBuyPriceText() + " STARCOIN",
@@ -522,44 +708,51 @@ public class TerminalHomeScreen extends CanvasScreen {
         }
         marketSectionState.setOrderSide(side);
         marketSectionState.setOrderType(type);
-        if (!marketSectionState.hasCompleteOrderTicket()) {
-            return;
-        }
         final boolean buy = side == TerminalMarketSectionState.OrderSide.BUY;
-        final boolean market = type == TerminalMarketSectionState.OrderType.MARKET;
-        TerminalMarketActionPayload ticket = marketSectionState.toUnifiedOrderPayload();
-        String price = market ? (buy ? marketModel.getLowestAsk() : marketModel.getHighestBid())
-            : String.valueOf(ticket.parseOrderLimitPrice()) + " STARCOIN";
-        String source = buy ? "银行可用余额" : "个人 Base Vault（服务端自动预留）";
-        String destination = buy ? "个人 Base Vault；满仓时转为待收货" : "市场卖单托管";
-        ModalPopupPanel popup = TerminalPopupFactory.createConfirmationPopup(
-            width,
-            height,
-            "确认" + (buy ? "买入" : "卖出") + (market ? "市价单" : "限价单"),
-            "服务端会重新计算盘口、估值、手续费、余额和库存；客户端预览不作为结算依据。",
-            Arrays.asList(
-                "商品: " + marketModel.getSelectedProductName(),
-                "方向 / 类型: " + (buy ? "买入" : "卖出") + " / " + (market ? "市价" : "限价"),
-                "数量: " + ticket.parseOrderQuantity(),
-                "价格基准: " + price,
-                "来源: " + source,
-                "去向: " + destination),
-            "确认" + (buy ? "买入" : "卖出"),
-            "取消",
+        String marketPrice = buy ? marketModel.getLowestAsk() : marketModel.getHighestBid();
+        long availableAsset = buy ? currentPlayerBalance() : parsePositiveLong(marketModel.getSourceAvailable());
+        ModalPopupPanel popup = new MarketOrderEntryPopup(width, height, marketSectionState, side, type,
+            marketModel.getSelectedProductName(), marketPrice,
+            buy ? "余额 " + availableAsset : "可卖 " + marketModel.getSourceAvailable(),
+            availableAsset,
             new Runnable() {
                 @Override
                 public void run() {
+                    if (!marketSectionState.hasCompleteOrderTicket()) { return; }
                     closePopup();
                     TerminalActionMessage message = TerminalMarketActionMessageFactory.createConfirmOrderMessage(
                         model, marketModel, marketSectionState);
                     if (message != null) sendActionToServer(message);
                 }
-            },
-            new Runnable() {
+            }, new Runnable() {
                 @Override
                 public void run() { closePopup(); }
             });
         openPopup(popup);
+    }
+
+    private long currentPlayerBalance() {
+        TerminalHomeScreenModel.PageSnapshotModel bankSnapshot = model.getPageSnapshot("bank");
+        TerminalBankSectionModel bankModel = bankSnapshot == null ? null : bankSnapshot.getBankSectionModel();
+        return bankModel == null ? 0L : parsePositiveLong(bankModel.getBalanceSummary().getPlayerBalance());
+    }
+
+    private static long parsePositiveLong(String value) {
+        if (value == null) { return 0L; }
+        StringBuilder digits = new StringBuilder();
+        boolean started = false;
+        for (int index = 0; index < value.length(); index++) {
+            char current = value.charAt(index);
+            if (current >= '0' && current <= '9') {
+                digits.append(current);
+                started = true;
+            } else if (started && current != ',') {
+                break;
+            }
+        }
+        if (digits.length() == 0) { return 0L; }
+        try { return Long.parseLong(digits.toString()); }
+        catch (NumberFormatException ignored) { return Long.MAX_VALUE; }
     }
 
     private void openDepositHeldConfirmPopup() {
@@ -575,13 +768,13 @@ public class TerminalHomeScreen extends CanvasScreen {
             width,
             height,
             "确认从个人仓存入",
-            "确认后将把已选择的个人仓标准商品存入市场托管 AVAILABLE，并回写最新市场 snapshot。",
+            "确认后将把已选择的个人仓标准商品转入市场可售库存，并回写最新市场数据。",
             Arrays.asList(
                 "商品: " + marketModel.getSelectedProductName(),
                 "数量: " + marketSectionState.getVaultDepositQuantityText(),
                 "仓储状态: " + marketModel.getWarehouseNotice(),
                 "来源: 个人 Base Vault（按标准商品键聚合扣除）。",
-                "去向: 市场 AVAILABLE；未准入、数量不足或版本变化时服务端拒绝执行。"),
+                "去向: 市场可售库存；未准入、数量不足或版本变化时服务端拒绝执行。"),
             "确认存入",
             "取消",
             new Runnable() {
@@ -625,14 +818,14 @@ public class TerminalHomeScreen extends CanvasScreen {
             width,
             height,
             "确认提交标准商品限价卖单",
-            "确认后将按当前标准商品详情与表单内容提交真实卖单，卖出来源只会消耗 AVAILABLE。",
+            "确认后将按当前标准商品详情与表单内容提交真实卖单，卖出来源只会消耗账户仓可售库存。",
             Arrays.asList(
                 "商品: " + marketModel.getSelectedProductName(),
                 "价格: " + marketSectionState.getLimitSellPriceText() + " STARCOIN",
                 "数量: " + marketSectionState.getLimitSellQuantityText(),
-                "AVAILABLE: " + marketModel.getSourceAvailable(),
+                "可售库存: " + marketModel.getSourceAvailable(),
                 "成交预览: " + marketModel.getLimitSellPreview(),
-                "来源: 只锁定 AVAILABLE；数量不足时服务端拒绝，不会直接出售手持物。"),
+                "来源: 只锁定账户仓库存；数量不足时服务端拒绝，不会直接出售手持物。"),
             "确认卖单",
             "取消",
             new Runnable() {
@@ -702,13 +895,13 @@ public class TerminalHomeScreen extends CanvasScreen {
             width,
             height,
             "确认即时卖出",
-            "确认后将按当前买盘深度执行真实即时卖出，卖出来源只会消耗 AVAILABLE。",
+            "确认后将按当前买盘深度执行真实即时卖出，卖出来源只会消耗账户仓库存。",
             Arrays.asList(
                 "商品: " + marketModel.getSelectedProductName(),
                 "数量: " + marketSectionState.getInstantSellQuantityText(),
                 "买一: " + marketModel.getHighestBid() + " / " + marketModel.getBestBidQuantity(),
                 "执行预览: " + marketModel.getInstantSellPreview(),
-                "来源: AVAILABLE=" + marketModel.getSourceAvailable()
+                "来源: 可售库存=" + marketModel.getSourceAvailable()
                     + "；深度或库存不足时服务端拒绝执行。"),
             "确认卖出",
             "取消",
@@ -742,12 +935,12 @@ public class TerminalHomeScreen extends CanvasScreen {
             width,
             height,
             "确认撤销当前订单",
-            "确认后将按订单方向走真实撤单链路，并回写新的标准市场 snapshot。",
+            "确认后将撤销当前订单，并在服务端处理完成后刷新市场页面。",
             Arrays.asList(
                 "orderId: " + orderId,
                 "明细: " + findOrderLine(marketModel, orderId),
                 "当前商品: " + marketModel.getSelectedProductName(),
-                "结果: 买单返还剩余冻结资金；卖单返还剩余 ESCROW 到 AVAILABLE。"),
+                "结果: 买单返还剩余冻结资金；卖单返还未成交库存到账户仓。"),
             "确认撤单",
             "取消",
             new Runnable() {
@@ -780,13 +973,13 @@ public class TerminalHomeScreen extends CanvasScreen {
         ModalPopupPanel popup = TerminalPopupFactory.createConfirmationPopup(
             width,
             height,
-            "确认提取 CLAIMABLE 资产",
-            "确认后将对当前 custody 执行真实 claim 链路，并在服务端处理后回写新的标准市场 snapshot。",
+            "确认接收待收货资产",
+            "确认后将接收当前待收货资产，并在服务端处理完成后刷新市场页面。",
             Arrays.asList(
-                "custodyId: " + custodyId,
+                "待收货编号: " + custodyId,
                 "明细: " + claimDetail,
                 "当前商品: " + marketModel.getSelectedProductName(),
-                "去向: 个人 Base Vault；个人仓满或投递异常时资产保持 CLAIMABLE 可恢复状态。"),
+                "去向: 个人 Base Vault；个人仓满或投递异常时资产保持待收货状态。"),
             "确认提取",
             "取消",
             new Runnable() {
@@ -837,7 +1030,7 @@ public class TerminalHomeScreen extends CanvasScreen {
             width,
             height,
             title,
-            "确认后将通过新 TerminalActionMessage 主链执行定制商品市场动作，并回写 MARKET_CUSTOM snapshot。",
+            "确认后将执行当前定制商品操作，并在服务端处理完成后刷新页面。",
             Arrays.asList(
                 "listingId: " + marketSectionState.getCustomState().getSelectedListingId(),
                 "标题: " + customModel.getSelectedTitle(),
@@ -866,9 +1059,6 @@ public class TerminalHomeScreen extends CanvasScreen {
     }
 
     private void openCustomPublishConfirmPopup() {
-        if (!marketSectionState.getCustomState().hasPublishPrice()) {
-            return;
-        }
         if (marketSectionState.getCustomState().getSelectedVaultSlot() < 0) {
             openExactVaultPicker("选择个人仓单件", new VaultAssetPickerPopup.SelectionHandler() {
                 @Override public void select(com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel.VaultAssetModel asset, int quantity) {
@@ -878,6 +1068,17 @@ public class TerminalHomeScreen extends CanvasScreen {
                 }
                 @Override public void cancel() { closePopup(); }
             });
+            return;
+        }
+        if (!marketSectionState.getCustomState().hasPublishPrice()) {
+            openPopup(new CustomListingPricePopup(width, height, value -> {
+                marketSectionState.getCustomState().setPublishPriceText(value);
+                closePopup();
+                openCustomPublishConfirmPopup();
+            }, () -> {
+                marketSectionState.getCustomState().setSelectedVaultSlot(-1);
+                closePopup();
+            }));
             return;
         }
         final String askingPrice = marketSectionState.getCustomState().getPublishPriceText();
@@ -904,6 +1105,7 @@ public class TerminalHomeScreen extends CanvasScreen {
                         TerminalActionType.MARKET_CUSTOM_PUBLISH_HELD.getId(),
                         marketSectionState.getCustomState().toPayload().encode()));
                     marketSectionState.getCustomState().setSelectedVaultSlot(-1);
+                    marketSectionState.getCustomState().setPublishPriceText("");
                 }
             },
             new Runnable() {
@@ -939,13 +1141,13 @@ public class TerminalHomeScreen extends CanvasScreen {
             width,
             height,
             "确认执行汇率兑换",
-            "确认后将按当前 formal quote 执行真实兑换，并通过 TerminalSnapshotMessage 回写 MARKET_EXCHANGE。",
+            "确认后将按当前正式报价执行兑换，并在服务端处理完成后刷新页面。",
             Arrays.asList(
-                "pair: " + exchangeModel.getPairCode(),
+                "兑换对: " + exchangeModel.getPairCode(),
                 "输入: 个人仓第 " + (marketSectionState.getExchangeState().getSelectedVaultSlot() + 1) + " 格 / "
                     + exchangeModel.getInputAssetCode(),
                 "到账: " + exchangeModel.getEffectiveExchangeValue() + " " + exchangeModel.getOutputAssetCode(),
-                "规则: " + exchangeModel.getRuleVersion() + " / " + exchangeModel.getLimitStatus()),
+                "规则: " + exchangeModel.getRuleVersion() + " / " + exchangeModel.getLimitStatusDisplay()),
             "确认兑换",
             "取消",
             new Runnable() {
@@ -1048,7 +1250,10 @@ public class TerminalHomeScreen extends CanvasScreen {
     }
 
     protected void sendActionToServer(TerminalActionMessage message) {
-        TerminalNetwork.CHANNEL.sendToServer(message);
+        if (message == null) {
+            return;
+        }
+        TerminalNetwork.CHANNEL.sendToServer(message.withRequestSequence(responseSequenceGate.issueNext()));
     }
 
     private void openShellInfoPopup() {
@@ -1074,16 +1279,16 @@ public class TerminalHomeScreen extends CanvasScreen {
                         + "\n\n汇率市场: 正式报价、规则校验与兑换确认。"
                 : standardizedMarketPage
                     ? "标准商品市场页现在按工作台节奏组织：左侧选商品，中间看行情与个人状态，右侧执行交易动作。"
-                        + "\n\n订单、CLAIMABLE 和规则提示都继续留在同一页，但不再抢交易动作主区。"
+                        + "\n\n订单、待收货和规则提示都继续留在同一页，但不再抢交易动作主区。"
                 : marketPage
                     ? "市场工作页主体应以可执行动作、结果反馈和共享状态为主。"
                         + "\n\n帮助、制度说明和风险解释继续留在弹层或辅助位，不回到正文主区域。"
-                : "当前终端继续沿用 selectedPageId / TerminalActionMessage / TerminalSnapshotMessage 主链。"
+                : "当前页面已接入终端统一请求与刷新流程。"
                     + "\n\n银行、市场和传送页都通过同一套新壳承载。",
             serverToolsPage
                 ? "传送过程中请勿移动或下线，避免 gateway 派发或目标服落点恢复失败。"
                 : standardizedMarketPage
-                    ? "确认前留意 AVAILABLE / ESCROW / CLAIMABLE / 冻结资金与最近反馈。"
+                    ? "确认前留意可售库存、卖单锁定、待收货、冻结资金与最近反馈。"
                 : marketPage
                     ? "先选市场，再做动作；不要把 MARKET 根页当成交易详情页。"
                 : "当前说明只覆盖正式终端壳，不会回接旧终端实现。",

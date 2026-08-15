@@ -215,19 +215,19 @@
 
 ### 5.2 可保留并归入汇率市场的残留
 
-下面这些当前可以保留，但应归到 `汇率市场`：
+下面这些领域能力当前可以保留，但应归到 `汇率市场`：
 
 - `TaskCoinDescriptor`
 - `TaskCoinExchangeQuote`
 - `TaskCoinExchangePlanner`
 - `TaskCoinExchangeService`
-- `/jsirgalaxybase market quote hand`
-- `/jsirgalaxybase market exchange hand`
 
 它们当前的真实定位不是“商品市场”，而是：
 
-- 汇率市场的固定规则兑换入口 v0
+- 汇率市场的固定规则报价与兑换服务
 - 依托银行结算链的早期兑换实现
+
+旧的 `/jsirgalaxybase market quote hand` 与 `/jsirgalaxybase market exchange hand` 仅作为历史实现记录，不再属于当前玩家入口。玩家报价和兑换必须通过银河终端 UI；命令面只保留管理员恢复工具。
 
 可以保留的部分是：
 

@@ -27,6 +27,10 @@ final class MarketBrowseTooltipPanel extends AbstractGuiPanel {
         TerminalMarketVisuals.drawItemIconOrBadge(b.getX() + 8, b.getY() + 8, 22, item.getIconRef(), item.getKey());
         FontRenderer font = Minecraft.getMinecraft().fontRenderer;
         draw(font, trim(font, item.getTitle(), b.getWidth() - 44), b.getX() + 36, b.getY() + 9, 0xFFE4EDF7);
+        if (!item.isStandardized()) {
+            drawSpecialized(font, b);
+            return;
+        }
         String change = item.hasDayChange() ? item.getDayChange() : "--";
         int changeColor = change.startsWith("-") ? 0xFFE56A64 : item.hasDayChange() ? 0xFF62D478 : 0xFF8FA2B8;
         draw(font, "最新 " + item.getCompactLatestPrice(), b.getX() + 8, b.getY() + 35, 0xFFF1CA62);
@@ -41,33 +45,64 @@ final class MarketBrowseTooltipPanel extends AbstractGuiPanel {
         draw(font, "可卖 " + item.getAvailable() + "  锁定 " + item.getEscrow() + "  待收 " + item.getClaimable(),
             b.getX() + 8, b.getY() + 95, 0xFF8FA2B8);
         if (item.getPricePoints().size() >= 2) {
-            drawSparkline(b.getX() + 8, b.getY() + 108, b.getWidth() - 16, 13, item.getPricePoints());
-            draw(font, "今日真实成交走势", b.getX() + 8, b.getY() + 122, 0xFF8FA2B8);
+            drawChangeBars(font, b.getX() + 8, b.getY() + 107, b.getWidth() - 16, 40,
+                item.getPricePoints());
         }
     }
 
-    private void drawSparkline(int x, int y, int width, int height, List<TerminalMarketSectionModel.PricePointModel> points) {
+    private void drawSpecialized(FontRenderer font, GuiRect b) {
+        if (item.getKind() == MarketBrowseItemModel.Kind.CUSTOM_LISTING) {
+            draw(font, "挂牌价格 " + item.getCompactReferencePrice(), b.getX() + 8, b.getY() + 35, 0xFFF1CA62);
+            draw(font, "交易方 " + item.getTooltipPrimary(), b.getX() + 8, b.getY() + 49, 0xFFBFCBDA);
+            draw(font, "状态 " + item.getTooltipSecondary(), b.getX() + 8, b.getY() + 63, 0xFF8FA2B8);
+            draw(font, "点击查看挂牌详情", b.getX() + 8, b.getY() + 81, 0xFF6AB6EE);
+            return;
+        }
+        draw(font, "任务书硬币 " + item.getCompactReferencePrice(), b.getX() + 8, b.getY() + 35, 0xFFF1CA62);
+        draw(font, "目录 " + item.getTooltipPrimary(), b.getX() + 8, b.getY() + 49, 0xFFBFCBDA);
+        draw(font, "兑换状态 " + item.getTooltipSecondary(), b.getX() + 8, b.getY() + 63, 0xFF8FA2B8);
+        draw(font, "点击查看正式报价", b.getX() + 8, b.getY() + 81, 0xFF6AB6EE);
+    }
+
+    private void drawChangeBars(FontRenderer font, int x, int y, int width, int height,
+        List<TerminalMarketSectionModel.PricePointModel> points) {
         Gui.drawRect(x, y, x + width, y + height, 0xAA101820);
-        if (points == null || points.size() < 2) { return; }
-        long min = Long.MAX_VALUE, max = Long.MIN_VALUE;
-        for (TerminalMarketSectionModel.PricePointModel point : points) { min = Math.min(min, point.getPrice()); max = Math.max(max, point.getPrice()); }
+        long min = Long.MAX_VALUE;
+        long max = Long.MIN_VALUE;
+        for (TerminalMarketSectionModel.PricePointModel point : points) {
+            min = Math.min(min, point.getPrice());
+            max = Math.max(max, point.getPrice());
+        }
         long range = Math.max(1L, max - min);
-        int previousX = x;
-        int previousY = y + height - 3 - (int) ((points.get(0).getPrice() - min) * (height - 5) / range);
-        for (int index = 1; index < points.size(); index++) {
-            int pointX = x + index * Math.max(1, width - 2) / Math.max(1, points.size() - 1);
-            int pointY = y + height - 3 - (int) ((points.get(index).getPrice() - min) * (height - 5) / range);
-            drawLine(previousX, previousY, pointX, pointY, 0xFF63C2F0);
-            previousX = pointX; previousY = pointY;
+        int axisWidth = Math.max(
+            MarketCompactText.width(font, String.valueOf(max), MarketCompactText.AXIS_SCALE),
+            MarketCompactText.width(font, String.valueOf(min), MarketCompactText.AXIS_SCALE)) + 3;
+        int plotX = x + axisWidth;
+        int plotY = y + 2;
+        int plotWidth = Math.max(8, width - axisWidth - 2);
+        int plotHeight = Math.max(10, height - 11);
+        int baseline = plotY + plotHeight - (int) ((points.get(0).getPrice() - min) * plotHeight / range);
+        Gui.drawRect(plotX, baseline, plotX + plotWidth, baseline + 1, 0x445B6F82);
+        int barWidth = Math.max(1, plotWidth / Math.max(1, points.size()) - 1);
+        for (int index = 0; index < points.size(); index++) {
+            long price = points.get(index).getPrice();
+            int pointY = plotY + plotHeight - (int) ((price - min) * plotHeight / range);
+            int barX = plotX + index * plotWidth / Math.max(1, points.size());
+            int top = Math.min(baseline, pointY);
+            int bottom = Math.max(baseline + 1, pointY + 1);
+            int color = price >= points.get(0).getPrice() ? 0xFF57C96B : 0xFFE05A55;
+            Gui.drawRect(barX, top, Math.min(plotX + plotWidth, barX + barWidth), bottom, color);
         }
-    }
-
-    private void drawLine(int x0, int y0, int x1, int y1, int color) {
-        int steps = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
-        for (int step = 0; step <= steps; step++) {
-            Gui.drawRect(x0 + (x1 - x0) * step / Math.max(1, steps), y0 + (y1 - y0) * step / Math.max(1, steps),
-                x0 + (x1 - x0) * step / Math.max(1, steps) + 1, y0 + (y1 - y0) * step / Math.max(1, steps) + 1, color);
-        }
+        MarketCompactText.draw(font, String.valueOf(max), x, plotY, 0xFF8FA2B8,
+            MarketCompactText.AXIS_SCALE);
+        MarketCompactText.draw(font, String.valueOf(min), x, plotY + plotHeight - 6, 0xFF8FA2B8,
+            MarketCompactText.AXIS_SCALE);
+        MarketCompactText.draw(font, "00:00", plotX, y + height - 6, 0xFF718396,
+            MarketCompactText.AXIS_SCALE);
+        String now = "现在";
+        MarketCompactText.draw(font, now,
+            plotX + plotWidth - MarketCompactText.width(font, now, MarketCompactText.AXIS_SCALE),
+            y + height - 6, 0xFF718396, MarketCompactText.AXIS_SCALE);
     }
 
     private static void draw(FontRenderer font, String text, int x, int y, int color) { font.drawStringWithShadow(text, x, y, color); }

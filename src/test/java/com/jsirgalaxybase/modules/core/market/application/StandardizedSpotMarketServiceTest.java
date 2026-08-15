@@ -359,6 +359,30 @@ public class StandardizedSpotMarketServiceTest {
     }
 
     @Test
+    public void recoveryServiceKeepsRejectedCancellationTerminalWhenOrderAlreadyFilled() {
+        FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
+        FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
+        FakeMarketOperationLogRepository operationLogRepository = new FakeMarketOperationLogRepository();
+
+        MarketOrder order = orderRepository.save(new MarketOrder(0L, MarketOrderSide.SELL, MarketOrderStatus.FILLED,
+            "player-a", TestProducts.STONE, true, 10L, 16L, 0L, 16L, 0L, 1L, "test-server", Instant.now(),
+            Instant.now()));
+        operationLogRepository.save(new MarketOperationLog(0L, "req-cancel-filled",
+            MarketOperationType.SELL_ORDER_CANCEL, MarketOperationStatus.FAILED, "test-server", "player-a",
+            "playerRef=player-a", order.getOrderId(), 0L, 0L,
+            "order is not cancellable in current status", Instant.now(), Instant.now()));
+
+        MarketRecoveryService recoveryService = new MarketRecoveryService(orderRepository, custodyRepository,
+            operationLogRepository);
+        List<MarketOperationLog> reconciled = recoveryService.scanAndEscalateIncompleteOperations(10);
+
+        assertEquals(1, reconciled.size());
+        assertEquals(MarketOperationStatus.FAILED, reconciled.get(0).getStatus());
+        assertTrue(reconciled.get(0).getMessage().contains("already FILLED"));
+        assertEquals(MarketOrderStatus.FILLED, orderRepository.findById(order.getOrderId()).get().getStatus());
+    }
+
+    @Test
     public void recoveryServiceCompletesExchangeOperationWhenFormalSettlementExists() {
         FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
         FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();

@@ -9,6 +9,7 @@ import net.minecraft.client.gui.GuiScreen;
 import net.minecraftforge.client.event.RenderGameOverlayEvent;
 
 import com.jsirgalaxybase.client.gui.framework.CanvasScreen;
+import com.jsirgalaxybase.terminal.client.screen.TerminalHomeScreen;
 import com.jsirgalaxybase.terminal.ui.TerminalNotification;
 import com.jsirgalaxybase.terminal.ui.TerminalNotificationSeverity;
 
@@ -36,6 +37,8 @@ public class TerminalHudOverlayHandler {
             return;
         }
 
+        if (minecraft.currentScreen instanceof TerminalHomeScreen) return;
+
         List<TerminalHudNotificationManager.NotificationView> notifications = TerminalHudNotificationManager.pollVisible(
             System.currentTimeMillis(),
             MAX_VISIBLE);
@@ -44,21 +47,38 @@ public class TerminalHudOverlayHandler {
         }
 
         int screenWidth = event.resolution.getScaledWidth();
-        int x = screenWidth - 176;
+        int width = Math.min(320, Math.max(180, screenWidth / 3));
+        width = Math.min(width, Math.max(120, screenWidth - 20));
+        int x = screenWidth - width - 10;
         int y = 10;
         for (TerminalHudNotificationManager.NotificationView notificationView : notifications) {
-            int height = drawNotification(minecraft.fontRenderer, notificationView, x, y);
+            int height = drawNotification(minecraft.fontRenderer, notificationView, x, y, width);
             y += height + 6;
         }
     }
 
+    public void drawTerminalNotifications(FontRenderer fontRenderer, int screenWidth, int screenHeight) {
+        if (fontRenderer == null) return;
+        List<TerminalHudNotificationManager.NotificationView> notifications = TerminalHudNotificationManager.pollVisible(
+            System.currentTimeMillis(), MAX_VISIBLE);
+        if (notifications.isEmpty()) return;
+        int terminalInset = Math.max(8, screenWidth / 20);
+        int width = Math.min(280, Math.max(170, screenWidth / 4));
+        width = Math.min(width, Math.max(120, screenWidth - terminalInset * 2));
+        int x = screenWidth - terminalInset - width;
+        int y = Math.max(28, screenHeight / 12);
+        for (TerminalHudNotificationManager.NotificationView view : notifications) {
+            int height = drawNotification(fontRenderer, view, x, y, width);
+            y += height + 5;
+        }
+    }
+
     private int drawNotification(FontRenderer fontRenderer, TerminalHudNotificationManager.NotificationView notificationView,
-        int x, int y) {
+        int x, int y, int width) {
         TerminalNotification notification = notificationView.getNotification();
         TerminalNotificationSeverity severity = notification.getSeverity();
-        int width = 166;
         List lines = fontRenderer.listFormattedStringToWidth(notification.getBody(), width - 18);
-        int visibleLines = Math.min(2, lines.size());
+        int visibleLines = Math.min(4, lines.size());
         int height = 18 + Math.max(visibleLines, 1) * 10;
         int alpha = computeAlpha(notification, notificationView.getAgeMillis());
         int background = applyAlpha(severity.getBackgroundColor(), alpha);
@@ -71,7 +91,8 @@ public class TerminalHudOverlayHandler {
         Gui.drawRect(x + 1, y + 1, x + width - 1, y + height - 1, background);
         Gui.drawRect(x + 1, y + 1, x + 5, y + height - 1, accent);
 
-        fontRenderer.drawStringWithShadow(notification.getTitle(), x + 10, y + 4, titleColor);
+        String title = fontRenderer.trimStringToWidth(notification.getTitle(), width - 18);
+        fontRenderer.drawStringWithShadow(title, x + 10, y + 4, titleColor);
         for (int i = 0; i < visibleLines; i++) {
             String line = (String) lines.get(i);
             fontRenderer.drawStringWithShadow(line, x + 10, y + 16 + i * 9, bodyColor);

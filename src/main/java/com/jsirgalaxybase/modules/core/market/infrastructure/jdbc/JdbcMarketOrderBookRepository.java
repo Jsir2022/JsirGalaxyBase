@@ -12,6 +12,8 @@ import com.jsirgalaxybase.modules.core.banking.infrastructure.jdbc.JdbcConnectio
 import com.jsirgalaxybase.modules.core.banking.infrastructure.jdbc.JdbcConnectionManager;
 import com.jsirgalaxybase.modules.core.market.application.MarketOperationException;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOrder;
+import com.jsirgalaxybase.modules.core.market.domain.MarketOrderHistoryPage;
+import com.jsirgalaxybase.modules.core.market.domain.MarketOrderHistoryQuery;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOrderSide;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOrderStatus;
 import com.jsirgalaxybase.modules.core.market.domain.StandardizedMarketProduct;
@@ -211,6 +213,97 @@ public class JdbcMarketOrderBookRepository extends AbstractJdbcRepository implem
                 }
             }
         });
+    }
+
+    @Override
+    public List<MarketOrder> findOrdersByOwner(final String ownerPlayerRef, final int limit) {
+        return connectionManager.withConnection(new JdbcConnectionCallback<List<MarketOrder>>() {
+
+            @Override
+            public List<MarketOrder> doInConnection(java.sql.Connection connection) throws SQLException {
+                PreparedStatement statement = connection.prepareStatement(
+                    "SELECT * FROM market_order WHERE owner_player_ref = ? ORDER BY created_at DESC, order_id DESC LIMIT ?");
+                try {
+                    statement.setString(1, ownerPlayerRef);
+                    statement.setInt(2, sanitizeLimit(limit));
+                    ResultSet resultSet = statement.executeQuery();
+                    try {
+                        return mapOrders(resultSet);
+                    } finally {
+                        resultSet.close();
+                    }
+                } finally {
+                    statement.close();
+                }
+            }
+        });
+    }
+
+    @Override
+    public MarketOrderHistoryPage findOrderHistory(final String ownerPlayerRef, final MarketOrderHistoryQuery query) {
+        return connectionManager.withConnection(new JdbcConnectionCallback<MarketOrderHistoryPage>() {
+            @Override public MarketOrderHistoryPage doInConnection(java.sql.Connection connection) throws SQLException {
+                String where = historyWhere(query);
+                int total;
+                PreparedStatement count = connection.prepareStatement("SELECT COUNT(*) FROM market_order " + where);
+                try {
+                    bindHistory(count, ownerPlayerRef, query, false);
+                    ResultSet rows = count.executeQuery();
+                    try { rows.next(); total = rows.getInt(1); } finally { rows.close(); }
+                } finally { count.close(); }
+                int pages = Math.max(1, (total + query.getPageSize() - 1) / query.getPageSize());
+                int page = Math.min(query.getPageIndex(), pages - 1);
+                PreparedStatement select = connection.prepareStatement("SELECT * FROM market_order " + where
+                    + " ORDER BY created_at DESC, order_id DESC LIMIT ? OFFSET ?");
+                try {
+                    int next = bindHistory(select, ownerPlayerRef, query, false);
+                    select.setInt(next++, query.getPageSize());
+                    select.setInt(next, page * query.getPageSize());
+                    ResultSet rows = select.executeQuery();
+                    try { return new MarketOrderHistoryPage(mapOrders(rows), total, page, query.getPageSize()); }
+                    finally { rows.close(); }
+                } finally { select.close(); }
+            }
+        });
+    }
+
+    private String historyWhere(MarketOrderHistoryQuery query) {
+        StringBuilder sql = new StringBuilder("WHERE owner_player_ref = ?");
+        if (!query.getProductKey().isEmpty()) sql.append(" AND product_key = ?");
+        if (!query.getSearchText().isEmpty()) {
+            sql.append(" AND (LOWER(product_key) LIKE ? ESCAPE '!' OR EXISTS (")
+                .append("SELECT 1 FROM standardized_market_catalog catalog ")
+                .append("WHERE catalog.product_key = market_order.product_key ")
+                .append("AND LOWER(catalog.display_name) LIKE ? ESCAPE '!'))");
+        }
+        if (query.getSide() != null) sql.append(" AND order_side = ?");
+        switch (query.getStatus()) {
+            case OPEN: sql.append(" AND order_status IN ('OPEN','PARTIALLY_FILLED')"); break;
+            case FILLED: sql.append(" AND order_status = 'FILLED'"); break;
+            case CLOSED: sql.append(" AND order_status IN ('CANCELLED','EXCEPTION')"); break;
+            default: break;
+        }
+        if (query.getCreatedAfter() != null) sql.append(" AND created_at >= ?");
+        return sql.toString();
+    }
+
+    private int bindHistory(PreparedStatement statement, String owner, MarketOrderHistoryQuery query,
+        boolean ignored) throws SQLException {
+        int index = 1;
+        statement.setString(index++, owner);
+        if (!query.getProductKey().isEmpty()) statement.setString(index++, query.getProductKey());
+        if (!query.getSearchText().isEmpty()) {
+            String pattern = "%" + escapeLike(query.getSearchText().toLowerCase(java.util.Locale.ROOT)) + "%";
+            statement.setString(index++, pattern);
+            statement.setString(index++, pattern);
+        }
+        if (query.getSide() != null) statement.setString(index++, query.getSide().name());
+        if (query.getCreatedAfter() != null) statement.setTimestamp(index++, java.sql.Timestamp.from(query.getCreatedAfter()));
+        return index;
+    }
+
+    static String escapeLike(String value) {
+        return value.replace("!", "!!").replace("%", "!%").replace("_", "!_");
     }
 
     @Override

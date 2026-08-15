@@ -5,6 +5,7 @@ import java.util.Collections;
 import java.util.List;
 
 import com.jsirgalaxybase.terminal.ui.TerminalNotificationSeverity;
+import com.jsirgalaxybase.terminal.TerminalMarketBrowseEntry;
 
 public final class TerminalCustomMarketSectionModel {
 
@@ -32,6 +33,13 @@ public final class TerminalCustomMarketSectionModel {
     private final boolean canCancel;
     private final boolean canClaim;
     private final ActionFeedbackModel actionFeedback;
+    private List<TerminalMarketBrowseEntry> browseEntries;
+    private String browseQuery;
+    private int browsePageIndex;
+    private int browsePageSize;
+    private int browseTotalEntries;
+    private boolean hasPreviousPage;
+    private boolean hasNextPage;
 
     public TerminalCustomMarketSectionModel(String serviceState, String browserHint, String scopeLabel,
         List<String> activeListingLines, List<String> activeListingIds, List<String> sellingListingLines,
@@ -60,7 +68,7 @@ public final class TerminalCustomMarketSectionModel {
         this.serviceState = normalize(serviceState, "定制商品市场状态未知");
         this.browserHint = normalize(browserHint, "当前没有定制商品浏览提示。");
         this.scopeLabel = normalize(scopeLabel, "全部挂牌");
-        this.activeListingLines = freeze(activeListingLines, Collections.singletonList("当前没有 active custom listings。"));
+        this.activeListingLines = freeze(activeListingLines, Collections.singletonList("当前没有可购买的定制挂牌。"));
         this.activeListingIds = freeze(activeListingIds, Collections.<String>emptyList());
         this.activeListingIconRefs = freeze(activeListingIconRefs, Collections.<String>emptyList());
         this.sellingListingLines = freeze(sellingListingLines, Collections.singletonList("你当前没有出售中的挂牌。"));
@@ -81,14 +89,38 @@ public final class TerminalCustomMarketSectionModel {
         this.canCancel = canCancel;
         this.canClaim = canClaim;
         this.actionFeedback = actionFeedback == null ? ActionFeedbackModel.placeholder() : actionFeedback;
+        this.browseEntries = Collections.emptyList();
+        this.browseQuery = "";
+        this.browsePageIndex = 0;
+        this.browsePageSize = 12;
+        this.browseTotalEntries = 0;
+        this.hasPreviousPage = false;
+        this.hasNextPage = false;
+    }
+
+    public TerminalCustomMarketSectionModel withBrowsePage(List<TerminalMarketBrowseEntry> entries, String query,
+        int pageIndex, int pageSize, int totalEntries, boolean previous, boolean next) {
+        TerminalCustomMarketSectionModel copy = new TerminalCustomMarketSectionModel(serviceState, browserHint, scopeLabel,
+            activeListingLines, activeListingIds, activeListingIconRefs, sellingListingLines, sellingListingIds,
+            sellingListingIconRefs, pendingListingLines, pendingListingIds, pendingListingIconRefs, selectedListingId,
+            selectedTitle, selectedPrice, selectedStatus, selectedCounterparty, selectedItemIdentity, selectedTradeSummary,
+            selectedActionHint, canBuy, canCancel, canClaim, actionFeedback);
+        copy.browseEntries = freeze(entries, Collections.<TerminalMarketBrowseEntry>emptyList());
+        copy.browseQuery = normalize(query, "");
+        copy.browsePageIndex = Math.max(0, pageIndex);
+        copy.browsePageSize = Math.max(1, pageSize);
+        copy.browseTotalEntries = Math.max(0, totalEntries);
+        copy.hasPreviousPage = previous;
+        copy.hasNextPage = next;
+        return copy;
     }
 
     public static TerminalCustomMarketSectionModel placeholder() {
         return new TerminalCustomMarketSectionModel(
-            "定制商品市场 section 已接入",
-            "listing-first 页面等待服务端 snapshot。",
+            "定制商品市场已接入",
+            "正在等待服务器返回定制商品市场数据。",
             "全部挂牌",
-            Collections.singletonList("当前没有 active custom listings。"),
+            Collections.singletonList("当前没有可购买的定制挂牌。"),
             Collections.<String>emptyList(),
             Collections.<String>emptyList(),
             Collections.singletonList("你当前没有出售中的挂牌。"),
@@ -135,6 +167,13 @@ public final class TerminalCustomMarketSectionModel {
     public boolean isCanCancel() { return canCancel; }
     public boolean isCanClaim() { return canClaim; }
     public ActionFeedbackModel getActionFeedback() { return actionFeedback; }
+    public List<TerminalMarketBrowseEntry> getBrowseEntries() { return browseEntries; }
+    public String getBrowseQuery() { return browseQuery; }
+    public int getBrowsePageIndex() { return browsePageIndex; }
+    public int getBrowsePageSize() { return browsePageSize; }
+    public int getBrowseTotalEntries() { return browseTotalEntries; }
+    public boolean hasPreviousPage() { return hasPreviousPage; }
+    public boolean hasNextPage() { return hasNextPage; }
     public boolean hasSelectedListing() { return !selectedListingId.isEmpty(); }
     public boolean hasAnyListing() {
         return hasRealListing(activeListingIds) || hasRealListing(sellingListingIds) || hasRealListing(pendingListingIds);

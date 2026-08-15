@@ -53,7 +53,7 @@ public final class TerminalBankSection extends PanelContainer {
         this.leadLabel = panels.createLabel(new GuiRect(0, 0, 0, 0), new Supplier<String>() {
             @Override
             public String get() {
-                return "开户、余额摘要、转账确认和 snapshot 回写都已迁入当前新壳。";
+                return "开户、余额摘要、转账确认和页面刷新都已接入当前终端。";
             }
         }, ThemeColorKey.TEXT_SECONDARY, false);
         this.accountCard = panels.createSurface(new GuiRect(0, 0, 0, 0), ThemeColorKey.PANEL_FILL);

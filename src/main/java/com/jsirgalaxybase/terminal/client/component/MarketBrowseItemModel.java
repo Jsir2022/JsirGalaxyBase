@@ -8,6 +8,8 @@ import com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel;
 /** Shared browse vocabulary for the standard, custom and exchange market adapters. */
 public final class MarketBrowseItemModel {
 
+    public enum Kind { STANDARDIZED, CUSTOM_LISTING, EXCHANGE_COIN }
+
     private final String key;
     private final String iconRef;
     private final String title;
@@ -22,6 +24,9 @@ public final class MarketBrowseItemModel {
     private final String claimable;
     private final String dayChange;
     private final List<TerminalMarketSectionModel.PricePointModel> pricePoints;
+    private final Kind kind;
+    private final String tooltipPrimary;
+    private final String tooltipSecondary;
 
     public MarketBrowseItemModel(String key, String iconRef, String title, String referencePrice, String status,
         String latestTrade, String bestBid, String bestAsk, String volume24h,
@@ -40,6 +45,14 @@ public final class MarketBrowseItemModel {
     public MarketBrowseItemModel(String key, String iconRef, String title, String referencePrice, String status,
         String latestTrade, String bestBid, String bestAsk, String volume24h, String available, String escrow,
         String claimable, String dayChange, List<TerminalMarketSectionModel.PricePointModel> pricePoints) {
+        this(key, iconRef, title, referencePrice, status, latestTrade, bestBid, bestAsk, volume24h, available,
+            escrow, claimable, dayChange, pricePoints, Kind.STANDARDIZED, "", "");
+    }
+
+    private MarketBrowseItemModel(String key, String iconRef, String title, String referencePrice, String status,
+        String latestTrade, String bestBid, String bestAsk, String volume24h, String available, String escrow,
+        String claimable, String dayChange, List<TerminalMarketSectionModel.PricePointModel> pricePoints, Kind kind,
+        String tooltipPrimary, String tooltipSecondary) {
         this.key = safe(key); this.iconRef = safe(iconRef); this.title = safe(title);
         this.referencePrice = safe(referencePrice); this.status = safe(status); this.latestTrade = safe(latestTrade);
         this.bestBid = safe(bestBid); this.bestAsk = safe(bestAsk); this.volume24h = safe(volume24h);
@@ -47,6 +60,23 @@ public final class MarketBrowseItemModel {
         this.dayChange = safe(dayChange);
         this.pricePoints = pricePoints == null ? Collections.<TerminalMarketSectionModel.PricePointModel>emptyList()
             : Collections.unmodifiableList(pricePoints);
+        this.kind = kind == null ? Kind.STANDARDIZED : kind;
+        this.tooltipPrimary = safe(tooltipPrimary);
+        this.tooltipSecondary = safe(tooltipSecondary);
+    }
+
+    public static MarketBrowseItemModel customListing(String key, String iconRef, String title, String price,
+        String ownerOrDelivery, String status) {
+        return new MarketBrowseItemModel(key, iconRef, title, price, status, ownerOrDelivery, "--", "--", "--",
+            "0", "0", "0", "--", Collections.<TerminalMarketSectionModel.PricePointModel>emptyList(),
+            Kind.CUSTOM_LISTING, ownerOrDelivery, status);
+    }
+
+    public static MarketBrowseItemModel exchangeCoin(String key, String iconRef, String title, String faceValue,
+        String familyTier, String availability) {
+        return new MarketBrowseItemModel(key, iconRef, title, faceValue, availability, familyTier, "--", "--", "--",
+            "0", "0", "0", "--", Collections.<TerminalMarketSectionModel.PricePointModel>emptyList(),
+            Kind.EXCHANGE_COIN, familyTier, availability);
     }
 
     public String getKey() { return key; }
@@ -63,6 +93,11 @@ public final class MarketBrowseItemModel {
     public String getClaimable() { return claimable; }
     public String getDayChange() { return dayChange; }
     public List<TerminalMarketSectionModel.PricePointModel> getPricePoints() { return pricePoints; }
+    public Kind getKind() { return kind; }
+    public String getTooltipPrimary() { return tooltipPrimary; }
+    public String getTooltipSecondary() { return tooltipSecondary; }
+    public boolean isStandardized() { return kind == Kind.STANDARDIZED; }
+    public String getCardStatus() { return isStandardized() ? (hasDayChange() ? dayChange : status) : status; }
 
     public double getChangePercent() {
         if (pricePoints.isEmpty()) { return 0.0D; }

@@ -61,4 +61,20 @@ public class TerminalMarketActionPayloadTest {
         assertEquals("volume", decoded.getBrowserSort());
         assertEquals("steel", decoded.getBrowserQuery());
     }
+
+    @Test
+    public void historyEncodingPreservesSearchAndFilters() {
+        TerminalMarketActionPayload payload = new TerminalMarketActionPayload(
+            "gregtech:steel_ingot:0", "", "", "", "", "", "", "", "")
+                .withHistory("ALL", "SELL", "OPEN", "WEEK", "steel ingot", 2, 7);
+
+        TerminalMarketActionPayload decoded = TerminalMarketActionPayload.decode(payload.encodeHistory());
+
+        assertEquals("steel ingot", decoded.getHistoryQuery());
+        assertEquals("SELL", decoded.getHistorySide());
+        assertEquals("OPEN", decoded.getHistoryStatus());
+        assertEquals("WEEK", decoded.getHistoryTime());
+        assertEquals(2, decoded.getHistoryPage());
+        assertEquals(7, decoded.getHistoryPageSize());
+    }
 }

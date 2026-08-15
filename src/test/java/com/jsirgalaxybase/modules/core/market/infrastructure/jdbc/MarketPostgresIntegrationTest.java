@@ -59,6 +59,8 @@ import com.jsirgalaxybase.modules.core.market.domain.MarketOperationLog;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOperationStatus;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOperationType;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOrder;
+import com.jsirgalaxybase.modules.core.market.domain.MarketOrderHistoryPage;
+import com.jsirgalaxybase.modules.core.market.domain.MarketOrderHistoryQuery;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOrderStatus;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketDeliveryStatus;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketListingStatus;
@@ -197,6 +199,19 @@ public class MarketPostgresIntegrationTest {
         } catch (MarketOperationException exception) {
             assertTrue(exception.getMessage().contains("unitPrice"));
         }
+    }
+
+    @Test
+    public void orderHistorySearchAcceptsTextAndEscapedWildcardCharactersOnPostgres() {
+        MarketOrderHistoryPage textResult = marketInfrastructure.getOrderBookRepository().findOrderHistory(
+            "player-search",
+            new MarketOrderHistoryQuery("", null, MarketOrderHistoryQuery.StatusGroup.ALL, null, "iron", 0, 10));
+        MarketOrderHistoryPage escapedResult = marketInfrastructure.getOrderBookRepository().findOrderHistory(
+            "player-search",
+            new MarketOrderHistoryQuery("", null, MarketOrderHistoryQuery.StatusGroup.ALL, null, "%_!", 0, 10));
+
+        assertEquals(0, textResult.getTotalEntries());
+        assertEquals(0, escapedResult.getTotalEntries());
     }
 
     @Test

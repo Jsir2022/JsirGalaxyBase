@@ -72,10 +72,15 @@ public final class StandardizedMarketReadRepository {
     }
 
     public List<Candle> readCandles(String productKey, Instant now, ChartRange range) {
+        return readCandles(productKey, now, range, 0L);
+    }
+
+    public List<Candle> readCandles(String productKey, Instant now, ChartRange range, long referencePrice) {
         long bucketSeconds = range.bucketSeconds;
+        long lastBucket = now.getEpochSecond() - now.getEpochSecond() % bucketSeconds;
+        long firstBucket = lastBucket - bucketSeconds * (range.bucketCount - 1L);
         List<MarketTradeRecord> history = trades.findByProductKeySince(productKey,
-            now.minusSeconds(bucketSeconds * range.bucketCount), 2048);
-        if (history.isEmpty()) { return Collections.emptyList(); }
+            Instant.ofEpochSecond(firstBucket), 2048);
         Collections.sort(history, new Comparator<MarketTradeRecord>() {
             @Override public int compare(MarketTradeRecord left, MarketTradeRecord right) {
                 return left.getCreatedAt().compareTo(right.getCreatedAt());
@@ -85,12 +90,33 @@ public final class StandardizedMarketReadRepository {
         for (MarketTradeRecord trade : history) {
             long epoch = trade.getCreatedAt().getEpochSecond();
             long start = epoch - epoch % bucketSeconds;
+            if (start < firstBucket || start > lastBucket) { continue; }
             MutableCandle candle = buckets.get(Long.valueOf(start));
             if (candle == null) { candle = new MutableCandle(start, trade.getUnitPrice()); buckets.put(Long.valueOf(start), candle); }
             candle.accept(trade);
         }
+        MarketTradeRecord prior = trades.findLatestByProductKeyBefore(productKey, Instant.ofEpochSecond(firstBucket));
+        long previousClose = prior == null ? 0L : prior.getUnitPrice();
+        CandleSource syntheticSource = prior == null ? CandleSource.REFERENCE : CandleSource.CARRY_FORWARD;
         List<Candle> result = new ArrayList<Candle>();
-        for (MutableCandle candle : buckets.values()) { result.add(candle.freeze()); }
+        for (int index = 0; index < range.bucketCount; index++) {
+            long start = firstBucket + index * bucketSeconds;
+            MutableCandle actual = buckets.get(Long.valueOf(start));
+            if (actual != null) {
+                Candle candle = actual.freeze();
+                result.add(candle);
+                previousClose = candle.close;
+                syntheticSource = CandleSource.CARRY_FORWARD;
+            } else if (previousClose > 0L) {
+                result.add(Candle.flat(start, previousClose, syntheticSource));
+            } else if (referencePrice > 0L) {
+                previousClose = referencePrice;
+                syntheticSource = CandleSource.REFERENCE;
+                result.add(Candle.flat(start, referencePrice, CandleSource.REFERENCE));
+            } else {
+                result.add(Candle.empty(start));
+            }
+        }
         return result;
     }
 
@@ -151,17 +177,25 @@ public final class StandardizedMarketReadRepository {
     }
 
     public static final class Candle {
-        public final long startEpochSeconds, open, high, low, close, volume;
-        Candle(long startEpochSeconds, long open, long high, long low, long close, long volume) {
+        public final long startEpochSeconds, open, high, low, close, volume, turnover;
+        public final CandleSource source;
+        Candle(long startEpochSeconds, long open, long high, long low, long close, long volume, long turnover,
+            CandleSource source) {
             this.startEpochSeconds = startEpochSeconds; this.open = open; this.high = high; this.low = low;
-            this.close = close; this.volume = volume;
+            this.close = close; this.volume = volume; this.turnover = turnover; this.source = source;
         }
+        static Candle flat(long start, long price, CandleSource source) {
+            return new Candle(start, price, price, price, price, 0L, 0L, source);
+        }
+        static Candle empty(long start) { return new Candle(start, 0L, 0L, 0L, 0L, 0L, 0L, CandleSource.EMPTY); }
     }
 
+    public enum CandleSource { TRADE, CARRY_FORWARD, REFERENCE, EMPTY }
+
     private static final class MutableCandle {
-        final long start, open; long high, low, close, volume;
+        final long start, open; long high, low, close, volume, turnover;
         MutableCandle(long start, long price) { this.start = start; this.open = price; this.high = price; this.low = price; this.close = price; }
-        void accept(MarketTradeRecord trade) { long price = trade.getUnitPrice(); high = Math.max(high, price); low = Math.min(low, price); close = price; volume += trade.getQuantity(); }
-        Candle freeze() { return new Candle(start, open, high, low, close, volume); }
+        void accept(MarketTradeRecord trade) { long price = trade.getUnitPrice(); high = Math.max(high, price); low = Math.min(low, price); close = price; volume += trade.getQuantity(); turnover += price * trade.getQuantity(); }
+        Candle freeze() { return new Candle(start, open, high, low, close, volume, turnover, CandleSource.TRADE); }
     }
 }

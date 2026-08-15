@@ -11,6 +11,7 @@ import com.jsirgalaxybase.modules.core.banking.infrastructure.jdbc.AbstractJdbcR
 import com.jsirgalaxybase.modules.core.banking.infrastructure.jdbc.JdbcConnectionCallback;
 import com.jsirgalaxybase.modules.core.banking.infrastructure.jdbc.JdbcConnectionManager;
 import com.jsirgalaxybase.modules.core.market.application.MarketOperationException;
+import com.jsirgalaxybase.modules.core.market.application.CustomMarketBrowsePage;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketDeliveryStatus;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketListing;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketListingStatus;
@@ -152,6 +153,52 @@ public class JdbcCustomMarketListingRepository extends AbstractJdbcRepository im
             buyerPlayerRef, deliveryStatus.name(), sanitizeLimit(limit));
     }
 
+    @Override
+    public CustomMarketBrowsePage findBrowsePage(final String scope, final String playerRef, final String query,
+        final int offset, final int limit) {
+        return connectionManager.withConnection(new JdbcConnectionCallback<CustomMarketBrowsePage>() {
+
+            @Override
+            public CustomMarketBrowsePage doInConnection(java.sql.Connection connection) throws SQLException {
+                BrowseSql browseSql = BrowseSql.create(scope, playerRef, query);
+                PreparedStatement countStatement = connection.prepareStatement(
+                    "SELECT COUNT(*) FROM custom_market_listing l "
+                        + "LEFT JOIN custom_market_item_snapshot i ON i.listing_id = l.listing_id "
+                        + browseSql.whereClause);
+                try {
+                    browseSql.bind(countStatement, 1);
+                    ResultSet countResult = countStatement.executeQuery();
+                    int total;
+                    try {
+                        total = countResult.next() ? countResult.getInt(1) : 0;
+                    } finally {
+                        countResult.close();
+                    }
+                    PreparedStatement pageStatement = connection.prepareStatement(
+                        "SELECT l.* FROM custom_market_listing l "
+                            + "LEFT JOIN custom_market_item_snapshot i ON i.listing_id = l.listing_id "
+                            + browseSql.whereClause
+                            + " ORDER BY l.updated_at DESC, l.listing_id DESC LIMIT ? OFFSET ?");
+                    try {
+                        int parameter = browseSql.bind(pageStatement, 1);
+                        pageStatement.setInt(parameter++, sanitizeLimit(limit));
+                        pageStatement.setInt(parameter, Math.max(0, offset));
+                        ResultSet resultSet = pageStatement.executeQuery();
+                        try {
+                            return new CustomMarketBrowsePage(mapListings(resultSet), total);
+                        } finally {
+                            resultSet.close();
+                        }
+                    } finally {
+                        pageStatement.close();
+                    }
+                } finally {
+                    countStatement.close();
+                }
+            }
+        });
+    }
+
     private void bindListing(PreparedStatement statement, CustomMarketListing listing) throws SQLException {
         statement.setString(1, listing.getSellerPlayerRef());
         setNullableText(statement, 2, listing.getBuyerPlayerRef());
@@ -230,5 +277,51 @@ public class JdbcCustomMarketListingRepository extends AbstractJdbcRepository im
 
     private int sanitizeLimit(int limit) {
         return limit <= 0 ? 20 : Math.min(limit, 50);
+    }
+
+    private static final class BrowseSql {
+
+        private final String whereClause;
+        private final String scope;
+        private final String playerRef;
+        private final String query;
+
+        private BrowseSql(String whereClause, String scope, String playerRef, String query) {
+            this.whereClause = whereClause;
+            this.scope = scope;
+            this.playerRef = playerRef == null ? "" : playerRef;
+            this.query = query == null ? "" : query.trim().toLowerCase(java.util.Locale.ROOT);
+        }
+
+        private static BrowseSql create(String rawScope, String playerRef, String query) {
+            String scope = rawScope == null ? "active" : rawScope.trim().toLowerCase(java.util.Locale.ROOT);
+            String state;
+            if ("selling".equals(scope)) {
+                state = "l.seller_player_ref = ? AND l.delivery_status = ?";
+            } else if ("pending".equals(scope)) {
+                state = "l.delivery_status = ? AND (l.seller_player_ref = ? OR l.buyer_player_ref = ?)";
+            } else {
+                scope = "active";
+                state = "l.listing_status = ?";
+            }
+            return new BrowseSql(" WHERE " + state
+                + " AND lower(coalesce(i.display_name, '') || ' ' || coalesce(i.item_id, '') || ' ' "
+                + "|| coalesce(l.seller_player_ref, '')) LIKE ?", scope, playerRef, query);
+        }
+
+        private int bind(PreparedStatement statement, int index) throws SQLException {
+            if ("selling".equals(scope)) {
+                statement.setString(index++, playerRef);
+                statement.setString(index++, CustomMarketDeliveryStatus.ESCROW_HELD.name());
+            } else if ("pending".equals(scope)) {
+                statement.setString(index++, CustomMarketDeliveryStatus.BUYER_PENDING_CLAIM.name());
+                statement.setString(index++, playerRef);
+                statement.setString(index++, playerRef);
+            } else {
+                statement.setString(index++, CustomMarketListingStatus.ACTIVE.name());
+            }
+            statement.setString(index++, "%" + query.replace("%", "\\%").replace("_", "\\_") + "%");
+            return index;
+        }
     }
 }

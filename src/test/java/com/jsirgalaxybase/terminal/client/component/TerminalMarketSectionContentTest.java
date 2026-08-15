@@ -1,6 +1,7 @@
 package com.jsirgalaxybase.terminal.client.component;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.util.Arrays;
@@ -13,6 +14,47 @@ import com.jsirgalaxybase.terminal.client.viewmodel.TerminalExchangeMarketSectio
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel;
 
 public class TerminalMarketSectionContentTest {
+
+    @Test
+    public void personalHistoryEntriesParseFilterAndExposeExactCancellationTarget() {
+        String now = java.time.Instant.now().toString();
+        TerminalMarketSectionContent.OrderEntry open = new TerminalMarketSectionContent.OrderEntry(
+            "42", "#42 | gregtech:steel_ingot:0 | SELL | 价 65 | 总 10 | 成 3 | 剩 7 | PARTIALLY_FILLED | "
+                + now + " | 钢锭",
+            true);
+        TerminalMarketSectionContent.OrderEntry oldFilled = new TerminalMarketSectionContent.OrderEntry(
+            "41", "#41 | gregtech:iron_ingot:0 | BUY | 价 63 | 总 8 | 成 8 | 剩 0 | FILLED | 2020-01-01T00:00:00Z",
+            false);
+        TerminalMarketSectionState state = new TerminalMarketSectionState();
+        state.setSelectedProductKey("gregtech:steel_ingot:0");
+        state.openStandardizedHistory();
+
+        assertEquals("gregtech:steel_ingot:0", open.getProductKey());
+        assertEquals("SELL", open.getSide());
+        assertEquals("PARTIALLY_FILLED", open.getStatus());
+        assertEquals("钢锭", open.getDisplayName());
+        assertEquals("65", open.getUnitPrice());
+        assertEquals("3", open.getFilledQuantity());
+        assertEquals("10", open.getOriginalQuantity());
+        assertEquals("7", open.getRemainingQuantity());
+        assertEquals("部分成交", open.getStatusLabel());
+        assertTrue(open.isCancelable());
+        assertFalse(oldFilled.isCancelable());
+        assertTrue(open.matches(state, state.getSelectedProductKey()));
+        assertTrue(oldFilled.matches(state, state.getSelectedProductKey()));
+
+        state.toggleHistoryProductScope();
+        assertTrue(open.matches(state, state.getSelectedProductKey()));
+        assertFalse(oldFilled.matches(state, state.getSelectedProductKey()));
+
+        state.cycleHistorySide();
+        state.cycleHistorySide();
+        assertTrue(open.matches(state, state.getSelectedProductKey()));
+
+        state.cycleHistoryTime();
+        assertTrue(open.matches(state, state.getSelectedProductKey()));
+        assertFalse(oldFilled.matches(state, "gregtech:iron_ingot:0"));
+    }
 
     @Test
     public void productClaimRuleAndBookBuildersKeepFullDatasets() {
@@ -118,7 +160,7 @@ public class TerminalMarketSectionContentTest {
         assertTrue(TerminalMarketSectionContent.buildExchangeOverviewEntry().getSummary().contains("报价"));
         assertTrue(TerminalMarketSectionContent.buildBrowserStatusLines(model).get(0).contains("服务"));
         assertTrue(TerminalMarketSectionContent.buildMarketSnapshotLines(model).get(0).contains("最新成交价"));
-        assertTrue(TerminalMarketSectionContent.buildInventoryStatusLines(model).get(0).contains("AVAILABLE"));
+        assertTrue(TerminalMarketSectionContent.buildInventoryStatusLines(model).get(0).contains("可售"));
     }
 
     @Test

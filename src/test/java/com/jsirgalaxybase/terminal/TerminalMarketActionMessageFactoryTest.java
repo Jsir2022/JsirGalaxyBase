@@ -101,6 +101,28 @@ public class TerminalMarketActionMessageFactoryTest {
     }
 
     @Test
+    public void historyCancelPreservesAuthenticatedQueryContext() {
+        TerminalHomeScreenModel screenModel = createMarketScreenModel();
+        TerminalMarketSectionState state = new TerminalMarketSectionState();
+        state.applyModel(screenModel.getSelectedPageSnapshot().getMarketSectionModel());
+        state.openStandardizedHistory();
+        state.toggleHistoryProductScope();
+        state.cycleHistorySide();
+        state.setHistoryPage(2);
+        state.setPendingCancelOrderId("17");
+
+        TerminalActionMessage cancel = TerminalMarketActionMessageFactory.createCancelOrderMessage(
+            screenModel, screenModel.getSelectedPageSnapshot().getMarketSectionModel(), state);
+
+        TerminalMarketActionPayload payload = TerminalMarketActionPayload.decode(cancel.getPayload());
+        assertEquals(17L, payload.parseOrderId());
+        assertEquals("CURRENT", payload.getHistoryProductScope());
+        assertEquals("BUY", payload.getHistorySide());
+        assertEquals(2, payload.getHistoryPage());
+        assertEquals(TerminalMarketActionPayload.DEFAULT_HISTORY_PAGE_SIZE, payload.getHistoryPageSize());
+    }
+
+    @Test
     public void unifiedOrderTicketUsesSingleModernActionContract() {
         TerminalHomeScreenModel screenModel = createMarketScreenModel();
         TerminalMarketSectionState state = new TerminalMarketSectionState();

@@ -2,7 +2,7 @@ package com.jsirgalaxybase.terminal.client.component;
 
 import com.jsirgalaxybase.client.gui.framework.GuiRect;
 
-/** Fixed-budget geometry for the modern horizontal trading workstation. */
+/** Fixed-budget geometry for the modern split trading workstation. */
 final class MarketDetailLayout {
 
     private static final int INSET = 6;
@@ -44,6 +44,28 @@ final class MarketDetailLayout {
         GuiRect book = new GuiRect(chart.getRight() + GAP, bodyY, bookWidth, bodyHeight);
         GuiRect ticket = new GuiRect(book.getRight() + GAP, bodyY, ticketWidth, bodyHeight);
         GuiRect footer = new GuiRect(x, bodyY + bodyHeight + GAP, width, footerHeight);
+        return new MarketDetailLayout(hero, chart, book, ticket, footer);
+    }
+
+    static MarketDetailLayout withinStandardSplit(GuiRect bounds) {
+        int x = bounds.getX() + INSET;
+        int y = bounds.getY() + INSET;
+        int width = Math.max(0, bounds.getWidth() - INSET * 2);
+        int height = Math.max(0, bounds.getHeight() - INSET * 2);
+        int availableWidth = Math.max(0, width - GAP);
+        int leftWidth = availableWidth * 48 / 100;
+        int rightWidth = Math.max(0, availableWidth - leftWidth);
+        int heroHeight = Math.min(30, Math.max(24, height / 11));
+        int ticketHeight = Math.min(84, Math.max(76, height * 24 / 100));
+        int bookY = y + heroHeight + GAP;
+        int bookHeight = Math.max(0, height - heroHeight - ticketHeight - GAP * 2);
+        int ticketY = bookY + bookHeight + GAP;
+
+        GuiRect hero = new GuiRect(x, y, leftWidth, heroHeight);
+        GuiRect book = new GuiRect(x, bookY, leftWidth, bookHeight);
+        GuiRect ticket = new GuiRect(x, ticketY, leftWidth, ticketHeight);
+        GuiRect chart = new GuiRect(x + leftWidth + GAP, y, rightWidth, height);
+        GuiRect footer = new GuiRect(x, y + height, 0, 0);
         return new MarketDetailLayout(hero, chart, book, ticket, footer);
     }
 }

@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Optional;
 
 import com.jsirgalaxybase.modules.core.market.domain.MarketOrder;
+import com.jsirgalaxybase.modules.core.market.domain.MarketOrderHistoryPage;
+import com.jsirgalaxybase.modules.core.market.domain.MarketOrderHistoryQuery;
 
 public interface MarketOrderBookRepository {
 
@@ -31,6 +33,15 @@ public interface MarketOrderBookRepository {
 
 	default List<MarketOrder> findOrdersByOwnerAndProductKey(String ownerPlayerRef, String productKey, int limit) {
 		return Collections.emptyList();
+	}
+
+	/** Recent orders across every standardized product for the personal history workspace. */
+	default List<MarketOrder> findOrdersByOwner(String ownerPlayerRef, int limit) {
+		return Collections.emptyList();
+	}
+
+	default MarketOrderHistoryPage findOrderHistory(String ownerPlayerRef, MarketOrderHistoryQuery query) {
+		return new MarketOrderHistoryPage(Collections.<MarketOrder>emptyList(), 0, query.getPageIndex(), query.getPageSize());
 	}
 
 	default List<String> findActiveProductKeys(int limit) {

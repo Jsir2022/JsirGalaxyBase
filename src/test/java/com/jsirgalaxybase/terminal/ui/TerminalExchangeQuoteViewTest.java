@@ -24,10 +24,10 @@ public class TerminalExchangeQuoteViewTest {
                     "星光币"),
                 new ExchangeMarketRuleVersion(TaskCoinExchangePlanner.RULE_VERSION, "汇率市场任务书硬币固定规则 v1"),
                 new ExchangeMarketLimitPolicy(ExchangeMarketLimitStatus.ALLOWED, "TASK_COIN_RULE_APPLIED",
-                    "当前为汇率市场 v1 固定规则报价源；兼容旧 market quote/exchange hand 入口。"),
+                    "当前为汇率市场 v1 固定规则报价源；玩家操作仅通过银河终端 UI。"),
                 "req-quote-1", "player-a", "s1-test", "dreamcraft:item.CoinChemistII", "Chemist", "II", 100L,
                 3L, 300L, 300L, 300L, 300L, 3L, 0,
-                "当前为汇率市场 v1 固定规则报价源；兼容旧 market quote/exchange hand 入口。"));
+                "当前为汇率市场 v1 固定规则报价源；玩家操作仅通过银河终端 UI。"));
 
         assertEquals("task-coin-to-starcoin", view.pairCode);
         assertEquals("TASK_COIN", view.inputAssetCode);

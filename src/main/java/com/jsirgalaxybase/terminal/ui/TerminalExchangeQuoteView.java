@@ -68,13 +68,13 @@ final class TerminalExchangeQuoteView {
             case ALLOWED:
             default:
                 serviceState = "汇率市场在线 / 已生成正式报价";
-                executionHint = "确认后将把当前手持硬币兑换为 "
+                executionHint = "确认后将把所选 Base Vault 硬币兑换为 "
                     + formatAmount(quote.getEffectiveExchangeValue()) + " STARCOIN。";
                 break;
         }
         return new TerminalExchangeQuoteView(
             serviceState,
-            safeText(heldSummary, "当前未检测到手持物品"),
+            safeText(heldSummary, "当前未选择 Base Vault 资产"),
             safeText(quote.getInputRegistryName(), "--"),
             safeText(quote.getPairDefinition().getPairCode(), "--"),
             safeText(quote.getPairDefinition().getInputAssetCode(), "--"),
@@ -97,7 +97,7 @@ final class TerminalExchangeQuoteView {
         String notes, String executionHint) {
         return new TerminalExchangeQuoteView(
             safeText(serviceState, "汇率市场离线"),
-            safeText(heldSummary, "当前未检测到手持物品"),
+            safeText(heldSummary, "当前未选择 Base Vault 资产"),
             safeText(inputRegistryName, "--"),
             "--",
             "--",

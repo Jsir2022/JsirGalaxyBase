@@ -16,14 +16,14 @@ final class TerminalMarketSectionContent {
         }
         List<String> lines = new ArrayList<String>();
         lines.add("服务: " + model.getServiceState() + " | 活跃商品: " + countActiveProducts(model));
-        lines.add("CLAIMABLE: " + model.getClaimableQuantity() + " | 冻结资金: " + model.getFrozenFunds());
+        lines.add("待收货: " + model.getClaimableQuantity() + " | 买单冻结资金: " + model.getFrozenFunds());
         return lines;
     }
 
     static OverviewEntrySummary buildStandardizedOverviewEntry(TerminalMarketSectionModel model) {
         String secondary = model == null
             ? "当前没有标准市场状态。"
-            : "活跃 " + countActiveProducts(model) + " | claim " + model.getClaimableQuantity();
+            : "活跃 " + countActiveProducts(model) + " | 待收货 " + model.getClaimableQuantity();
         return new OverviewEntrySummary(
             "标准商品市场",
             "目录商品、订单簿、仓储与即时成交",
@@ -92,7 +92,7 @@ final class TerminalMarketSectionContent {
 
     static String buildProductCatalogEmptyTitle(TerminalMarketSectionModel model) {
         if (model == null) {
-            return "市场快照未加载";
+            return "市场数据尚未加载";
         }
         if (normalize(model.getServiceState()).contains("不可用")) {
             return "市场服务不可用";
@@ -102,7 +102,7 @@ final class TerminalMarketSectionContent {
 
     static String buildProductCatalogEmptyReason(TerminalMarketSectionModel model) {
         if (model == null) {
-            return "等待服务端回写标准商品市场 snapshot。";
+            return "正在读取标准商品目录，请稍候。";
         }
         String hint = normalize(model.getBrowserHint());
         if (!hint.isEmpty()) {
@@ -148,7 +148,7 @@ final class TerminalMarketSectionContent {
             return Collections.singletonList("当前没有仓储状态。");
         }
         List<String> lines = new ArrayList<String>();
-        lines.add("AVAILABLE / ESCROW / CLAIMABLE: " + model.getSourceAvailable() + " / "
+        lines.add("可售 / 卖单锁定 / 待收货: " + model.getSourceAvailable() + " / "
             + model.getLockedEscrowQuantity() + " / " + model.getClaimableQuantity());
         lines.add("冻结资金: " + model.getFrozenFunds());
         lines.add("来源目录: " + model.getSourceMode());
@@ -250,7 +250,7 @@ final class TerminalMarketSectionContent {
             return "市场快照未加载，不能存入。";
         }
         if (model.isDepositEnabled()) {
-            return "从个人仓存入 AVAILABLE 后，才能继续卖出。";
+            return "个人账户仓库存不足，无法继续卖出。";
         }
         if (!hasProductCatalog(model)) {
             return "当前没有可存入的标准化物品或标准商品目录。";
@@ -494,11 +494,30 @@ final class TerminalMarketSectionContent {
         private final String orderId;
         private final String detail;
         private final boolean cancelable;
+        private final String productKey;
+        private final String side;
+        private final String status;
+        private final String createdAt;
+        private final String displayName;
+        private final String unitPrice;
+        private final String originalQuantity;
+        private final String filledQuantity;
+        private final String remainingQuantity;
 
         OrderEntry(String orderId, String detail, boolean cancelable) {
             this.orderId = normalize(orderId);
             this.detail = normalize(detail);
             this.cancelable = cancelable;
+            String[] parts = this.detail.split("\\|");
+            this.productKey = part(parts, 1);
+            this.side = part(parts, 2).toUpperCase(java.util.Locale.ROOT);
+            this.status = part(parts, 7).toUpperCase(java.util.Locale.ROOT);
+            this.createdAt = part(parts, 8);
+            this.displayName = part(parts, 9).isEmpty() ? productKey : part(parts, 9);
+            this.unitPrice = stripLabel(part(parts, 3), "价");
+            this.originalQuantity = stripLabel(part(parts, 4), "总");
+            this.filledQuantity = stripLabel(part(parts, 5), "成");
+            this.remainingQuantity = stripLabel(part(parts, 6), "剩");
         }
 
         String getOrderId() {
@@ -511,6 +530,81 @@ final class TerminalMarketSectionContent {
 
         boolean isCancelable() {
             return cancelable && !orderId.isEmpty();
+        }
+
+        String getProductKey() { return productKey; }
+        String getSide() { return side; }
+        String getStatus() { return status; }
+        String getCreatedAt() { return createdAt; }
+        String getDisplayName() { return displayName; }
+        String getUnitPrice() { return unitPrice; }
+        String getOriginalQuantity() { return originalQuantity; }
+        String getFilledQuantity() { return filledQuantity; }
+        String getRemainingQuantity() { return remainingQuantity; }
+
+        String getSideLabel() {
+            return "BUY".equals(side) ? "买" : "SELL".equals(side) ? "卖" : "--";
+        }
+
+        String getStatusLabel() {
+            if ("OPEN".equals(status)) return "未成交";
+            if ("PARTIALLY_FILLED".equals(status)) return "部分成交";
+            if ("FILLED".equals(status) || "COMPLETED".equals(status)) return "已成交";
+            if ("CANCELLED".equals(status) || "CANCELED".equals(status)) return "已撤销";
+            if ("REJECTED".equals(status)) return "已拒绝";
+            if ("EXPIRED".equals(status)) return "已过期";
+            return status.isEmpty() ? "--" : status;
+        }
+
+        boolean matches(TerminalMarketSectionState state, String selectedProductKey) {
+            if (state == null) return true;
+            if (state.isHistoryCurrentProductOnly() && !normalize(selectedProductKey).equals(productKey)) return false;
+            if (state.getHistorySide() != TerminalMarketSectionState.HistorySide.ALL
+                && !state.getHistorySide().name().equals(side)) return false;
+            if (!matchesStatus(state.getHistoryStatus())) return false;
+            return matchesTime(state.getHistoryTime());
+        }
+
+        String getCompactSummary() {
+            String[] parts = detail.split("\\|");
+            String price = part(parts, 3);
+            String filled = part(parts, 5);
+            String remaining = part(parts, 6);
+            return price + " / " + filled + " / " + remaining;
+        }
+
+        private boolean matchesStatus(TerminalMarketSectionState.HistoryStatus filter) {
+            if (filter == TerminalMarketSectionState.HistoryStatus.ALL) return true;
+            if (filter == TerminalMarketSectionState.HistoryStatus.OPEN) {
+                return "OPEN".equals(status) || "PARTIALLY_FILLED".equals(status);
+            }
+            if (filter == TerminalMarketSectionState.HistoryStatus.FILLED) {
+                return "FILLED".equals(status) || "COMPLETED".equals(status);
+            }
+            return "CANCELLED".equals(status) || "CANCELED".equals(status) || "REJECTED".equals(status)
+                || "EXPIRED".equals(status);
+        }
+
+        private boolean matchesTime(TerminalMarketSectionState.HistoryTime filter) {
+            if (filter == TerminalMarketSectionState.HistoryTime.ALL || createdAt.isEmpty()) return true;
+            try {
+                long ageMillis = System.currentTimeMillis() - java.time.Instant.parse(createdAt).toEpochMilli();
+                long days = filter == TerminalMarketSectionState.HistoryTime.DAY ? 1L
+                    : filter == TerminalMarketSectionState.HistoryTime.WEEK ? 7L : 30L;
+                return ageMillis >= 0L && ageMillis <= days * 24L * 60L * 60L * 1000L;
+            } catch (RuntimeException ignored) {
+                return false;
+            }
+        }
+
+        private static String part(String[] parts, int index) {
+            return parts != null && index >= 0 && index < parts.length ? normalize(parts[index]) : "";
+        }
+
+        private static String stripLabel(String value, String label) {
+            String normalized = normalize(value);
+            String prefix = normalize(label);
+            return normalized.startsWith(prefix) ? normalize(normalized.substring(prefix.length())) : normalized;
         }
     }
 

@@ -10,6 +10,8 @@ interface TerminalMarketSnapshotRequest {
 
     String getBrowserFilter();
 
+    String getBrowserSort();
+
     String getChartRange();
 
     long parseInstantBuyQuantity();

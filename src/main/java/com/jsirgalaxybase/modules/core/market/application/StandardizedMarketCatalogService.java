@@ -52,7 +52,7 @@ public class StandardizedMarketCatalogService implements StandardizedMarketProdu
     @Override
     public StandardizedMarketAdmissionDecision evaluateStack(ItemStack stack) {
         if (stack == null || stack.getItem() == null || stack.stackSize <= 0) {
-            return rejectedDecision("当前手持物品不是可用于标准商品市场目录判定的真实物品堆。",
+            return rejectedDecision("当前所选资产不是可用于标准商品市场目录判定的真实物品堆。",
                 StandardizedMarketAdmissionReason.INVALID_STACK);
         }
         return catalogSource.findEntryByStack(stack)
@@ -67,7 +67,7 @@ public class StandardizedMarketCatalogService implements StandardizedMarketProdu
 
                 @Override
                 public StandardizedMarketAdmissionDecision get() {
-                    return rejectedDecision("当前手持物品不在标准商品市场目录 " + catalogVersion.getVersionKey()
+                    return rejectedDecision("当前所选资产不在标准商品市场目录 " + catalogVersion.getVersionKey()
                         + " 的准入边界内；当前目录来源为 " + catalogSource.getSourceDescription() + "。",
                         StandardizedMarketAdmissionReason.CATALOG_BOUNDARY_REJECTED);
                 }

@@ -37,10 +37,15 @@ public class TerminalSnapshotMessage implements IMessage {
     private List<TerminalHomeScreenModel.PageSnapshotModel> pageSnapshots = new ArrayList<TerminalHomeScreenModel.PageSnapshotModel>();
     private List<TerminalHomeScreenModel.NotificationModel> notifications = new ArrayList<TerminalHomeScreenModel.NotificationModel>();
     private String sessionToken;
+    private long requestSequence;
 
     public TerminalSnapshotMessage() {}
 
     public TerminalSnapshotMessage(TerminalOpenApproval approval) {
+        this(approval, 0L);
+    }
+
+    public TerminalSnapshotMessage(TerminalOpenApproval approval, long requestSequence) {
         this.selectedPageId = approval.getSelectedPageId();
         this.terminalTitle = approval.getTerminalTitle();
         this.terminalSubtitle = approval.getTerminalSubtitle();
@@ -53,6 +58,7 @@ public class TerminalSnapshotMessage implements IMessage {
         this.pageSnapshots = toPageSnapshotModels(approval.getPageSnapshots());
         this.notifications = toNotificationModels(approval.getNotifications());
         this.sessionToken = approval.getSessionToken();
+        this.requestSequence = Math.max(0L, requestSequence);
     }
 
     @Override
@@ -69,6 +75,7 @@ public class TerminalSnapshotMessage implements IMessage {
         pageSnapshots = OpenTerminalApprovedMessage.readPageSnapshots(buf);
         notifications = OpenTerminalApprovedMessage.readNotifications(buf);
         sessionToken = ByteBufUtils.readUTF8String(buf);
+        requestSequence = buf.readableBytes() >= 8 ? Math.max(0L, buf.readLong()) : 0L;
     }
 
     @Override
@@ -85,6 +92,7 @@ public class TerminalSnapshotMessage implements IMessage {
         OpenTerminalApprovedMessage.writePageSnapshots(buf, pageSnapshots);
         OpenTerminalApprovedMessage.writeNotifications(buf, notifications);
         ByteBufUtils.writeUTF8String(buf, safe(sessionToken));
+        buf.writeLong(requestSequence);
     }
 
     public TerminalHomeScreenModel toScreenModel() {
@@ -102,6 +110,10 @@ public class TerminalSnapshotMessage implements IMessage {
             pageSnapshots,
             notifications,
             sessionToken);
+    }
+
+    public long getRequestSequence() {
+        return requestSequence;
     }
 
     private static List<TerminalHomeScreenModel.NavItemModel> toNavItemModels(List<TerminalOpenApproval.NavItem> items) {
@@ -205,7 +217,10 @@ public class TerminalSnapshotMessage implements IMessage {
             new TerminalCustomMarketSectionModel.ActionFeedbackModel(
                 snapshot.getActionFeedback().getTitle(),
                 snapshot.getActionFeedback().getBody(),
-                snapshot.getActionFeedback().getSeverityName()));
+                snapshot.getActionFeedback().getSeverityName())).withBrowsePage(
+                    snapshot.getBrowseEntries(), snapshot.getBrowseQuery(), snapshot.getBrowsePageIndex(),
+                    snapshot.getBrowsePageSize(), snapshot.getBrowseTotalEntries(), snapshot.hasPreviousPage(),
+                    snapshot.hasNextPage());
     }
 
     private static TerminalExchangeMarketSectionModel toExchangeMarketSectionModel(
@@ -219,6 +234,7 @@ public class TerminalSnapshotMessage implements IMessage {
             snapshot.getTargetCodes(),
             snapshot.getTargetLabels(),
             snapshot.getSelectedTargetCode(),
+            snapshot.getSelectedCoinCode(),
             snapshot.getSelectedTargetTitle(),
             snapshot.getSelectedTargetSummary(),
             snapshot.getHeldSummary(),
@@ -241,7 +257,10 @@ public class TerminalSnapshotMessage implements IMessage {
             new TerminalExchangeMarketSectionModel.ActionFeedbackModel(
                 snapshot.getActionFeedback().getTitle(),
                 snapshot.getActionFeedback().getBody(),
-                snapshot.getActionFeedback().getSeverityName()));
+                snapshot.getActionFeedback().getSeverityName())).withBrowsePage(
+                    snapshot.getBrowseEntries(), snapshot.getBrowseQuery(), snapshot.getBrowsePageIndex(),
+                    snapshot.getBrowsePageSize(), snapshot.getBrowseTotalEntries(), snapshot.hasPreviousPage(),
+                    snapshot.hasNextPage());
     }
 
     private static TerminalBankSectionModel toBankSectionModel(TerminalBankSectionSnapshot snapshot) {
@@ -344,7 +363,14 @@ public class TerminalSnapshotMessage implements IMessage {
                     snapshot.getCatalogTotalEntries(),
                     snapshot.hasCatalogPreviousPage(),
                     snapshot.hasCatalogNextPage())
-                .withVaultAssets(toVaultAssets(snapshot));
+                .withVaultAssets(toVaultAssets(snapshot))
+                .withHistoryPage(
+                    snapshot.getMyOrderLines(),
+                    snapshot.getMyOrderIds(),
+                    snapshot.getMyOrderCancelableFlags(),
+                    snapshot.getHistoryTotalEntries(),
+                    snapshot.getHistoryPageIndex(),
+                    snapshot.getHistoryPageSize());
     }
 
     private static List<TerminalMarketSectionModel.CatalogProductModel> toCatalogProducts(
@@ -365,7 +391,9 @@ public class TerminalSnapshotMessage implements IMessage {
         List<TerminalMarketSectionModel.PricePointModel> points = new ArrayList<TerminalMarketSectionModel.PricePointModel>();
         if (summary != null) {
             for (TerminalMarketSectionSnapshot.PricePoint point : summary.getPricePoints()) {
-                points.add(new TerminalMarketSectionModel.PricePointModel(point.getPrice(), point.getQuantity(), point.getCreatedAtEpochSeconds()));
+                points.add(new TerminalMarketSectionModel.PricePointModel(point.getOpen(), point.getHigh(),
+                    point.getLow(), point.getPrice(), point.getQuantity(), point.getTurnover(),
+                    point.getCreatedAtEpochSeconds(), point.getSource()));
             }
             return new TerminalMarketSectionModel.CatalogMarketSummaryModel(summary.getLatestTrade(), summary.getBestBid(),
                 summary.getBestAsk(), summary.getVolume24h(), summary.getAvailable(), summary.getEscrow(),
@@ -424,7 +452,7 @@ public class TerminalSnapshotMessage implements IMessage {
 
         @Override
         public IMessage onMessage(TerminalSnapshotMessage message, MessageContext ctx) {
-            TerminalClientScreenController.INSTANCE.queueHomeScreen(message.toScreenModel());
+            TerminalClientScreenController.INSTANCE.queueHomeScreen(message.toScreenModel(), message.requestSequence);
             return null;
         }
     }

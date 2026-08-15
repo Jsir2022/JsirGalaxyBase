@@ -18,7 +18,7 @@ import com.jsirgalaxybase.modules.core.banking.application.BankPostingResult;
 import com.jsirgalaxybase.modules.core.banking.application.BankingApplicationService;
 import com.jsirgalaxybase.modules.core.banking.application.BankingConstants;
 import com.jsirgalaxybase.modules.core.banking.application.BankingException;
-import com.jsirgalaxybase.modules.core.banking.application.command.OpenAccountCommand;
+import com.jsirgalaxybase.modules.core.banking.application.PlayerBankAccountProvisioner;
 import com.jsirgalaxybase.modules.core.banking.application.command.PlayerTransferCommand;
 import com.jsirgalaxybase.modules.core.banking.domain.BankAccount;
 import com.jsirgalaxybase.modules.core.banking.domain.BankAccountType;
@@ -244,14 +244,8 @@ public final class TerminalBankingService {
     }
 
     private BankAccount ensurePlayerAccount(BankingApplicationService bankingService, EntityPlayerMP player) {
-        return bankingService.openAccount(new OpenAccountCommand(
-            null,
-            BankAccountType.PLAYER,
-            BankingConstants.OWNER_TYPE_PLAYER_UUID,
-            player.getUniqueID().toString(),
-            BankingConstants.DEFAULT_CURRENCY_CODE,
-            player.getCommandSenderName(),
-            "{\"kind\":\"player\",\"source\":\"terminal_gui\"}"));
+        return PlayerBankAccountProvisioner.ensurePersonalAccount(
+            bankingService, player.getUniqueID(), player.getCommandSenderName());
     }
 
     private long findAccountBalance(BankPostingResult result, long accountId) {

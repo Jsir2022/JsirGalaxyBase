@@ -46,7 +46,7 @@ public class TerminalHomeScreenModel {
             defaultNavItems("home"),
             defaultPageSnapshots(),
             Collections.singletonList(
-                new NotificationModel("终端首页壳已接入", "当前模型已经具备 section 宿主、导航与最小 snapshot 落点。", "INFO")),
+                new NotificationModel("终端首页已接入", "当前页面已具备导航、分区和服务端状态刷新能力。", "INFO")),
             "terminal-session");
     }
 

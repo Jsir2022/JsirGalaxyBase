@@ -68,6 +68,7 @@ public class MarketRecoveryService {
     private boolean supportsAutomaticReconciliation(MarketOperationType operationType) {
         return operationType == MarketOperationType.BUY_ORDER_CREATE
             || operationType == MarketOperationType.BUY_ORDER_CANCEL
+            || operationType == MarketOperationType.SELL_ORDER_CANCEL
             || operationType == MarketOperationType.CLAIMABLE_ASSET_CLAIM
             || operationType == MarketOperationType.INVENTORY_DEPOSIT
             || operationType == MarketOperationType.EXCHANGE_EXECUTION;
@@ -77,6 +78,9 @@ public class MarketRecoveryService {
         if (settlementFacade != null && (candidate.getOperationType() == MarketOperationType.BUY_ORDER_CREATE
             || candidate.getOperationType() == MarketOperationType.BUY_ORDER_CANCEL)) {
             return recoverBuySideFunds(candidate);
+        }
+        if (candidate.getOperationType() == MarketOperationType.SELL_ORDER_CANCEL) {
+            return reconcileSellOrderCancellation(candidate);
         }
         if (candidate.getOperationType() == MarketOperationType.CLAIMABLE_ASSET_CLAIM) {
             return recoverClaimOperation(candidate);
@@ -88,6 +92,30 @@ public class MarketRecoveryService {
             return recoverExchangeOperation(candidate);
         }
         return escalateGeneric(candidate);
+    }
+
+    private MarketOperationLog reconcileSellOrderCancellation(final MarketOperationLog candidate) {
+        return transactionRunner.inTransaction(new Supplier<MarketOperationLog>() {
+
+            @Override
+            public MarketOperationLog get() {
+                if (candidate.getRelatedOrderId() <= 0L) {
+                    return escalateGeneric(candidate);
+                }
+                Optional<MarketOrder> existingOrder = orderRepository.findById(candidate.getRelatedOrderId());
+                if (!existingOrder.isPresent()) {
+                    return escalateGeneric(candidate);
+                }
+                MarketOrderStatus status = existingOrder.get().getStatus();
+                if (status == MarketOrderStatus.FILLED || status == MarketOrderStatus.CANCELLED) {
+                    return operationLogRepository.update(candidate.withState(MarketOperationStatus.FAILED,
+                        candidate.getRelatedOrderId(), candidate.getRelatedCustodyId(), candidate.getRelatedTradeId(),
+                        "cancellation rejected safely: linked order is already " + status.name(),
+                        candidate.getRecoveryMetadataKey(), Instant.now()));
+                }
+                return escalateGeneric(candidate);
+            }
+        });
     }
 
     private MarketOperationLog recoverExchangeOperation(final MarketOperationLog candidate) {

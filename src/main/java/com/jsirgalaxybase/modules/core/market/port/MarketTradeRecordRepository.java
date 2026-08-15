@@ -20,6 +20,11 @@ public interface MarketTradeRecordRepository {
         return Collections.emptyList();
     }
 
+    /** Latest trade strictly before the requested chart window. */
+    default MarketTradeRecord findLatestByProductKeyBefore(String productKey, Instant before) {
+        return null;
+    }
+
     /** One page-level history read for terminal browse summaries. */
     default List<MarketTradeRecord> findByProductKeysSince(List<String> productKeys, Instant since, int limit) {
         return Collections.emptyList();

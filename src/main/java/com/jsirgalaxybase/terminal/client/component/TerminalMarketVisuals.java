@@ -5,10 +5,17 @@ import java.lang.reflect.Method;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.util.EnumChatFormatting;
 
 import com.jsirgalaxybase.client.gui.framework.RoundedRectPainter;
 
 final class TerminalMarketVisuals {
+
+    enum StatusIconKind {
+        INVENTORY,
+        DELIVERY,
+        ORDERS
+    }
 
     static final int COLOR_BLUE = 0xFF3268C0;
     static final int COLOR_BROWN = 0xFF82603B;
@@ -81,6 +88,22 @@ final class TerminalMarketVisuals {
         return new ItemStack((Item) object, Math.max(1, parsed.stackSize), Math.max(0, parsed.meta));
     }
 
+    static String resolveLocalizedItemName(String iconRef, String fallback) {
+        ItemStack stack = resolveItemStack(iconRef);
+        if (stack != null) {
+            try {
+                String localized = EnumChatFormatting.getTextWithoutFormattingCodes(stack.getDisplayName());
+                if (localized != null && !localized.trim().isEmpty()) {
+                    return localized.trim();
+                }
+            } catch (RuntimeException ignored) {
+                // Broken third-party localization must not make the market unusable.
+            }
+        }
+        String safeFallback = fallback == null ? "" : fallback.trim();
+        return safeFallback.isEmpty() ? "--" : safeFallback;
+    }
+
     static void drawMarketIcon(int x, int y, int size, int kind) {
         if (kind == 1) {
             drawCrate(x, y, size, COLOR_BROWN);
@@ -138,6 +161,27 @@ final class TerminalMarketVisuals {
         Gui.drawRect(x, y + 2, x + 8, y + 6, darken(color));
         Gui.drawRect(x + 2, y, x + 6, y + 8, darken(color));
         Gui.drawRect(x + 2, y + 2, x + 6, y + 6, color);
+    }
+
+    static void drawStatusIcon(int x, int y, boolean active, StatusIconKind kind) {
+        int color = active ? COLOR_GREEN : 0xFF68727D;
+        int dark = darken(color);
+        if (kind == StatusIconKind.DELIVERY) {
+            Gui.drawRect(x + 1, y + 6, x + 9, y + 9, dark);
+            Gui.drawRect(x + 4, y, x + 6, y + 6, color);
+            Gui.drawRect(x + 2, y + 3, x + 8, y + 5, color);
+            return;
+        }
+        if (kind == StatusIconKind.ORDERS) {
+            Gui.drawRect(x + 1, y, x + 8, y + 9, dark);
+            Gui.drawRect(x + 3, y + 2, x + 7, y + 3, color);
+            Gui.drawRect(x + 3, y + 4, x + 7, y + 5, color);
+            Gui.drawRect(x + 3, y + 6, x + 6, y + 7, color);
+            return;
+        }
+        Gui.drawRect(x, y + 2, x + 9, y + 9, dark);
+        Gui.drawRect(x + 1, y + 3, x + 8, y + 5, color);
+        Gui.drawRect(x + 4, y + 3, x + 5, y + 9, dark);
     }
 
     static void drawAccentFrame(int x, int y, int width, int height, int border, int fill) {

@@ -18,17 +18,17 @@ final class TerminalMarketShell {
         if (snapshot == null) {
             return "市场";
         }
-        if (snapshot.hasMarketSectionModel()) {
-            TerminalMarketSectionModel market = snapshot.getMarketSectionModel();
-            return market != null && market.isOverviewRoute()
-                ? "市场 / 总入口"
-                : "市场 / 标准商品 / 交易台";
-        }
         if (snapshot.hasCustomMarketSectionModel()) {
             return "市场 / 定制商品";
         }
         if (snapshot.hasExchangeMarketSectionModel()) {
             return "市场 / 汇率市场";
+        }
+        if (snapshot.hasMarketSectionModel()) {
+            TerminalMarketSectionModel market = snapshot.getMarketSectionModel();
+            return market != null && market.isOverviewRoute()
+                ? "市场 / 总入口"
+                : "市场 / 标准商品 / 交易台";
         }
         String navLabel = model == null || model.getSelectedNavItem() == null ? "市场" : model.getSelectedNavItem().getLabel();
         String title = snapshot.getTitle() == null ? "" : snapshot.getTitle();

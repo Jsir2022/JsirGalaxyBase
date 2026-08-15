@@ -79,7 +79,14 @@ public final class TerminalMarketActionMessageFactory {
             || !marketSectionState.hasPendingCancelOrderSelection()) {
             return null;
         }
-        return createMarketActionMessage(screenModel, TerminalActionType.MARKET_CANCEL_ORDER, marketSectionState);
+        TerminalMarketActionPayload payload = marketSectionState.isStandardizedHistoryView()
+            ? marketSectionState.toHistoryPayload()
+            : marketSectionState.toPayload();
+        return new TerminalActionMessage(
+            screenModel.getSessionToken(),
+            screenModel.getSelectedPageId(),
+            TerminalActionType.MARKET_CANCEL_ORDER.getId(),
+            marketSectionState.isStandardizedHistoryView() ? payload.encodeHistory() : payload.encode());
     }
 
     public static TerminalActionMessage createClaimMessage(TerminalHomeScreenModel screenModel,

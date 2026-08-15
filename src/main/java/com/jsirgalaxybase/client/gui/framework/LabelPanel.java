@@ -41,13 +41,20 @@ public class LabelPanel extends AbstractGuiPanel {
 
         FontRenderer fontRenderer = minecraft.fontRenderer;
         GuiRect bounds = getBounds();
+        if (bounds.getWidth() <= 0 || bounds.getHeight() <= 0) {
+            return;
+        }
         int availableWidth = Math.max(8, Math.round((bounds.getWidth() - 8) / textScale));
         String text = textSupplier == null ? "" : textSupplier.get();
         List<String> lines = safeWrap(fontRenderer, text == null ? "" : text, availableWidth);
         int color = scene.getTheme().color(colorKey);
         int lineY = bounds.getY() + 2;
         int lineStep = Math.max(7, Math.round(10 * textScale));
+        int glyphHeight = Math.max(6, Math.round(8 * textScale));
         for (String line : lines) {
+            if (lineY + glyphHeight > bounds.getBottom()) {
+                break;
+            }
             int lineWidth = Math.round(fontRenderer.getStringWidth(line) * textScale);
             int drawX = centered
                 ? bounds.getX() + Math.max(0, (bounds.getWidth() - lineWidth) / 2)
@@ -58,9 +65,6 @@ public class LabelPanel extends AbstractGuiPanel {
             fontRenderer.drawStringWithShadow(line, 0, 0, color);
             GL11.glPopMatrix();
             lineY += lineStep;
-            if (lineY > bounds.getBottom() - lineStep) {
-                break;
-            }
         }
     }
 

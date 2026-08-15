@@ -59,7 +59,10 @@ public final class BaseVaultService {
         return viewVault(VaultAccountType.PERSONAL, playerRef);
     }
 
-    /** Reads any finite Vault account. Callers must authorize non-personal accounts first. */
+    /**
+     * Trusted storage read. Player-facing callers must authorize through
+     * {@link VaultAccessService}, especially for enterprise and public accounts.
+     */
     public VaultView viewVault(VaultAccountType accountType, String accountRef) {
         VaultAccount account = repository.ensureAccount(requireAccountType(accountType), requireText(accountRef, "accountRef"));
         return new VaultView(account, fillSlots(account, repository.findSlots(account.getAccountId())));
@@ -72,7 +75,7 @@ public final class BaseVaultService {
 
     /**
      * Server-authoritative sort for personal, enterprise, and public Base Vault
-     * accounts. The caller owns authorization; this service owns the atomic
+     * accounts. Player-facing callers use {@link VaultAccessService}; this service owns the atomic
      * account lock, slot rewrite, and audit evidence.
      */
     public VaultSortResult sortVault(final String requestId, final VaultAccountType accountType,

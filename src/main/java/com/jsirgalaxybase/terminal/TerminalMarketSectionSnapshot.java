@@ -37,9 +37,9 @@ public final class TerminalMarketSectionSnapshot {
     private final String instantSellPreview;
     private final List<String> askLines;
     private final List<String> bidLines;
-    private final List<String> myOrderLines;
-    private final List<String> myOrderIds;
-    private final List<String> myOrderCancelableFlags;
+    private List<String> myOrderLines;
+    private List<String> myOrderIds;
+    private List<String> myOrderCancelableFlags;
     private final List<String> claimLines;
     private final List<String> claimIds;
     private final List<String> ruleLines;
@@ -57,6 +57,9 @@ public final class TerminalMarketSectionSnapshot {
     private boolean catalogHasPreviousPage;
     private boolean catalogHasNextPage;
     private List<VaultAsset> vaultAssets;
+    private int historyTotalEntries;
+    private int historyPageIndex;
+    private int historyPageSize;
 
     public TerminalMarketSectionSnapshot(String routePageId, String serviceState, String browserHint,
         List<String> productKeys, List<String> productLabels, String selectedProductKey, String selectedProductName,
@@ -92,7 +95,7 @@ public final class TerminalMarketSectionSnapshot {
         this.sourceMode = normalize(sourceMode, "当前没有仓储来源说明。");
         this.warehouseNotice = normalize(warehouseNotice, "当前没有仓储提示。");
         this.limitBuyPreview = normalize(limitBuyPreview, "填写价格与数量后，将显示冻结资金摘要。");
-        this.limitSellPreview = normalize(limitSellPreview, "填写价格与数量后，将显示 AVAILABLE 仓储卖出摘要。");
+        this.limitSellPreview = normalize(limitSellPreview, "填写价格与数量后，将显示账户仓卖出摘要。");
         this.instantBuyPreview = normalize(instantBuyPreview, "填写数量后，将按当前卖盘测深。");
         this.instantSellPreview = normalize(instantSellPreview, "填写数量后，将按当前买盘测深。");
         this.askLines = freeze(askLines, Collections.singletonList("当前没有卖盘深度。"));
@@ -100,7 +103,7 @@ public final class TerminalMarketSectionSnapshot {
         this.myOrderLines = freeze(myOrderLines, Collections.singletonList("当前没有个人订单。"));
         this.myOrderIds = freeze(myOrderIds, Collections.singletonList(""));
         this.myOrderCancelableFlags = freeze(myOrderCancelableFlags, Collections.singletonList("0"));
-        this.claimLines = freeze(claimLines, Collections.singletonList("当前没有待提取的 CLAIMABLE 资产。"));
+        this.claimLines = freeze(claimLines, Collections.singletonList("当前没有待收货资产。"));
         this.claimIds = freeze(claimIds, Collections.singletonList(""));
         this.ruleLines = freeze(ruleLines, Collections.singletonList("当前没有规则提示。"));
         this.depositEnabled = depositEnabled;
@@ -117,6 +120,9 @@ public final class TerminalMarketSectionSnapshot {
         this.catalogHasPreviousPage = false;
         this.catalogHasNextPage = false;
         this.vaultAssets = Collections.emptyList();
+        this.historyTotalEntries = 0;
+        this.historyPageIndex = 0;
+        this.historyPageSize = TerminalMarketActionPayload.DEFAULT_HISTORY_PAGE_SIZE;
     }
 
     public static TerminalMarketSectionSnapshot placeholder(String routePageId) {
@@ -144,7 +150,7 @@ public final class TerminalMarketSectionSnapshot {
             "当前没有仓储来源说明。",
             "当前没有仓储提示。",
             "填写价格与数量后，将显示冻结资金摘要。",
-            "填写价格与数量后，将显示 AVAILABLE 仓储卖出摘要。",
+            "填写价格与数量后，将显示账户仓卖出摘要。",
             "填写数量后，将按当前卖盘测深。",
             "填写数量后，将按当前买盘测深。",
             Collections.singletonList("当前没有卖盘深度。"),
@@ -152,7 +158,7 @@ public final class TerminalMarketSectionSnapshot {
             Collections.singletonList("当前没有个人订单。"),
             Collections.singletonList(""),
             Collections.singletonList("0"),
-            Collections.singletonList("当前没有待提取的 CLAIMABLE 资产。"),
+            Collections.singletonList("当前没有待收货资产。"),
             Collections.singletonList(""),
             Collections.singletonList("当前没有规则提示。"),
             false,
@@ -358,6 +364,26 @@ public final class TerminalMarketSectionSnapshot {
 
     public List<VaultAsset> getVaultAssets() { return vaultAssets; }
 
+    public TerminalMarketSectionSnapshot withHistoryPage(List<String> lines, List<String> ids,
+        List<String> cancelableFlags, int totalEntries, int pageIndex, int pageSize) {
+        this.myOrderLines = freezeAllowEmpty(lines);
+        this.myOrderIds = freezeAllowEmpty(ids);
+        this.myOrderCancelableFlags = freezeAllowEmpty(cancelableFlags);
+        this.historyTotalEntries = Math.max(0, totalEntries);
+        this.historyPageIndex = Math.max(0, pageIndex);
+        this.historyPageSize = Math.max(1, pageSize);
+        return this;
+    }
+
+    public int getHistoryTotalEntries() { return historyTotalEntries; }
+    public int getHistoryPageIndex() { return historyPageIndex; }
+    public int getHistoryPageSize() { return historyPageSize; }
+    public int getHistoryTotalPages() {
+        return Math.max(1, (historyTotalEntries + historyPageSize - 1) / historyPageSize);
+    }
+    public boolean hasHistoryPreviousPage() { return historyPageIndex > 0; }
+    public boolean hasHistoryNextPage() { return historyPageIndex + 1 < getHistoryTotalPages(); }
+
     public boolean isOverviewRoute() {
         return TerminalPage.MARKET.getId().equalsIgnoreCase(routePageId);
     }
@@ -369,6 +395,11 @@ public final class TerminalMarketSectionSnapshot {
     private static <T> List<T> freeze(List<T> source, List<T> fallback) {
         List<T> resolved = source == null || source.isEmpty() ? fallback : source;
         return Collections.unmodifiableList(new ArrayList<T>(resolved));
+    }
+
+    private static <T> List<T> freezeAllowEmpty(List<T> source) {
+        return Collections.unmodifiableList(new ArrayList<T>(
+            source == null ? Collections.<T>emptyList() : source));
     }
 
     private static String normalize(String value, String fallback) {
@@ -501,17 +532,47 @@ public final class TerminalMarketSectionSnapshot {
     }
 
     public static final class PricePoint {
+        private final long open;
+        private final long high;
+        private final long low;
         private final long price;
         private final long quantity;
+        private final long turnover;
         private final long createdAtEpochSeconds;
+        private final String source;
         public PricePoint(long price, long quantity, long createdAtEpochSeconds) {
-            this.price = Math.max(0L, price);
-            this.quantity = Math.max(0L, quantity);
-            this.createdAtEpochSeconds = Math.max(0L, createdAtEpochSeconds);
+            this(price, price, price, price, quantity, price * quantity, createdAtEpochSeconds, "TRADE");
         }
+        public PricePoint(long open, long high, long low, long close, long quantity, long turnover,
+            long createdAtEpochSeconds) {
+            this(open, high, low, close, quantity, turnover, createdAtEpochSeconds, "TRADE");
+        }
+        public PricePoint(long open, long high, long low, long close, long quantity, long turnover,
+            long createdAtEpochSeconds, String source) {
+            this.open = Math.max(0L, open);
+            this.high = Math.max(this.open, Math.max(high, close));
+            this.low = Math.max(0L, Math.min(this.open, Math.min(low, close)));
+            this.price = Math.max(0L, close);
+            this.quantity = Math.max(0L, quantity);
+            this.turnover = Math.max(0L, turnover);
+            this.createdAtEpochSeconds = Math.max(0L, createdAtEpochSeconds);
+            this.source = normalizeSource(source);
+        }
+        public long getOpen() { return open; }
+        public long getHigh() { return high; }
+        public long getLow() { return low; }
         public long getPrice() { return price; }
         public long getQuantity() { return quantity; }
+        public long getTurnover() { return turnover; }
         public long getCreatedAtEpochSeconds() { return createdAtEpochSeconds; }
+        public String getSource() { return source; }
+
+        private static String normalizeSource(String source) {
+            if ("CARRY_FORWARD".equals(source) || "REFERENCE".equals(source) || "EMPTY".equals(source)) {
+                return source;
+            }
+            return "TRADE";
+        }
     }
 
     public static final class LimitBuyDraft {

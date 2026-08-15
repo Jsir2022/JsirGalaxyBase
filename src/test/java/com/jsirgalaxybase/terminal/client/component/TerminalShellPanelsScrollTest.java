@@ -131,18 +131,22 @@ public class TerminalShellPanelsScrollTest {
 
     @Test
     public void marketStandardizedSectionKeepsWorkbenchCardsInsideBounds() {
+        TerminalMarketSectionState state = new TerminalMarketSectionState();
+        state.openStandardizedHistory();
         TerminalMarketSection section = new TerminalMarketSection(
             new TerminalPanelFactory(),
             createMarketSectionModel(),
-            new TerminalMarketSectionState(),
+            state,
             null);
 
         section.setBounds(new GuiRect(0, 0, 720, 240));
 
-        assertEquals(2, section.getChildren().size() - 2);
+        assertEquals(3, section.getChildren().size() - 2);
         assertImmediateChildBoundsInside(section);
         assertEquals(0, countImmediateScrollPanels((PanelContainer) section.getChildren().get(2)));
         assertEquals(0, countImmediateScrollPanels((PanelContainer) section.getChildren().get(3)));
+        assertEquals(0, countImmediateScrollPanels((PanelContainer) section.getChildren().get(4)));
+        assertChildBoundsInside((PanelContainer) section.getChildren().get(4));
     }
 
     @Test
@@ -306,6 +310,53 @@ public class TerminalShellPanelsScrollTest {
         assertImmediateChildBoundsInside(exchange);
         assertEquals(0, countAllScrollPanels(custom));
         assertEquals(0, countAllScrollPanels(exchange));
+
+        PanelContainer customToolbar = (PanelContainer) custom.getChildren().get(0);
+        PanelContainer exchangeToolbar = (PanelContainer) exchange.getChildren().get(0);
+        assertEquals(5, customToolbar.getChildren().size());
+        assertEquals(4, exchangeToolbar.getChildren().size());
+        assertChildBoundsInside(customToolbar);
+        assertChildBoundsInside(exchangeToolbar);
+    }
+
+    @Test
+    public void customAndExchangeDetailActionsBelongToTheirDetailContainers() {
+        TerminalCustomMarketSectionModel customModel = new TerminalCustomMarketSectionModel(
+            "在线", "挂牌", "全部挂牌",
+            Collections.singletonList("钻石镐 | 价格 9000"), Collections.singletonList("1"),
+            Collections.<String>emptyList(), Collections.<String>emptyList(),
+            Collections.<String>emptyList(), Collections.<String>emptyList(),
+            "1", "钻石镐", "9000 STARCOIN", "ACTIVE / ESCROW_HELD",
+            "卖家=demo", "minecraft:diamond_pickaxe@0", "尚未成交", "可购买",
+            true, false, false, TerminalCustomMarketSectionModel.ActionFeedbackModel.placeholder());
+        TerminalCustomMarketSectionState customState = new TerminalCustomMarketSectionState();
+        customState.requestDetail("1");
+        customState.applyModel(customModel);
+        TerminalCustomMarketSection custom = new TerminalCustomMarketSection(
+            new TerminalPanelFactory(), customModel, customState, null);
+
+        TerminalExchangeMarketSectionModel exchangeModel = new TerminalExchangeMarketSectionModel(
+            "在线", "报价", Collections.singletonList("task_coin"), Collections.singletonList("任务书硬币"),
+            com.jsirgalaxybase.terminal.TerminalExchangeMarketActionPayload.TARGET_TASK_COIN,
+            "魔法师币 $100", "DarkWizard / II", "个人仓第 1 格", "dreamcraft:itemQuestBook@0",
+            "TASK_COIN_100_TO_STARCOIN", "TASK_COIN", "STARCOIN", "v1", "AVAILABLE", "OK", "",
+            "1", "100", "100", "100", "无折扣", "1:1", "可兑换", true,
+            TerminalExchangeMarketSectionModel.ActionFeedbackModel.placeholder());
+        TerminalExchangeMarketSectionState exchangeState = new TerminalExchangeMarketSectionState();
+        exchangeState.requestDetail("dreamcraft:itemQuestBook@0");
+        exchangeState.applyModel(exchangeModel);
+        TerminalExchangeMarketSection exchange = new TerminalExchangeMarketSection(
+            new TerminalPanelFactory(), exchangeModel, exchangeState, null);
+
+        custom.setBounds(new GuiRect(0, 0, 460, 220));
+        exchange.setBounds(new GuiRect(0, 0, 460, 220));
+
+        PanelContainer customDetail = (PanelContainer) custom.getChildren().get(2);
+        PanelContainer exchangeDetail = (PanelContainer) exchange.getChildren().get(2);
+        assertEquals(3, customDetail.getChildren().size());
+        assertEquals(2, exchangeDetail.getChildren().size());
+        assertChildBoundsInside(customDetail);
+        assertChildBoundsInside(exchangeDetail);
     }
 
     @Test
@@ -364,10 +415,30 @@ public class TerminalShellPanelsScrollTest {
             null,
             null,
             null);
+        TerminalHomeScreenModel.PageSnapshotModel customSnapshot = new TerminalHomeScreenModel.PageSnapshotModel(
+            "market_custom",
+            "定制市场",
+            "custom",
+            Collections.singletonList(TerminalHomeScreenModel.SectionModel.placeholder()),
+            null,
+            createMarketSectionModel(),
+            TerminalCustomMarketSectionModel.placeholder(),
+            null);
+        TerminalHomeScreenModel.PageSnapshotModel exchangeSnapshot = new TerminalHomeScreenModel.PageSnapshotModel(
+            "market_exchange",
+            "汇率市场",
+            "exchange",
+            Collections.singletonList(TerminalHomeScreenModel.SectionModel.placeholder()),
+            null,
+            createMarketSectionModel(),
+            null,
+            TerminalExchangeMarketSectionModel.placeholder());
         TerminalHomeScreenModel model = createHomeModel(5, 1, 0).withSelectedPageId("market");
 
         assertEquals("市场 / 总入口", TerminalMarketShell.buildStatusBandText(model, overviewSnapshot));
         assertEquals("市场 / 标准商品 / 交易台", TerminalMarketShell.buildStatusBandText(model, standardizedSnapshot));
+        assertEquals("市场 / 定制商品", TerminalMarketShell.buildStatusBandText(model, customSnapshot));
+        assertEquals("市场 / 汇率市场", TerminalMarketShell.buildStatusBandText(model, exchangeSnapshot));
     }
 
     @Test

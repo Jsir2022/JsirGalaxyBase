@@ -102,9 +102,17 @@ public final class TerminalShellPanels {
 
         void openCancelOrderConfirm(String orderId);
 
+        default void openStandardizedHistory() {}
+
+        default void refreshStandardizedHistory() {}
+
         void openClaimConfirm(String custodyId);
 
         void selectCustomListing(String scope, String listingId);
+
+        void refreshCustomBrowse();
+
+        void changeCustomBrowsePage(int pageIndex);
 
         void openCustomBuyConfirm();
 
@@ -115,6 +123,10 @@ public final class TerminalShellPanels {
         void openCustomClaimConfirm();
 
         void selectExchangeTarget(String targetCode);
+
+        void refreshExchangeBrowse();
+
+        void changeExchangeBrowsePage(int pageIndex);
 
         void refreshExchangeQuote();
 
@@ -308,6 +320,16 @@ public final class TerminalShellPanels {
                     }
 
                     @Override
+                    public void refreshBrowse() {
+                        if (marketActionHandler != null) marketActionHandler.refreshCustomBrowse();
+                    }
+
+                    @Override
+                    public void changeBrowsePage(int pageIndex) {
+                        if (marketActionHandler != null) marketActionHandler.changeCustomBrowsePage(pageIndex);
+                    }
+
+                    @Override
                     public void openBuyConfirm() {
                         if (marketActionHandler != null) {
                             marketActionHandler.openCustomBuyConfirm();
@@ -348,6 +370,16 @@ public final class TerminalShellPanels {
                         if (marketActionHandler != null) {
                             marketActionHandler.selectExchangeTarget(targetCode);
                         }
+                    }
+
+                    @Override
+                    public void refreshBrowse() {
+                        if (marketActionHandler != null) marketActionHandler.refreshExchangeBrowse();
+                    }
+
+                    @Override
+                    public void changeBrowsePage(int pageIndex) {
+                        if (marketActionHandler != null) marketActionHandler.changeExchangeBrowsePage(pageIndex);
                     }
 
                     @Override
@@ -476,6 +508,16 @@ public final class TerminalShellPanels {
                         if (marketActionHandler != null) {
                             marketActionHandler.openCancelOrderConfirm(orderId);
                         }
+                    }
+
+                    @Override
+                    public void openStandardizedHistory() {
+                        if (marketActionHandler != null) marketActionHandler.openStandardizedHistory();
+                    }
+
+                    @Override
+                    public void refreshStandardizedHistory() {
+                        if (marketActionHandler != null) marketActionHandler.refreshStandardizedHistory();
                     }
 
                     @Override

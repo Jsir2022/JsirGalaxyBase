@@ -63,7 +63,8 @@ public class TerminalServiceTest {
 
         assertEquals("session-2", approval.getSessionToken());
         assertFalse(approval.getNotifications().isEmpty());
-        assertTrue(approval.getNotifications().get(0).getBody().contains("TerminalActionMessage -> TerminalSnapshotMessage"));
+        assertEquals("分区快照已刷新", approval.getNotifications().get(0).getTitle());
+        assertTrue(approval.getNotifications().get(0).getBody().contains("已完成刷新"));
     }
 
     @Test

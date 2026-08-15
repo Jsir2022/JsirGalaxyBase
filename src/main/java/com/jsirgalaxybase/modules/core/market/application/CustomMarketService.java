@@ -33,6 +33,7 @@ import net.minecraft.item.ItemStack;
 public class CustomMarketService {
 
     private static final int DEFAULT_LIMIT = 20;
+    public static final String UI_DEMO_SOURCE_SERVER_ID = "custom-market-ui-demo-v1";
 
     private final CustomMarketListingRepository listingRepository;
     private final CustomMarketItemSnapshotRepository itemSnapshotRepository;
@@ -89,6 +90,12 @@ public class CustomMarketService {
         List<CustomMarketListing> listings = listingRepository.findByStatus(CustomMarketListingStatus.ACTIVE,
             normalizedLimit);
         return loadListingViews(listings);
+    }
+
+    public CustomMarketBrowseResult browsePage(String scope, String playerRef, String query, int offset, int limit) {
+        CustomMarketBrowsePage page = listingRepository.findBrowsePage(scope, playerRef, query,
+            Math.max(0, offset), sanitizeLimit(limit));
+        return new CustomMarketBrowseResult(loadListingViews(page.getListings()), page.getTotalEntries());
     }
 
     public List<ListingView> listSellerActiveListings(String sellerPlayerRef, int limit) {
@@ -193,6 +200,7 @@ public class CustomMarketService {
             public PurchaseListingResult get() {
                 Instant now = Instant.now();
                 CustomMarketListing lockedListing = listingRepository.lockById(command.getListingId());
+                rejectUiDemoListing(lockedListing);
                 if (lockedListing.getListingStatus() != CustomMarketListingStatus.ACTIVE) {
                     throw new MarketOperationException("custom market listing is not active: " + lockedListing.getListingId());
                 }
@@ -261,6 +269,7 @@ public class CustomMarketService {
             public CancelListingResult get() {
                 Instant now = Instant.now();
                 CustomMarketListing lockedListing = listingRepository.lockById(command.getListingId());
+                rejectUiDemoListing(lockedListing);
                 if (!command.getSellerPlayerRef().equals(lockedListing.getSellerPlayerRef())) {
                     throw new MarketOperationException("custom market listing can only be cancelled by seller");
                 }
@@ -306,6 +315,7 @@ public class CustomMarketService {
             public ClaimListingResult get() {
                 Instant now = Instant.now();
                 CustomMarketListing lockedListing = listingRepository.lockById(command.getListingId());
+                rejectUiDemoListing(lockedListing);
                 if (!command.getBuyerPlayerRef().equals(lockedListing.getBuyerPlayerRef())) {
                     throw new MarketOperationException("custom market listing can only be claimed by buyer");
                 }
@@ -482,6 +492,7 @@ public class CustomMarketService {
             public PreparedCustomDelivery get() {
                 Instant now = Instant.now();
                 CustomMarketListing locked = listingRepository.lockById(command.getListingId());
+                rejectUiDemoListing(locked);
                 if (!command.getSellerPlayerRef().equals(locked.getSellerPlayerRef())
                     || locked.getListingStatus() != CustomMarketListingStatus.ACTIVE
                     || locked.getDeliveryStatus() != CustomMarketDeliveryStatus.ESCROW_HELD) {
@@ -507,6 +518,7 @@ public class CustomMarketService {
             public PreparedCustomDelivery get() {
                 Instant now = Instant.now();
                 CustomMarketListing locked = listingRepository.lockById(command.getListingId());
+                rejectUiDemoListing(locked);
                 if (!command.getBuyerPlayerRef().equals(locked.getBuyerPlayerRef())
                     || locked.getListingStatus() != CustomMarketListingStatus.SOLD
                     || locked.getDeliveryStatus() != CustomMarketDeliveryStatus.BUYER_PENDING_CLAIM) {
@@ -684,6 +696,16 @@ public class CustomMarketService {
             this.audit = audit;
             this.originalStatus = originalStatus;
             this.deliveryRequestId = deliveryRequestId;
+        }
+    }
+
+    public static boolean isUiDemoListing(CustomMarketListing listing) {
+        return listing != null && UI_DEMO_SOURCE_SERVER_ID.equals(listing.getSourceServerId());
+    }
+
+    private static void rejectUiDemoListing(CustomMarketListing listing) {
+        if (isUiDemoListing(listing)) {
+            throw new MarketOperationException("custom market UI demo listing is read-only");
         }
     }
 

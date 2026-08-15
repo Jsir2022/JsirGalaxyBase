@@ -10,6 +10,7 @@ public final class TerminalMarketSectionState {
     public enum FocusField {
         NONE,
         BROWSER_QUERY,
+        HISTORY_QUERY,
         LIMIT_BUY_PRICE,
         LIMIT_BUY_QUANTITY,
         LIMIT_SELL_PRICE,
@@ -18,9 +19,12 @@ public final class TerminalMarketSectionState {
         INSTANT_SELL_QUANTITY
     }
 
-    public enum StandardizedViewMode { BROWSE, DETAIL }
+    public enum StandardizedViewMode { BROWSE, DETAIL, HISTORY }
     public enum OrderSide { BUY, SELL }
     public enum OrderType { MARKET, LIMIT }
+    public enum HistorySide { ALL, BUY, SELL }
+    public enum HistoryStatus { ALL, OPEN, FILLED, CLOSED }
+    public enum HistoryTime { DAY, WEEK, MONTH, ALL }
     public enum BrowserFilter { ALL, TRADED, BOOK }
     public enum BrowserSort { DIRECTORY, PRICE, GAIN, LOSS, VOLUME }
 
@@ -45,6 +49,12 @@ public final class TerminalMarketSectionState {
     private BrowserFilter browserFilter = BrowserFilter.ALL;
     private BrowserSort browserSort = BrowserSort.DIRECTORY;
     private String selectedChartRange = "24h";
+    private boolean historyCurrentProductOnly;
+    private HistorySide historySide = HistorySide.ALL;
+    private HistoryStatus historyStatus = HistoryStatus.ALL;
+    private HistoryTime historyTime = HistoryTime.ALL;
+    private int historyPage;
+    private String historyQuery = "";
     private final TerminalCustomMarketSectionState customState = new TerminalCustomMarketSectionState();
     private final TerminalExchangeMarketSectionState exchangeState = new TerminalExchangeMarketSectionState();
 
@@ -83,6 +93,23 @@ public final class TerminalMarketSectionState {
         instantSellQuantityText = sanitizeNumber(model.getInstantSellDraft().getQuantityText());
         pendingClaimCustodyId = resolvePendingClaimId(model.getClaimIds(), pendingClaimCustodyId);
         pendingCancelOrderId = resolvePendingClaimId(model.getMyOrderIds(), pendingCancelOrderId);
+    }
+
+    /** Rejects snapshots produced for an older browse context or product selection. */
+    public boolean acceptsModel(TerminalMarketSectionModel model) {
+        if (model == null) {
+            return true;
+        }
+        String responseProductKey = normalize(model.getSelectedProductKey());
+        if (!pendingDetailProductKey.isEmpty()) {
+            return pendingDetailProductKey.equals(responseProductKey);
+        }
+        if (standardizedViewMode == StandardizedViewMode.DETAIL
+            || standardizedViewMode == StandardizedViewMode.HISTORY) {
+            return selectedProductKey.equals(responseProductKey);
+        }
+        return browserQuery.equals(normalize(model.getCatalogQuery()))
+            && browserPage == Math.max(0, model.getCatalogPageIndex());
     }
 
     public TerminalCustomMarketSectionState getCustomState() {
@@ -144,6 +171,75 @@ public final class TerminalMarketSectionState {
     }
 
     public boolean isStandardizedDetailView() { return standardizedViewMode == StandardizedViewMode.DETAIL; }
+    public boolean isStandardizedHistoryView() { return standardizedViewMode == StandardizedViewMode.HISTORY; }
+
+    public void openStandardizedHistory() {
+        standardizedViewMode = StandardizedViewMode.HISTORY;
+        focusedField = FocusField.NONE;
+        historyPage = 0;
+    }
+
+    public TerminalMarketActionPayload toHistoryPayload() {
+        return toPayload().withHistory(
+            historyCurrentProductOnly ? "CURRENT" : "ALL",
+            historySide.name(),
+            historyStatus.name(),
+            historyTime.name(),
+            historyQuery,
+            historyPage,
+            TerminalMarketActionPayload.DEFAULT_HISTORY_PAGE_SIZE);
+    }
+
+    public void returnToStandardizedDetail() {
+        standardizedViewMode = StandardizedViewMode.DETAIL;
+        focusedField = FocusField.NONE;
+    }
+
+    public boolean isHistoryCurrentProductOnly() { return historyCurrentProductOnly; }
+    public void toggleHistoryProductScope() { historyCurrentProductOnly = !historyCurrentProductOnly; historyPage = 0; }
+    public HistorySide getHistorySide() { return historySide; }
+    public void cycleHistorySide() {
+        HistorySide[] values = HistorySide.values();
+        historySide = values[(historySide.ordinal() + 1) % values.length];
+        historyPage = 0;
+    }
+    public HistoryStatus getHistoryStatus() { return historyStatus; }
+    public void cycleHistoryStatus() {
+        HistoryStatus[] values = HistoryStatus.values();
+        historyStatus = values[(historyStatus.ordinal() + 1) % values.length];
+        historyPage = 0;
+    }
+    public HistoryTime getHistoryTime() { return historyTime; }
+    public void cycleHistoryTime() {
+        HistoryTime[] values = HistoryTime.values();
+        historyTime = values[(historyTime.ordinal() + 1) % values.length];
+        historyPage = 0;
+    }
+    public int getHistoryPage() { return historyPage; }
+    public void setHistoryPage(int value) { historyPage = Math.max(0, value); }
+    public String getHistoryQuery() { return historyQuery; }
+    public void setHistoryQuery(String value) { historyQuery = normalize(value); historyPage = 0; }
+    public void resetHistoryFilters() {
+        historyQuery = "";
+        historyCurrentProductOnly = false;
+        historySide = HistorySide.ALL;
+        historyStatus = HistoryStatus.ALL;
+        historyTime = HistoryTime.ALL;
+        historyPage = 0;
+        focusedField = FocusField.NONE;
+    }
+    public String getHistoryProductScopeLabel() { return historyCurrentProductOnly ? "商品: 本商品" : "商品: 全部"; }
+    public String getHistorySideLabel() {
+        return historySide == HistorySide.BUY ? "方向: 买入" : historySide == HistorySide.SELL ? "方向: 卖出" : "方向: 全部";
+    }
+    public String getHistoryStatusLabel() {
+        return historyStatus == HistoryStatus.OPEN ? "状态: 进行中" : historyStatus == HistoryStatus.FILLED ? "状态: 已成交"
+            : historyStatus == HistoryStatus.CLOSED ? "状态: 已结束" : "状态: 全部";
+    }
+    public String getHistoryTimeLabel() {
+        return historyTime == HistoryTime.DAY ? "时间: 24小时" : historyTime == HistoryTime.WEEK ? "时间: 7天"
+            : historyTime == HistoryTime.MONTH ? "时间: 30天" : "时间: 全部";
+    }
 
     public OrderSide getOrderSide() { return orderSide; }
     public void setOrderSide(OrderSide value) { orderSide = value == null ? OrderSide.BUY : value; }
@@ -311,6 +407,13 @@ public final class TerminalMarketSectionState {
 
     public boolean isFocused(FocusField focusField) {
         return focusedField == focusField;
+    }
+
+    public boolean hasFocusedField() {
+        return focusedField != FocusField.NONE
+            || customState.isBrowserQueryFocused()
+            || customState.isPublishPriceFocused()
+            || exchangeState.isBrowserQueryFocused();
     }
 
     private String resolvePendingClaimId(List<String> claimIds, String currentValue) {

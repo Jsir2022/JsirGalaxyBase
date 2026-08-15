@@ -27,7 +27,7 @@ public class ExchangeMarketService {
     public static final String OUTPUT_ASSET_CODE_STARCOIN = BankingConstants.DEFAULT_CURRENCY_CODE;
     public static final ExchangeMarketPairDefinition TASK_COIN_TO_STARCOIN = new ExchangeMarketPairDefinition(
         "task-coin-to-starcoin", INPUT_ASSET_CODE_TASK_COIN, OUTPUT_ASSET_CODE_STARCOIN, "任务书硬币", "星光币");
-    private static final String DEFAULT_NOTES = "当前为汇率市场 v1 固定规则报价源；兼容旧 market quote/exchange hand 入口。";
+    private static final String DEFAULT_NOTES = "当前为汇率市场 v1 固定规则报价源；玩家操作仅通过银河终端 UI。";
 
     private final BankingInfrastructure bankingInfrastructure;
     private final BankingApplicationService bankingService;
@@ -57,7 +57,7 @@ public class ExchangeMarketService {
         }
         if (!legacyQuote.isPresent()) {
             return Optional.of(buildDisallowedQuote(request, "TASK_COIN_ASSET_UNSUPPORTED",
-                "当前手持物品不属于汇率市场支持的任务书硬币资产对。"));
+                "当前 Base Vault 资产不属于汇率市场支持的任务书硬币资产对。"));
         }
 
         return Optional.of(toFormalQuote(legacyQuote.get(), request));

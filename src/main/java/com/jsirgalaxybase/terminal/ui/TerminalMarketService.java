@@ -6,12 +6,12 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Locale;
 import java.util.Optional;
-import java.util.UUID;
 
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
@@ -21,10 +21,13 @@ import net.minecraft.server.MinecraftServer;
 
 import com.jsirgalaxybase.GalaxyBase;
 import com.jsirgalaxybase.module.ModuleManager;
+import com.jsirgalaxybase.terminal.TerminalMarketActionPayload;
 import com.jsirgalaxybase.modules.core.InstitutionCoreModule;
+import com.jsirgalaxybase.modules.core.banking.application.PlayerBankAccountProvisioner;
 import com.jsirgalaxybase.modules.core.market.application.CustomMarketService;
 import com.jsirgalaxybase.modules.core.market.application.TaskCoinExchangeService;
 import com.jsirgalaxybase.modules.core.market.application.TaskCoinExchangePlanner;
+import com.jsirgalaxybase.modules.core.market.application.TaskCoinCatalog;
 import com.jsirgalaxybase.modules.core.market.application.MarketOperationException;
 import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketAdmissionDecision;
 import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketCatalogEntry;
@@ -46,6 +49,8 @@ import com.jsirgalaxybase.modules.core.market.domain.CustomMarketListingStatus;
 import com.jsirgalaxybase.modules.core.market.domain.MarketCustodyInventory;
 import com.jsirgalaxybase.modules.core.market.domain.MarketCustodyStatus;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOrder;
+import com.jsirgalaxybase.modules.core.market.domain.MarketOrderHistoryPage;
+import com.jsirgalaxybase.modules.core.market.domain.MarketOrderHistoryQuery;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOrderSide;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOrderStatus;
 import com.jsirgalaxybase.modules.core.market.domain.MarketTradeRecord;
@@ -69,9 +74,10 @@ final class TerminalMarketService {
 
     private static final int PRODUCT_LIMIT = 12;
     private static final int BOOK_DEPTH = 6;
-    private static final int ORDER_LIMIT = 6;
+    private static final int ORDER_LIMIT = 100;
     private static final int CLAIM_LIMIT = 4;
     private static final int CUSTOM_LISTING_LIMIT = 50;
+    private static final int CUSTOM_BROWSER_PAGE_SIZE = 12;
     private static final int CUSTOM_SCOPE_ACTIVE = 0;
     private static final int CUSTOM_SCOPE_SELLING = 1;
     private static final int CUSTOM_SCOPE_PENDING = 2;
@@ -84,27 +90,40 @@ final class TerminalMarketService {
 
     private TerminalMarketService() {}
 
-    TerminalCustomMarketSnapshot createCustomSnapshot(EntityPlayer player, int selectedScope, String selectedListingId) {
+    TerminalCustomMarketSnapshot createCustomSnapshot(EntityPlayer player, int selectedScope, String selectedListingId,
+        String query, int pageIndex) {
         CustomContext context = resolveCustomContext();
         if (!context.isReady() || context.vaultService == null) {
             return createUnavailableCustomSnapshot(context.unavailableMessage, selectedScope);
         }
 
         String playerRef = resolvePlayerRef(player);
-        List<CustomMarketService.ListingView> activeViews = context.customMarketService.browseListings(CUSTOM_LISTING_LIMIT);
-        List<CustomMarketService.ListingView> sellingViews = context.customMarketService.listSellerActiveListings(
-            playerRef, CUSTOM_LISTING_LIMIT);
-        List<CustomMarketService.ListingView> pendingViews = mergeCustomViews(
-            context.customMarketService.listBuyerPendingClaims(playerRef),
-            context.customMarketService.listSellerPendingDeliveries(playerRef),
-            CUSTOM_LISTING_LIMIT);
+        com.jsirgalaxybase.modules.core.market.application.CustomMarketBrowseResult browsePage =
+            context.customMarketService.browsePage(describeCustomScopeKey(selectedScope), playerRef, query,
+                Math.max(0, pageIndex) * CUSTOM_BROWSER_PAGE_SIZE, CUSTOM_BROWSER_PAGE_SIZE);
+        List<CustomMarketService.ListingView> currentViews = browsePage.getListingViews();
+        List<CustomMarketService.ListingView> activeViews = selectedScope == CUSTOM_SCOPE_ACTIVE ? currentViews
+            : Collections.<CustomMarketService.ListingView>emptyList();
+        List<CustomMarketService.ListingView> sellingViews = selectedScope == CUSTOM_SCOPE_SELLING ? currentViews
+            : Collections.<CustomMarketService.ListingView>emptyList();
+        List<CustomMarketService.ListingView> pendingViews = selectedScope == CUSTOM_SCOPE_PENDING ? currentViews
+            : Collections.<CustomMarketService.ListingView>emptyList();
         CustomMarketService.ListingView selectedView = findCustomSelectedView(
             selectedListingId,
             activeViews,
             sellingViews,
             pendingViews);
+        // A selected row can be outside the currently fetched browse window.
+        // Resolve it by id so the detail route never depends on a UI page cache.
+        if (selectedView == null && selectedListingId != null && !selectedListingId.trim().isEmpty()) {
+            try {
+                selectedView = context.customMarketService.inspectListing(Long.parseLong(selectedListingId.trim()));
+            } catch (RuntimeException ignored) {
+                selectedView = null;
+            }
+        }
         return new TerminalCustomMarketSnapshot(
-            "定制商品市场在线 / listing-first GUI 已接线",
+            "定制商品市场在线",
             buildCustomBrowserHint(selectedScope, activeViews, sellingViews, pendingViews),
             describeCustomScope(selectedScope),
             buildCustomListingLines(activeViews),
@@ -128,25 +147,30 @@ final class TerminalMarketService {
             buildCustomActionHint(playerRef, selectedView),
             canBuyCustomListing(playerRef, selectedView) ? "1" : "0",
             canCancelCustomListing(playerRef, selectedView) ? "1" : "0",
-            canClaimCustomListing(playerRef, selectedView) ? "1" : "0");
+            canClaimCustomListing(playerRef, selectedView) ? "1" : "0",
+            activeViews, sellingViews, pendingViews, currentViews, browsePage.getTotalEntries());
     }
 
     TerminalExchangeMarketSnapshot createExchangeSnapshot(EntityPlayer player, String selectedTargetCode,
-        int selectedVaultSlot) {
+        String selectedCoinCode, int selectedVaultSlot) {
         ExchangeContext context = resolveExchangeContext();
         TerminalExchangeQuoteView quoteView = buildExchangeQuoteView(resolvePlayerRef(player),
             resolveVaultStack(player, context, selectedVaultSlot), context);
-        // There is only one settlement output (STARCOIN). The left browser is a
-        // reference catalog for accepted input coins, not a second target selector.
-        boolean selected = true;
+        TaskCoinCatalog.Entry selectedCoin = TaskCoinCatalog.defaultCatalog().find(selectedCoinCode).orElse(null);
+        String targetTitle = selectedCoin == null ? "任务书硬币正式兑换" : selectedCoin.getDisplayName();
+        String targetSummary = selectedCoin == null
+            ? "从个人 Base Vault 选择目录内任务书硬币即可刷新正式报价。"
+            : selectedCoin.getFamilyDisplayName() + " / " + selectedCoin.getTier() + " / 面值 "
+                + formatAmount(selectedCoin.getFaceValue()) + "，实际执行仍以所选 Vault 格位为准。";
         return new TerminalExchangeMarketSnapshot(
             quoteView.serviceState,
             "从 Base Vault 选择目录内任务书硬币即可刷新正式报价。",
             new String[] { EXCHANGE_TARGET_TASK_COIN },
             new String[] { "任务书硬币 -> STARCOIN | 75 种正式币" },
             EXCHANGE_TARGET_TASK_COIN,
-            "任务书硬币正式兑换",
-            "选择 Vault 中的硬币后刷新报价，再确认兑换。",
+            selectedCoin == null ? "" : selectedCoin.getRegistryName(),
+            targetTitle,
+            targetSummary,
             quoteView.heldSummary,
             quoteView.inputRegistryName,
             quoteView.pairCode,
@@ -163,7 +187,8 @@ final class TerminalMarketService {
             quoteView.discountStatus,
             quoteView.exchangeRateDisplay,
             quoteView.executionHint,
-            quoteView.executableFlag);
+            quoteView.executableFlag,
+            TaskCoinCatalog.defaultCatalog().getEntries());
     }
 
     TerminalMarketSnapshot createSnapshot(EntityPlayer player, TerminalMarketSnapshotRequest controller) {
@@ -172,19 +197,17 @@ final class TerminalMarketService {
         MarketContext context = resolveContext();
         // Formal catalog and Base Vault are now the only market item sources.
         // Never infer a market product from the player's held stack here.
-        HeldMarketItem heldItem = null;
         if (!context.isReady()) {
-            return createUnavailableSnapshot(heldItem, context.unavailableMessage, exchangeQuoteView);
+            return createUnavailableSnapshot(context.unavailableMessage, exchangeQuoteView);
         }
 
         String playerRef = resolvePlayerRef(player);
-        StandardizedMarketCatalogPage catalogPage = context.spotMarketService.browseCatalog(
-            controller.getBrowserQuery(), controller.getBrowserPage(), PRODUCT_LIMIT);
+        StandardizedMarketCatalogPage catalogPage = browseCatalogPage(context, controller, playerRef);
         List<String> productKeys = productKeys(catalogPage.getEntries());
-        String selectedProductKey = normalizeSelectedProductKey(controller.getSelectedProductKey(), productKeys, heldItem);
+        String selectedProductKey = normalizeSelectedProductKey(controller.getSelectedProductKey(), productKeys);
         if (selectedProductKey == null) {
             return attachCatalogBrowserData(
-                createEmptySnapshot(productKeys, heldItem, context, exchangeQuoteView),
+                createEmptySnapshot(productKeys, context, exchangeQuoteView),
                 catalogPage,
                 buildCatalogMarketSummaries(
                     context,
@@ -209,8 +232,10 @@ final class TerminalMarketService {
             selectedProductKey,
             Instant.now().minusSeconds(24L * 60L * 60L),
             64);
-        List<MarketOrder> myOrders = context.orderRepository.findOrdersByOwnerAndProductKey(playerRef, selectedProductKey,
-            ORDER_LIMIT);
+        List<MarketOrder> myOrders = context.orderRepository.findOrdersByOwner(playerRef, ORDER_LIMIT);
+        if ((myOrders == null || myOrders.isEmpty()) && selectedProductKey != null && !selectedProductKey.isEmpty()) {
+            myOrders = context.orderRepository.findOrdersByOwnerAndProductKey(playerRef, selectedProductKey, ORDER_LIMIT);
+        }
         List<MarketCustodyInventory> claimables = context.custodyRepository.findByOwnerProductKeyAndStatuses(
             playerRef,
             selectedProductKey,
@@ -231,7 +256,7 @@ final class TerminalMarketService {
 
         TerminalMarketSnapshot result = new TerminalMarketSnapshot(
             "市场服务在线 / 共享 JDBC 运行时已接线",
-            buildCatalogBrowserHint(catalogPage, heldItem),
+            buildCatalogBrowserHint(catalogPage),
             toSizedArray(productKeys, PRODUCT_LIMIT),
             buildProductLabels(catalogPage.getEntries()),
             selectedProductKey,
@@ -258,8 +283,8 @@ final class TerminalMarketService {
             formatAmount(sumCustodyQuantity(escrow)),
             formatAmount(sumCustodyQuantity(claimables)),
             formatAmount(sumFrozenFunds(myOrders)) + " STARCOIN",
-            buildWarehouseNotice(heldItem, selectedProductKey, availableQuantity),
-            buildMyOrderLines(myOrders),
+            buildWarehouseNotice(selectedProductKey, availableQuantity),
+            buildMyOrderLines(myOrders, true, context.spotMarketService),
             buildMyOrderIds(myOrders),
             buildMyOrderCancelableFlags(myOrders),
             buildClaimLines(claimables),
@@ -294,6 +319,57 @@ final class TerminalMarketService {
             controller.getChartRange()));
     }
 
+    OrderHistorySnapshot createOrderHistorySnapshot(EntityPlayer player, TerminalMarketActionPayload payload) {
+        MarketContext context = resolveContext();
+        TerminalMarketActionPayload request = payload == null ? TerminalMarketActionPayload.empty() : payload;
+        // The history workbench has four fixed-height rows. Keep the server page
+        // contract aligned with that viewport, including requests from older clients.
+        int pageSize = TerminalMarketActionPayload.DEFAULT_HISTORY_PAGE_SIZE;
+        if (!context.isReady()) {
+            return OrderHistorySnapshot.empty(request.getHistoryPage(), pageSize);
+        }
+        String productKey = "CURRENT".equals(request.getHistoryProductScope())
+            ? request.getSelectedProductKey() : "";
+        MarketOrderSide side = parseHistorySide(request.getHistorySide());
+        MarketOrderHistoryQuery.StatusGroup status = parseHistoryStatus(request.getHistoryStatus());
+        MarketOrderHistoryQuery query = new MarketOrderHistoryQuery(
+            productKey,
+            side,
+            status,
+            historyCutoff(request.getHistoryTime()),
+            request.getHistoryQuery(),
+            request.getHistoryPage(),
+            pageSize);
+        MarketOrderHistoryPage page = context.orderRepository.findOrderHistory(resolvePlayerRef(player), query);
+        List<MarketOrder> orders = page == null ? Collections.<MarketOrder>emptyList() : page.getOrders();
+        return new OrderHistorySnapshot(
+            buildMyOrderLines(orders, false, context.spotMarketService),
+            buildMyOrderIds(orders),
+            buildMyOrderCancelableFlags(orders),
+            page == null ? 0 : page.getTotalEntries(),
+            page == null ? request.getHistoryPage() : page.getPageIndex(),
+            page == null ? pageSize : page.getPageSize());
+    }
+
+    private MarketOrderSide parseHistorySide(String value) {
+        if ("BUY".equals(value)) return MarketOrderSide.BUY;
+        if ("SELL".equals(value)) return MarketOrderSide.SELL;
+        return null;
+    }
+
+    private MarketOrderHistoryQuery.StatusGroup parseHistoryStatus(String value) {
+        try {
+            return MarketOrderHistoryQuery.StatusGroup.valueOf(value == null ? "ALL" : value);
+        } catch (IllegalArgumentException ignored) {
+            return MarketOrderHistoryQuery.StatusGroup.ALL;
+        }
+    }
+
+    private Instant historyCutoff(String value) {
+        long days = "DAY".equals(value) ? 1L : "WEEK".equals(value) ? 7L : "MONTH".equals(value) ? 30L : 0L;
+        return days == 0L ? null : Instant.now().minusSeconds(days * 24L * 60L * 60L);
+    }
+
     TerminalActionFeedback refreshExchangeQuote(EntityPlayer player) {
         TerminalExchangeQuoteView quoteView = buildExchangeQuoteView((ItemStack) null, resolveExchangeContext());
         if (!quoteView.hasFormalQuote()) {
@@ -304,7 +380,7 @@ final class TerminalMarketService {
                 3600L);
         }
         TerminalNotificationSeverity severity = "1".equals(quoteView.executableFlag)
-            ? TerminalNotificationSeverity.INFO
+            ? TerminalNotificationSeverity.SUCCESS
             : TerminalNotificationSeverity.WARNING;
         String title = "1".equals(quoteView.executableFlag) ? "正式报价已刷新" : "正式报价禁兑";
         return TerminalActionFeedback.of(
@@ -336,6 +412,7 @@ final class TerminalMarketService {
                 "请先在 Base Vault 中选择一格任务书硬币，再刷新正式报价。", 4200L);
         }
         try {
+            ensurePersonalMarketAccount(serverPlayer);
             final String requestId = newRequestId("terminal-vault-exchange");
             ExchangeMarketExecutionResult result = context.vaultService.inSharedTransaction(
                 new java.util.function.Supplier<ExchangeMarketExecutionResult>() {
@@ -373,6 +450,7 @@ final class TerminalMarketService {
         }
 
         try {
+            ensurePersonalMarketAccount(serverPlayer);
             CustomMarketService.PurchaseListingResult result = context.customMarketService.purchaseListing(
                 new PurchaseCustomMarketListingCommand(
                     newRequestId("terminal-custom-market-buy"),
@@ -415,6 +493,7 @@ final class TerminalMarketService {
                 context.unavailableMessage, 3600L);
         }
         try {
+            ensurePersonalMarketAccount(serverPlayer);
             final String requestId = newRequestId("terminal-custom-market-publish");
             CustomMarketService.PublishListingResult result = context.vaultService.inSharedTransaction(
                 new java.util.function.Supplier<CustomMarketService.PublishListingResult>() {
@@ -458,6 +537,7 @@ final class TerminalMarketService {
         }
 
         try {
+            ensurePersonalMarketAccount(serverPlayer);
             CustomMarketService.CancelListingResult result = context.customMarketService.cancelListing(
                 new CancelCustomMarketListingCommand(
                     newRequestId("terminal-custom-market-cancel"),
@@ -495,6 +575,7 @@ final class TerminalMarketService {
         }
 
         try {
+            ensurePersonalMarketAccount(serverPlayer);
             CustomMarketService.ClaimListingResult result = context.customMarketService.claimPurchasedListing(
                 new ClaimCustomMarketListingCommand(
                     newRequestId("terminal-custom-market-claim"),
@@ -528,6 +609,7 @@ final class TerminalMarketService {
         }
 
         try {
+            ensurePersonalMarketAccount(serverPlayer);
             StandardizedMarketProduct product = requireTradableProduct(context.spotMarketService, productKey);
             boolean stackable = resolveStackability(product);
             StandardizedSpotMarketService.CreateBuyOrderResult result = context.spotMarketService.createBuyOrder(
@@ -572,6 +654,7 @@ final class TerminalMarketService {
         }
 
         try {
+            ensurePersonalMarketAccount(serverPlayer);
             StandardizedMarketProduct product = requireTradableProduct(context.spotMarketService, productKey);
             StandardizedSpotMarketService.CreateSellOrderResult result = createSellOrderFromAccountInventory(context,
                 serverPlayer.getUniqueID().toString(), product, quantity, unitPrice, "terminal-market-sell");
@@ -617,6 +700,7 @@ final class TerminalMarketService {
         }
 
         try {
+            ensurePersonalMarketAccount(serverPlayer);
             StandardizedMarketProduct product = requireTradableProduct(context.spotMarketService, productKey);
             boolean stackable = resolveStackability(product);
             StandardizedSpotMarketService.CreateBuyOrderResult result = context.spotMarketService.createBuyOrder(
@@ -689,6 +773,7 @@ final class TerminalMarketService {
         }
 
         try {
+            ensurePersonalMarketAccount(serverPlayer);
             StandardizedSpotMarketService.CreateSellOrderResult result = createSellOrderFromAccountInventory(context,
                 serverPlayer.getUniqueID().toString(), product, quantity, quote.extremeUnitPrice,
                 "terminal-market-sell-now");
@@ -768,6 +853,7 @@ final class TerminalMarketService {
 
         StandardizedMarketProduct product;
         try {
+            ensurePersonalMarketAccount(serverPlayer);
             product = context.spotMarketService.inspectCatalogProduct(selectedProductKey).requireProduct();
             final StandardizedMarketProduct selectedProduct = product;
             final String playerRef = serverPlayer.getUniqueID().toString();
@@ -800,7 +886,7 @@ final class TerminalMarketService {
             return TerminalActionFeedback.of(
                 TerminalNotificationSeverity.SUCCESS,
                 "已存入市场托管",
-                "已将个人仓中的 " + formatAmount(deposited) + " 单位存入 AVAILABLE，当前可用库存 "
+                "已将个人仓中的 " + formatAmount(deposited) + " 单位转入市场可售库存，当前可售 "
                     + formatAmount(result.getTotalAvailableQuantity()) + "。",
                 3600L);
         } catch (RuntimeException exception) {
@@ -899,6 +985,7 @@ final class TerminalMarketService {
         }
 
         try {
+            ensurePersonalMarketAccount(serverPlayer);
             Optional<MarketOrder> order = context.orderRepository.findById(orderId);
             if (!order.isPresent()) {
                 throw new MarketOperationException("orderId 对应的订单不存在");
@@ -953,6 +1040,7 @@ final class TerminalMarketService {
         }
 
         try {
+            ensurePersonalMarketAccount(serverPlayer);
             StandardizedSpotMarketService.ClaimMarketAssetResult result = context.spotMarketService.claimMarketAsset(
                 new ClaimMarketAssetCommand(
                     newRequestId("terminal-market-claim"),
@@ -962,8 +1050,7 @@ final class TerminalMarketService {
             return TerminalActionFeedback.of(
                 TerminalNotificationSeverity.SUCCESS,
                 "资产已提取",
-                "custodyId=" + result.getCustody().getCustodyId() + "，数量 " + formatAmount(result.getCustody().getQuantity())
-                    + " 已存入 Base Vault。",
+                "数量 " + formatAmount(result.getCustody().getQuantity()) + " 已存入个人仓。",
                 3600L);
         } catch (RuntimeException exception) {
             return errorFeedback("提取失败", exception);
@@ -1014,16 +1101,16 @@ final class TerminalMarketService {
         return new DepthQuote(requestedQuantity, available, matchedQuantity, extremePrice, grossAmount, fee);
     }
 
-    private TerminalMarketSnapshot createUnavailableSnapshot(HeldMarketItem heldItem, String message,
+    private TerminalMarketSnapshot createUnavailableSnapshot(String message,
         TerminalExchangeQuoteView exchangeQuoteView) {
         return new TerminalMarketSnapshot(
             "市场服务不可用",
             message,
-            toSizedArray(heldItem == null ? new ArrayList<String>() : Arrays.asList(heldItem.productKey), PRODUCT_LIMIT),
-            toSizedArray(heldItem == null ? new ArrayList<String>() : Arrays.asList(heldItem.displayLabel), PRODUCT_LIMIT),
-            heldItem == null ? "" : heldItem.productKey,
-            heldItem == null ? "未选中商品" : heldItem.displayName,
-            heldItem == null ? "标准化单位" : heldItem.unitLabel,
+            emptyArray(PRODUCT_LIMIT),
+            emptyArray(PRODUCT_LIMIT),
+            "",
+            "未选中商品",
+            "标准化单位",
             "--",
             "--",
             "--",
@@ -1040,12 +1127,12 @@ final class TerminalMarketService {
             "市场服务不可用。",
             "市场服务不可用。",
             "市场服务不可用。",
-            heldItem == null ? "当前没有可存入仓储的手持标准化金属。" : "当前只能读取手持商品，市场运行时离线时不可存入或卖出。",
+            "市场运行时离线，当前不能读取正式目录或个人账户仓。",
             "0",
             "0",
             "0",
             "0 STARCOIN",
-            "运行时离线，无法确认 AVAILABLE / ESCROW / CLAIMABLE 状态。",
+            "运行时离线，无法确认可售、卖单锁定和待收货状态。",
             emptyArray(ORDER_LIMIT),
             emptyArray(ORDER_LIMIT),
             emptyArray(ORDER_LIMIT),
@@ -1077,11 +1164,10 @@ final class TerminalMarketService {
             exchangeQuoteView.executableFlag);
     }
 
-    private TerminalMarketSnapshot createEmptySnapshot(List<String> productKeys, HeldMarketItem heldItem,
+    private TerminalMarketSnapshot createEmptySnapshot(List<String> productKeys,
         MarketContext context, TerminalExchangeQuoteView exchangeQuoteView) {
         String browserHint = productKeys.isEmpty()
-            ? (heldItem == null ? "当前没有活跃商品，也没有检测到可存入的手持标准化金属物品。"
-                : "当前没有活跃商品，已检测到你的手持标准化金属物品，可先存入后作为首个交易标的。")
+            ? "正式商品目录当前为空；请由管理员启用目录商品。"
             : "请选择左侧商品进入交易详情。";
         return new TerminalMarketSnapshot(
             context.isReady() ? "市场服务在线 / 暂无选中商品" : "市场服务不可用",
@@ -1104,15 +1190,15 @@ final class TerminalMarketService {
             emptyArray(BOOK_DEPTH),
             emptyArray(BOOK_DEPTH),
             "请选择商品后填写限价买单。",
-            "请选择商品后填写限价卖单，卖出只会消耗 AVAILABLE。",
+            "请选择商品后填写限价卖单，卖出只会消耗账户仓库存。",
             "请选择商品后填写即时买入数量。",
-            "请选择商品后填写即时卖出数量，卖出只会消耗 AVAILABLE。",
-            heldItem == null ? "当前未检测到手持标准化金属物品。" : "已检测到手持商品，但尚未选中详情页商品。",
+            "请选择商品后填写即时卖出数量，卖出只会消耗账户仓库存。",
+            "尚未选择正式目录商品。",
             "0",
             "0",
             "0",
             "0 STARCOIN",
-            "当前运行时卖出资金直接记入银行账户，卖单只从 AVAILABLE 扣减。",
+            "当前运行时卖出资金直接记入银行账户，卖单只从账户仓预留库存。",
             emptyArray(ORDER_LIMIT),
             emptyArray(ORDER_LIMIT),
             emptyArray(ORDER_LIMIT),
@@ -1121,8 +1207,8 @@ final class TerminalMarketService {
             new String[] {
                 "点击商品后才能查看订单簿。",
                 "即时成交仍按真实盘口撮合，不按最新成交价直接结算。",
-                "当前运行时卖单来源是统一仓储 AVAILABLE，不直接消耗手持物品。",
-                "CLAIMABLE 资产可在详情页直接提取。"
+                "卖单来源是个人账户仓与市场托管，不读取玩家背包。",
+                "待收货资产可在详情页接收至账户仓。"
             },
             exchangeQuoteView.serviceState,
             exchangeQuoteView.heldSummary,
@@ -1241,7 +1327,7 @@ final class TerminalMarketService {
 
     private String buildExchangeHeldSummary(ItemStack heldStack) {
         if (heldStack == null || heldStack.getItem() == null || heldStack.stackSize <= 0) {
-            return "当前未检测到手持物品";
+            return "当前未选择 Base Vault 资产";
         }
         String displayName;
         try {
@@ -1271,7 +1357,7 @@ final class TerminalMarketService {
         return amount * basisPoints / 10000L;
     }
 
-    private String normalizeSelectedProductKey(String requestedProductKey, List<String> productKeys, HeldMarketItem heldItem) {
+    private String normalizeSelectedProductKey(String requestedProductKey, List<String> productKeys) {
         if (requestedProductKey != null && !requestedProductKey.trim().isEmpty()) {
             for (String productKey : productKeys) {
                 if (requestedProductKey.equals(productKey)) {
@@ -1348,6 +1434,12 @@ final class TerminalMarketService {
             return "我的待处理";
         }
         return "全部挂牌";
+    }
+
+    private String describeCustomScopeKey(int scope) {
+        if (scope == CUSTOM_SCOPE_SELLING) return "selling";
+        if (scope == CUSTOM_SCOPE_PENDING) return "pending";
+        return "active";
     }
 
     private String[] buildCustomListingLines(List<CustomMarketService.ListingView> views) {
@@ -1433,6 +1525,9 @@ final class TerminalMarketService {
         if (selectedView == null || selectedView.getListing() == null) {
             return "先从左侧列表选中一条挂牌。";
         }
+        if (CustomMarketService.isUiDemoListing(selectedView.getListing())) {
+            return "演示挂牌，仅用于 UI 核验，不会进入真实结算或交付。";
+        }
         if (canClaimCustomListing(playerRef, selectedView)) {
             return "当前是你买下且待领取的 listing，可执行 claim。";
         }
@@ -1447,18 +1542,21 @@ final class TerminalMarketService {
 
     private boolean canBuyCustomListing(String playerRef, CustomMarketService.ListingView selectedView) {
         return selectedView != null && selectedView.getListing() != null
+            && !CustomMarketService.isUiDemoListing(selectedView.getListing())
             && selectedView.getListing().getListingStatus() == CustomMarketListingStatus.ACTIVE
             && playerRef != null && !playerRef.equals(selectedView.getListing().getSellerPlayerRef());
     }
 
     private boolean canCancelCustomListing(String playerRef, CustomMarketService.ListingView selectedView) {
         return selectedView != null && selectedView.getListing() != null
+            && !CustomMarketService.isUiDemoListing(selectedView.getListing())
             && playerRef != null && playerRef.equals(selectedView.getListing().getSellerPlayerRef())
             && selectedView.getListing().getListingStatus() == CustomMarketListingStatus.ACTIVE;
     }
 
     private boolean canClaimCustomListing(String playerRef, CustomMarketService.ListingView selectedView) {
         return selectedView != null && selectedView.getListing() != null
+            && !CustomMarketService.isUiDemoListing(selectedView.getListing())
             && playerRef != null && playerRef.equals(selectedView.getListing().getBuyerPlayerRef())
             && selectedView.getListing().getDeliveryStatus() == CustomMarketDeliveryStatus.BUYER_PENDING_CLAIM;
     }
@@ -1487,7 +1585,11 @@ final class TerminalMarketService {
             "当前不能继续执行 custom market 动作。",
             "0",
             "0",
-            "0");
+            "0",
+            Collections.<CustomMarketService.ListingView>emptyList(),
+            Collections.<CustomMarketService.ListingView>emptyList(),
+            Collections.<CustomMarketService.ListingView>emptyList(),
+            Collections.<CustomMarketService.ListingView>emptyList(), 0);
     }
 
     private String safeText(String value, String fallback) {
@@ -1503,8 +1605,12 @@ final class TerminalMarketService {
             return Collections.emptyMap();
         }
         List<StandardizedMarketProduct> products = new ArrayList<StandardizedMarketProduct>();
+        Map<String, Long> referencePrices = new HashMap<String, Long>();
         for (StandardizedMarketCatalogEntry entry : page.getEntries()) {
-            if (entry != null && entry.getProduct() != null) { products.add(entry.getProduct()); }
+            if (entry != null && entry.getProduct() != null) {
+                products.add(entry.getProduct());
+                referencePrices.put(entry.getProduct().getProductKey(), Long.valueOf(entry.getReferencePrice()));
+            }
         }
         StandardizedMarketReadRepository reader = new StandardizedMarketReadRepository(context.orderRepository,
             context.tradeRecordRepository, context.accountInventoryResolver);
@@ -1520,11 +1626,13 @@ final class TerminalMarketService {
             appendIntradayPricePoints(points, trades, now);
             if (productKey.equals(selectedProductKey)) {
                 List<StandardizedMarketReadRepository.Candle> candles = reader.readCandles(productKey, now,
-                    parseChartRange(chartRange));
+                    parseChartRange(chartRange), referencePrices.containsKey(productKey)
+                        ? referencePrices.get(productKey).longValue() : 0L);
                 points.clear();
                 for (StandardizedMarketReadRepository.Candle candle : candles) {
-                    points.add(new TerminalMarketSnapshot.MarketPricePoint(candle.close, candle.volume,
-                        candle.startEpochSeconds));
+                    points.add(new TerminalMarketSnapshot.MarketPricePoint(candle.open, candle.high, candle.low,
+                        candle.close, candle.volume, candle.turnover, candle.startEpochSeconds,
+                        candle.source.name()));
                 }
             }
             String latest = quote == null || quote.latestPrice <= 0L ? "--"
@@ -1541,6 +1649,89 @@ final class TerminalMarketService {
                 formatDayChange(quote), points));
         }
         return results;
+    }
+
+    /** Applies market-data filters and ordering before pagination, rather than reordering one client page. */
+    private StandardizedMarketCatalogPage browseCatalogPage(MarketContext context,
+        TerminalMarketSnapshotRequest controller, String playerRef) {
+        String query = controller.getBrowserQuery();
+        String filter = normalizeBrowseOption(controller.getBrowserFilter(), "ALL");
+        String sort = normalizeBrowseOption(controller.getBrowserSort(), "DIRECTORY");
+        if ("ALL".equals(filter) && "DIRECTORY".equals(sort)) {
+            return context.spotMarketService.browseCatalog(query, controller.getBrowserPage(), PRODUCT_LIMIT);
+        }
+
+        StandardizedMarketCatalogPage first = context.spotMarketService.browseCatalog(query, 0, 64);
+        List<StandardizedMarketCatalogEntry> entries = new ArrayList<StandardizedMarketCatalogEntry>(first.getEntries());
+        int totalPages = first.getTotalEntries() == 0 ? 1 : (first.getTotalEntries() + 63) / 64;
+        for (int page = 1; page < totalPages && entries.size() < 4096; page++) {
+            entries.addAll(context.spotMarketService.browseCatalog(query, page, 64).getEntries());
+        }
+
+        List<StandardizedMarketProduct> products = new ArrayList<StandardizedMarketProduct>();
+        for (StandardizedMarketCatalogEntry entry : entries) {
+            if (entry != null && entry.getProduct() != null) { products.add(entry.getProduct()); }
+        }
+        StandardizedMarketReadRepository reader = new StandardizedMarketReadRepository(context.orderRepository,
+            context.tradeRecordRepository, context.accountInventoryResolver);
+        final Map<String, StandardizedMarketReadRepository.ProductQuote> quotes =
+            reader.readPage(products, playerRef, Instant.now());
+
+        List<StandardizedMarketCatalogEntry> filtered = new ArrayList<StandardizedMarketCatalogEntry>();
+        for (StandardizedMarketCatalogEntry entry : entries) {
+            StandardizedMarketReadRepository.ProductQuote quote = quotes.get(entry.getProduct().getProductKey());
+            if ("TRADED".equals(filter) && (quote == null || quote.tradeCount24h <= 0L)) { continue; }
+            if ("BOOK".equals(filter) && (quote == null
+                || quote.bestBidPrice <= 0L && quote.bestAskPrice <= 0L)) { continue; }
+            filtered.add(entry);
+        }
+        if (!"DIRECTORY".equals(sort)) {
+            final String requestedSort = sort;
+            java.util.Collections.sort(filtered, new java.util.Comparator<StandardizedMarketCatalogEntry>() {
+                @Override
+                public int compare(StandardizedMarketCatalogEntry left, StandardizedMarketCatalogEntry right) {
+                    StandardizedMarketReadRepository.ProductQuote leftQuote = quotes.get(left.getProduct().getProductKey());
+                    StandardizedMarketReadRepository.ProductQuote rightQuote = quotes.get(right.getProduct().getProductKey());
+                    int compared;
+                    if ("GAIN".equals(requestedSort) || "LOSS".equals(requestedSort)) {
+                        compared = Double.compare(dayChangePercent(leftQuote), dayChangePercent(rightQuote));
+                        if ("GAIN".equals(requestedSort)) { compared = -compared; }
+                    } else {
+                        long leftValue = "VOLUME".equals(requestedSort) ? quoteVolume(leftQuote) : quotePrice(leftQuote);
+                        long rightValue = "VOLUME".equals(requestedSort) ? quoteVolume(rightQuote) : quotePrice(rightQuote);
+                        compared = Long.compare(rightValue, leftValue);
+                    }
+                    return compared != 0 ? compared
+                        : left.getProduct().getProductKey().compareTo(right.getProduct().getProductKey());
+                }
+            });
+        }
+
+        int total = filtered.size();
+        int maxPage = total == 0 ? 0 : (total - 1) / PRODUCT_LIMIT;
+        int page = Math.min(Math.max(0, controller.getBrowserPage()), maxPage);
+        int start = Math.min(total, page * PRODUCT_LIMIT);
+        int end = Math.min(total, start + PRODUCT_LIMIT);
+        return new StandardizedMarketCatalogPage(query, page, PRODUCT_LIMIT, total,
+            filtered.subList(start, end));
+    }
+
+    private String normalizeBrowseOption(String value, String fallback) {
+        String normalized = value == null ? "" : value.trim().toUpperCase(java.util.Locale.ROOT);
+        return normalized.isEmpty() ? fallback : normalized;
+    }
+
+    private long quotePrice(StandardizedMarketReadRepository.ProductQuote quote) {
+        return quote == null ? 0L : quote.latestPrice;
+    }
+
+    private long quoteVolume(StandardizedMarketReadRepository.ProductQuote quote) {
+        return quote == null ? 0L : quote.volume24h;
+    }
+
+    private double dayChangePercent(StandardizedMarketReadRepository.ProductQuote quote) {
+        if (quote == null || quote.dayOpenPrice <= 0L || quote.latestPrice <= 0L) { return 0.0D; }
+        return (quote.latestPrice - quote.dayOpenPrice) * 100.0D / quote.dayOpenPrice;
     }
 
     private String formatDayChange(StandardizedMarketReadRepository.ProductQuote quote) {
@@ -1590,7 +1781,7 @@ final class TerminalMarketService {
         return snapshot.withCatalogPage(catalogPage).withCatalogMarketSummaries(catalogMarketSummaries);
     }
 
-    private String buildCatalogBrowserHint(StandardizedMarketCatalogPage page, HeldMarketItem heldItem) {
+    private String buildCatalogBrowserHint(StandardizedMarketCatalogPage page) {
         List<StandardizedMarketCatalogEntry> entries = page == null
             ? java.util.Collections.<StandardizedMarketCatalogEntry>emptyList() : page.getEntries();
         if (entries.isEmpty()) {
@@ -1706,14 +1897,14 @@ final class TerminalMarketService {
             return "先选择商品。";
         }
         if (quantity <= 0L || unitPrice <= 0L) {
-            return "填写价格与数量后，将显示 AVAILABLE 仓储卖出摘要。";
+            return "填写价格与数量后，将显示账户仓卖出摘要。";
         }
         if (quantity > availableQuantity) {
-            return "AVAILABLE 数量不足，当前最多只能提交 " + formatAmount(availableQuantity) + "。请先存入。";
+            return "账户仓可售数量不足，当前最多只能提交 " + formatAmount(availableQuantity) + "。";
         }
         long gross = unitPrice * quantity;
         long makerFee = calculateFee(gross, MAKER_FEE_BASIS_POINTS);
-        return "将锁定 AVAILABLE 仓储数量 " + formatAmount(quantity) + "，若挂入簿内，预估成交后净到账约 "
+        return "将锁定账户仓数量 " + formatAmount(quantity) + "，若挂入簿内，预估成交后净到账约 "
             + formatAmount(gross - makerFee) + " STARCOIN。";
     }
 
@@ -1745,41 +1936,74 @@ final class TerminalMarketService {
         }
         StandardizedMarketAdmissionDecision decision = inspectRuntimeCatalogProduct(spotMarketService, selectedProductKey);
         return "目录版本=" + decision.getCatalogVersion().getVersionKey() + " | 来源=" + decision.getSourceKey()
-            + " | 卖出来源=统一仓储 AVAILABLE";
+            + " | 卖出来源=个人账户仓";
     }
 
     private String buildSourceAvailable(long availableQuantity) {
         return formatAmount(availableQuantity);
     }
 
-    private String buildWarehouseNotice(HeldMarketItem heldItem, String selectedProductKey, long availableQuantity) {
+    private String buildWarehouseNotice(String selectedProductKey, long availableQuantity) {
         if (selectedProductKey == null || selectedProductKey.isEmpty()) {
-            return "请选择商品后查看 AVAILABLE / ESCROW / CLAIMABLE 状态。";
+            return "请选择商品后查看账户仓、卖单锁定和待收货状态。";
         }
         if (availableQuantity > 0L) {
-            return "当前商品 AVAILABLE=" + formatAmount(availableQuantity) + "，可直接挂卖单或即时卖出。";
+            return "当前商品可售=" + formatAmount(availableQuantity) + "，可直接挂卖单或即时卖出。";
         }
-        return "当前 AVAILABLE 为 0。若要卖出，请先从个人仓选择对应目录商品并存入市场托管。";
+        return "当前可卖数量为 0；卖出时将由服务端从个人账户仓校验并预留库存。";
     }
 
-    private String[] buildMyOrderLines(List<MarketOrder> orders) {
+    private String[] buildMyOrderLines(List<MarketOrder> orders, boolean includeEmptyState,
+        StandardizedSpotMarketService marketService) {
         List<String> lines = new ArrayList<String>(ORDER_LIMIT);
         if (orders != null) {
             for (MarketOrder order : orders) {
                 lines.add(
-                    "#" + order.getOrderId() + " | " + order.getSide() + " | 价 " + formatAmount(order.getUnitPrice())
+                    "#" + order.getOrderId() + " | " + order.getProduct().getProductKey() + " | " + order.getSide()
+                        + " | 价 " + formatAmount(order.getUnitPrice())
                         + " | 总 " + formatAmount(order.getOriginalQuantity()) + " | 成 " + formatAmount(order.getFilledQuantity())
                         + " | 剩 " + formatAmount(order.getOpenQuantity()) + " | " + order.getStatus() + " | "
-                        + formatInstant(order.getCreatedAt()));
+                        + formatInstant(order.getCreatedAt()) + " | "
+                        + resolveProductDisplayName(marketService, order.getProduct()));
                 if (lines.size() >= ORDER_LIMIT) {
                     break;
                 }
             }
         }
-        if (lines.isEmpty()) {
-            lines.add("当前商品下没有你的订单。");
+        if (lines.isEmpty() && includeEmptyState) {
+            lines.add("当前账户还没有标准商品订单。");
         }
         return toSizedArray(lines, ORDER_LIMIT);
+    }
+
+    static final class OrderHistorySnapshot {
+        private final String[] lines;
+        private final String[] ids;
+        private final String[] cancelableFlags;
+        private final int totalEntries;
+        private final int pageIndex;
+        private final int pageSize;
+
+        private OrderHistorySnapshot(String[] lines, String[] ids, String[] cancelableFlags,
+            int totalEntries, int pageIndex, int pageSize) {
+            this.lines = lines;
+            this.ids = ids;
+            this.cancelableFlags = cancelableFlags;
+            this.totalEntries = Math.max(0, totalEntries);
+            this.pageIndex = Math.max(0, pageIndex);
+            this.pageSize = Math.max(1, pageSize);
+        }
+
+        static OrderHistorySnapshot empty(int pageIndex, int pageSize) {
+            return new OrderHistorySnapshot(new String[0], new String[0], new String[0], 0, pageIndex, pageSize);
+        }
+
+        String[] getLines() { return lines; }
+        String[] getIds() { return ids; }
+        String[] getCancelableFlags() { return cancelableFlags; }
+        int getTotalEntries() { return totalEntries; }
+        int getPageIndex() { return pageIndex; }
+        int getPageSize() { return pageSize; }
     }
 
     private String[] buildMyOrderIds(List<MarketOrder> orders) {
@@ -1812,15 +2036,15 @@ final class TerminalMarketService {
         List<String> lines = new ArrayList<String>(CLAIM_LIMIT);
         if (claimables != null) {
             for (MarketCustodyInventory custody : claimables) {
-                lines.add("custodyId=" + custody.getCustodyId() + " | 数量 " + formatAmount(custody.getQuantity())
-                    + " | 状态 " + custody.getStatus());
+                lines.add("收货编号 " + custody.getCustodyId() + " | 数量 " + formatAmount(custody.getQuantity())
+                    + " | 待存入个人仓");
                 if (lines.size() >= CLAIM_LIMIT) {
                     break;
                 }
             }
         }
         if (lines.isEmpty()) {
-            lines.add("当前商品下没有可提取的 CLAIMABLE 资产。");
+            lines.add("当前商品下没有待收货资产。");
         }
         return toSizedArray(lines, CLAIM_LIMIT);
     }
@@ -1913,6 +2137,19 @@ final class TerminalMarketService {
 
     private EntityPlayerMP requireServerPlayer(EntityPlayer player) {
         return player instanceof EntityPlayerMP ? (EntityPlayerMP) player : null;
+    }
+
+    private void ensurePersonalMarketAccount(EntityPlayerMP player) {
+        if (GalaxyBase.proxy == null || GalaxyBase.proxy.getModuleManager() == null) {
+            throw new MarketOperationException("银行运行时尚未就绪");
+        }
+        InstitutionCoreModule core = GalaxyBase.proxy.getModuleManager().findModule(InstitutionCoreModule.class);
+        if (core == null || core.getBankingInfrastructure() == null) {
+            throw new MarketOperationException("银行运行时尚未就绪");
+        }
+        PlayerBankAccountProvisioner.ensurePersonalAccount(
+            core.getBankingInfrastructure().getBankingApplicationService(),
+            player.getUniqueID(), player.getCommandSenderName());
     }
 
     private String resolvePlayerRef(EntityPlayer player) {
@@ -2013,7 +2250,7 @@ final class TerminalMarketService {
             TerminalNotificationSeverity.WARNING,
             "即时卖出部分成交，剩余撤回失败",
             "已真实成交 " + formatAmount(filledQuantity) + "；orderId=" + orderId + " 仍有 "
-                + formatAmount(openQuantity) + " 未成交数量未能自动撤回，当前系统中可能仍保留开放卖单与 ESCROW 数量，请在“我的订单”中继续处理。原因: "
+                + formatAmount(openQuantity) + " 未成交数量未能自动撤回，当前系统中可能仍保留开放卖单与锁定库存，请在“我的订单”中继续处理。原因: "
                 + reason,
             5200L);
     }
@@ -2029,11 +2266,26 @@ final class TerminalMarketService {
 
     private String toClientSafeMessage(RuntimeException exception) {
         String message = exception == null ? null : exception.getMessage();
-        return message == null || message.trim().isEmpty() ? "请查看服务端日志确认失败原因。" : message.trim();
+        if (message == null || message.trim().isEmpty()) {
+            return "市场操作失败，服务端没有返回具体原因。请稍后重试。";
+        }
+        String normalized = message.trim();
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        if (lower.contains("value too long") || lower.contains("violates") || lower.contains("constraint")) {
+            return "市场请求未通过数据约束，操作已安全回滚。请刷新后重试；若仍失败请联系管理员。";
+        }
+        if (lower.contains("connection refused") || lower.contains("connection is closed")
+            || lower.contains("connection timed out") || lower.contains("could not connect")) {
+            return "市场数据库暂时无法连接，操作未完成。请稍后重试。";
+        }
+        if (lower.startsWith("database access failed")) {
+            return "市场数据库拒绝了本次操作，事务已回滚。请刷新后重试。";
+        }
+        return normalized;
     }
 
     private String newRequestId(String prefix) {
-        return prefix + ":" + UUID.randomUUID().toString();
+        return MarketRequestIdFactory.newRoot(prefix);
     }
 
     private ExchangeContext resolveExchangeContext() {
@@ -2164,26 +2416,6 @@ final class TerminalMarketService {
 
         boolean canFullyFill() {
             return requestedQuantity > 0L && matchedQuantity >= requestedQuantity;
-        }
-    }
-
-    private static final class HeldMarketItem {
-
-        private final String productKey;
-        private final ItemStack snapshot;
-        private final boolean stackable;
-        private final String displayName;
-        private final String unitLabel;
-        private final String displayLabel;
-
-        private HeldMarketItem(String productKey, ItemStack snapshot, boolean stackable, String displayName,
-            String unitLabel, String displayLabel) {
-            this.productKey = productKey;
-            this.snapshot = snapshot;
-            this.stackable = stackable;
-            this.displayName = displayName;
-            this.unitLabel = unitLabel;
-            this.displayLabel = displayLabel;
         }
     }
 

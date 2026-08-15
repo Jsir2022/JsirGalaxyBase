@@ -13,6 +13,7 @@ public final class TerminalExchangeMarketSectionSnapshot {
     private final List<String> targetCodes;
     private final List<String> targetLabels;
     private final String selectedTargetCode;
+    private final String selectedCoinCode;
     private final String selectedTargetTitle;
     private final String selectedTargetSummary;
     private final String heldSummary;
@@ -33,9 +34,29 @@ public final class TerminalExchangeMarketSectionSnapshot {
     private final String executionHint;
     private final boolean executable;
     private final ActionFeedback actionFeedback;
+    private final List<TerminalMarketBrowseEntry> browseEntries;
+    private final String browseQuery;
+    private final int browsePageIndex;
+    private final int browsePageSize;
+    private final int browseTotalEntries;
+    private final boolean hasPreviousPage;
+    private final boolean hasNextPage;
 
     public TerminalExchangeMarketSectionSnapshot(String serviceState, String browserHint, List<String> targetCodes,
         List<String> targetLabels, String selectedTargetCode, String selectedTargetTitle,
+        String selectedTargetSummary, String heldSummary, String inputRegistryName, String pairCode,
+        String inputAssetCode, String outputAssetCode, String ruleVersion, String limitStatus, String reasonCode,
+        String notes, String inputQuantity, String nominalFaceValue, String effectiveExchangeValue,
+        String contributionValue, String discountStatus, String rateDisplay, String executionHint,
+        boolean executable, ActionFeedback actionFeedback) {
+        this(serviceState, browserHint, targetCodes, targetLabels, selectedTargetCode, "", selectedTargetTitle,
+            selectedTargetSummary, heldSummary, inputRegistryName, pairCode, inputAssetCode, outputAssetCode,
+            ruleVersion, limitStatus, reasonCode, notes, inputQuantity, nominalFaceValue, effectiveExchangeValue,
+            contributionValue, discountStatus, rateDisplay, executionHint, executable, actionFeedback);
+    }
+
+    public TerminalExchangeMarketSectionSnapshot(String serviceState, String browserHint, List<String> targetCodes,
+        List<String> targetLabels, String selectedTargetCode, String selectedCoinCode, String selectedTargetTitle,
         String selectedTargetSummary, String heldSummary, String inputRegistryName, String pairCode,
         String inputAssetCode, String outputAssetCode, String ruleVersion, String limitStatus, String reasonCode,
         String notes, String inputQuantity, String nominalFaceValue, String effectiveExchangeValue,
@@ -46,9 +67,10 @@ public final class TerminalExchangeMarketSectionSnapshot {
         this.targetCodes = freeze(targetCodes, Collections.<String>emptyList());
         this.targetLabels = freeze(targetLabels, Collections.<String>emptyList());
         this.selectedTargetCode = normalize(selectedTargetCode, "");
+        this.selectedCoinCode = normalize(selectedCoinCode, "");
         this.selectedTargetTitle = normalize(selectedTargetTitle, "未选择兑换标的");
         this.selectedTargetSummary = normalize(selectedTargetSummary, "请选择标的后查看报价。");
-        this.heldSummary = normalize(heldSummary, "当前未检测到手持物品");
+        this.heldSummary = normalize(heldSummary, "当前未选择 Base Vault 资产");
         this.inputRegistryName = normalize(inputRegistryName, "--");
         this.pairCode = normalize(pairCode, "--");
         this.inputAssetCode = normalize(inputAssetCode, "--");
@@ -66,18 +88,69 @@ public final class TerminalExchangeMarketSectionSnapshot {
         this.executionHint = normalize(executionHint, "当前不能继续执行兑换。");
         this.executable = executable;
         this.actionFeedback = actionFeedback == null ? ActionFeedback.placeholder() : actionFeedback;
+        this.browseEntries = Collections.emptyList();
+        this.browseQuery = "";
+        this.browsePageIndex = 0;
+        this.browsePageSize = 12;
+        this.browseTotalEntries = 0;
+        this.hasPreviousPage = false;
+        this.hasNextPage = false;
+    }
+
+    private TerminalExchangeMarketSectionSnapshot(TerminalExchangeMarketSectionSnapshot source,
+        List<TerminalMarketBrowseEntry> browseEntries, String browseQuery, int browsePageIndex,
+        int browsePageSize, int browseTotalEntries, boolean hasPreviousPage, boolean hasNextPage) {
+        this.serviceState = source.serviceState;
+        this.browserHint = source.browserHint;
+        this.targetCodes = source.targetCodes;
+        this.targetLabels = source.targetLabels;
+        this.selectedTargetCode = source.selectedTargetCode;
+        this.selectedCoinCode = source.selectedCoinCode;
+        this.selectedTargetTitle = source.selectedTargetTitle;
+        this.selectedTargetSummary = source.selectedTargetSummary;
+        this.heldSummary = source.heldSummary;
+        this.inputRegistryName = source.inputRegistryName;
+        this.pairCode = source.pairCode;
+        this.inputAssetCode = source.inputAssetCode;
+        this.outputAssetCode = source.outputAssetCode;
+        this.ruleVersion = source.ruleVersion;
+        this.limitStatus = source.limitStatus;
+        this.reasonCode = source.reasonCode;
+        this.notes = source.notes;
+        this.inputQuantity = source.inputQuantity;
+        this.nominalFaceValue = source.nominalFaceValue;
+        this.effectiveExchangeValue = source.effectiveExchangeValue;
+        this.contributionValue = source.contributionValue;
+        this.discountStatus = source.discountStatus;
+        this.rateDisplay = source.rateDisplay;
+        this.executionHint = source.executionHint;
+        this.executable = source.executable;
+        this.actionFeedback = source.actionFeedback;
+        this.browseEntries = freeze(browseEntries, Collections.<TerminalMarketBrowseEntry>emptyList());
+        this.browseQuery = normalize(browseQuery, "");
+        this.browsePageIndex = Math.max(0, browsePageIndex);
+        this.browsePageSize = Math.max(1, browsePageSize);
+        this.browseTotalEntries = Math.max(0, browseTotalEntries);
+        this.hasPreviousPage = hasPreviousPage;
+        this.hasNextPage = hasNextPage;
+    }
+
+    public TerminalExchangeMarketSectionSnapshot withBrowsePage(List<TerminalMarketBrowseEntry> entries,
+        String query, int pageIndex, int pageSize, int totalEntries, boolean previous, boolean next) {
+        return new TerminalExchangeMarketSectionSnapshot(this, entries, query, pageIndex, pageSize, totalEntries,
+            previous, next);
     }
 
     public static TerminalExchangeMarketSectionSnapshot placeholder() {
         return new TerminalExchangeMarketSectionSnapshot(
-            "汇率市场 section 已接入",
-            "quote-first 页面等待服务端 snapshot。",
+            "汇率市场正在连接",
+            "正在读取兑换目录，请稍候。",
             Collections.<String>emptyList(),
             Collections.<String>emptyList(),
             "",
             "未选择兑换标的",
             "请选择标的后查看报价。",
-            "当前未检测到手持物品",
+            "当前未选择 Base Vault 资产",
             "--",
             "--",
             "--",
@@ -102,6 +175,7 @@ public final class TerminalExchangeMarketSectionSnapshot {
     public List<String> getTargetCodes() { return targetCodes; }
     public List<String> getTargetLabels() { return targetLabels; }
     public String getSelectedTargetCode() { return selectedTargetCode; }
+    public String getSelectedCoinCode() { return selectedCoinCode; }
     public String getSelectedTargetTitle() { return selectedTargetTitle; }
     public String getSelectedTargetSummary() { return selectedTargetSummary; }
     public String getHeldSummary() { return heldSummary; }
@@ -122,6 +196,13 @@ public final class TerminalExchangeMarketSectionSnapshot {
     public String getExecutionHint() { return executionHint; }
     public boolean isExecutable() { return executable; }
     public ActionFeedback getActionFeedback() { return actionFeedback; }
+    public List<TerminalMarketBrowseEntry> getBrowseEntries() { return browseEntries; }
+    public String getBrowseQuery() { return browseQuery; }
+    public int getBrowsePageIndex() { return browsePageIndex; }
+    public int getBrowsePageSize() { return browsePageSize; }
+    public int getBrowseTotalEntries() { return browseTotalEntries; }
+    public boolean hasPreviousPage() { return hasPreviousPage; }
+    public boolean hasNextPage() { return hasNextPage; }
 
     private static <T> List<T> freeze(List<T> source, List<T> fallback) {
         List<T> resolved = source == null || source.isEmpty() ? fallback : source;

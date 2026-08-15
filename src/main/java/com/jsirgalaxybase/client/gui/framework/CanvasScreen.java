@@ -156,6 +156,10 @@ public abstract class CanvasScreen extends GuiScreen implements GuiScene {
         this.popupPanel = null;
     }
 
+    protected final boolean hasOpenPopup() {
+        return popupPanel != null && popupPanel.isVisible();
+    }
+
     @Override
     public void openHoverOverlay(GuiPanel panel) {
         if (popupPanel != null && popupPanel.isVisible()) {

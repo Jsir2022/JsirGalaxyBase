@@ -32,6 +32,13 @@ public final class TerminalCustomMarketSectionSnapshot {
     private final boolean canCancel;
     private final boolean canClaim;
     private final ActionFeedback actionFeedback;
+    private final List<TerminalMarketBrowseEntry> browseEntries;
+    private final String browseQuery;
+    private final int browsePageIndex;
+    private final int browsePageSize;
+    private final int browseTotalEntries;
+    private final boolean hasPreviousPage;
+    private final boolean hasNextPage;
 
     public TerminalCustomMarketSectionSnapshot(String serviceState, String browserHint, String scopeLabel,
         List<String> activeListingLines, List<String> activeListingIds, List<String> sellingListingLines,
@@ -81,14 +88,63 @@ public final class TerminalCustomMarketSectionSnapshot {
         this.canCancel = canCancel;
         this.canClaim = canClaim;
         this.actionFeedback = actionFeedback == null ? ActionFeedback.placeholder() : actionFeedback;
+        this.browseEntries = Collections.emptyList();
+        this.browseQuery = "";
+        this.browsePageIndex = 0;
+        this.browsePageSize = 12;
+        this.browseTotalEntries = 0;
+        this.hasPreviousPage = false;
+        this.hasNextPage = false;
+    }
+
+    private TerminalCustomMarketSectionSnapshot(TerminalCustomMarketSectionSnapshot source,
+        List<TerminalMarketBrowseEntry> browseEntries, String browseQuery, int browsePageIndex,
+        int browsePageSize, int browseTotalEntries, boolean hasPreviousPage, boolean hasNextPage) {
+        this.serviceState = source.serviceState;
+        this.browserHint = source.browserHint;
+        this.scopeLabel = source.scopeLabel;
+        this.activeListingLines = source.activeListingLines;
+        this.activeListingIds = source.activeListingIds;
+        this.activeListingIconRefs = source.activeListingIconRefs;
+        this.sellingListingLines = source.sellingListingLines;
+        this.sellingListingIds = source.sellingListingIds;
+        this.sellingListingIconRefs = source.sellingListingIconRefs;
+        this.pendingListingLines = source.pendingListingLines;
+        this.pendingListingIds = source.pendingListingIds;
+        this.pendingListingIconRefs = source.pendingListingIconRefs;
+        this.selectedListingId = source.selectedListingId;
+        this.selectedTitle = source.selectedTitle;
+        this.selectedPrice = source.selectedPrice;
+        this.selectedStatus = source.selectedStatus;
+        this.selectedCounterparty = source.selectedCounterparty;
+        this.selectedItemIdentity = source.selectedItemIdentity;
+        this.selectedTradeSummary = source.selectedTradeSummary;
+        this.selectedActionHint = source.selectedActionHint;
+        this.canBuy = source.canBuy;
+        this.canCancel = source.canCancel;
+        this.canClaim = source.canClaim;
+        this.actionFeedback = source.actionFeedback;
+        this.browseEntries = freeze(browseEntries, Collections.<TerminalMarketBrowseEntry>emptyList());
+        this.browseQuery = normalize(browseQuery, "");
+        this.browsePageIndex = Math.max(0, browsePageIndex);
+        this.browsePageSize = Math.max(1, browsePageSize);
+        this.browseTotalEntries = Math.max(0, browseTotalEntries);
+        this.hasPreviousPage = hasPreviousPage;
+        this.hasNextPage = hasNextPage;
+    }
+
+    public TerminalCustomMarketSectionSnapshot withBrowsePage(List<TerminalMarketBrowseEntry> entries,
+        String query, int pageIndex, int pageSize, int totalEntries, boolean previous, boolean next) {
+        return new TerminalCustomMarketSectionSnapshot(this, entries, query, pageIndex, pageSize, totalEntries,
+            previous, next);
     }
 
     public static TerminalCustomMarketSectionSnapshot placeholder() {
         return new TerminalCustomMarketSectionSnapshot(
-            "定制商品市场 section 已接入",
-            "listing-first 页面等待服务端 snapshot。",
+            "定制商品市场正在连接",
+            "正在读取挂牌目录，请稍候。",
             "全部挂牌",
-            Collections.singletonList("当前没有 active custom listings。"),
+            Collections.singletonList("当前没有可购买的挂牌。"),
             Collections.<String>emptyList(),
             Collections.<String>emptyList(),
             Collections.singletonList("你当前没有出售中的挂牌。"),
@@ -135,6 +191,13 @@ public final class TerminalCustomMarketSectionSnapshot {
     public boolean isCanCancel() { return canCancel; }
     public boolean isCanClaim() { return canClaim; }
     public ActionFeedback getActionFeedback() { return actionFeedback; }
+    public List<TerminalMarketBrowseEntry> getBrowseEntries() { return browseEntries; }
+    public String getBrowseQuery() { return browseQuery; }
+    public int getBrowsePageIndex() { return browsePageIndex; }
+    public int getBrowsePageSize() { return browsePageSize; }
+    public int getBrowseTotalEntries() { return browseTotalEntries; }
+    public boolean hasPreviousPage() { return hasPreviousPage; }
+    public boolean hasNextPage() { return hasNextPage; }
 
     private static <T> List<T> freeze(List<T> source, List<T> fallback) {
         List<T> resolved = source == null || source.isEmpty() ? fallback : source;

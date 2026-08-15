@@ -11,9 +11,10 @@ public final class TerminalCustomMarketSectionState {
     private String selectedListingId = "";
     private String publishPriceText = "";
     private boolean publishPriceFocused;
+    private boolean browserQueryFocused;
     private int selectedVaultSlot = -1;
     private final MarketBrowseDetailController browser = new MarketBrowseDetailController();
-    private boolean pendingDetail;
+    private String pendingDetailListingId = "";
 
     public void applyModel(TerminalCustomMarketSectionModel model) {
         if (model == null) {
@@ -21,17 +22,37 @@ public final class TerminalCustomMarketSectionState {
             selectedListingId = "";
             publishPriceText = "";
             publishPriceFocused = false;
+            browserQueryFocused = false;
             selectedVaultSlot = -1;
             browser.reset();
-            pendingDetail = false;
+            pendingDetailListingId = "";
             return;
         }
         selectedScope = scopeFromLabel(model.getScopeLabel());
-        selectedListingId = resolveListingId(model);
-        if (pendingDetail && !selectedListingId.isEmpty()) {
+        // A browse refresh must not silently promote the first result into a selected listing.
+        // Details are entered only after the player clicks a real grid item.
+        selectedListingId = sanitizeNumber(model.getSelectedListingId());
+        if (!pendingDetailListingId.isEmpty() && pendingDetailListingId.equals(selectedListingId)) {
             browser.openDetail(selectedListingId);
-            pendingDetail = false;
+            pendingDetailListingId = "";
         }
+    }
+
+    /** Rejects snapshots produced for an older scope, browse context, or listing selection. */
+    public boolean acceptsModel(TerminalCustomMarketSectionModel model) {
+        if (model == null) {
+            return true;
+        }
+        String responseListingId = sanitizeNumber(model.getSelectedListingId());
+        if (!pendingDetailListingId.isEmpty()) {
+            return pendingDetailListingId.equals(responseListingId);
+        }
+        if (browser.isDetail()) {
+            return browser.getSelectedKey().equals(responseListingId);
+        }
+        return selectedScope.equals(scopeFromLabel(model.getScopeLabel()))
+            && browser.getQuery().equals(normalize(model.getBrowseQuery()))
+            && browser.getPageIndex() == Math.max(0, model.getBrowsePageIndex());
     }
 
     public TerminalCustomMarketActionPayload toPayload() {
@@ -58,13 +79,15 @@ public final class TerminalCustomMarketSectionState {
     public void requestDetail(String listingId) {
         setSelectedListingId(listingId);
         browser.setSelectedKey(this.selectedListingId);
-        pendingDetail = !this.selectedListingId.isEmpty();
+        pendingDetailListingId = this.selectedListingId;
     }
 
     public boolean isDetailView() { return browser.isDetail(); }
-    public void returnToBrowse() { browser.openBrowse(); pendingDetail = false; publishPriceFocused = false; }
+    public void returnToBrowse() { browser.openBrowse(); pendingDetailListingId = ""; publishPriceFocused = false; browserQueryFocused = false; }
     public String getBrowserQuery() { return browser.getQuery(); }
     public void setBrowserQuery(String value) { browser.setQuery(value); }
+    public boolean isBrowserQueryFocused() { return browserQueryFocused; }
+    public void focusBrowserQuery() { browserQueryFocused = true; }
     public int getBrowserPage() { return browser.getPageIndex(); }
     public void setBrowserPage(int value) { browser.setPageIndex(value); }
     public int getBrowserGridScrollOffset() { return browser.getGridScrollOffset(); }
@@ -109,27 +132,11 @@ public final class TerminalCustomMarketSectionState {
         }
     }
 
-    private String resolveListingId(TerminalCustomMarketSectionModel model) {
-        String selected = sanitizeNumber(model.getSelectedListingId());
-        if (!selected.isEmpty()) {
-            return selected;
-        }
-        List<String> ids = "selling".equals(selectedScope) ? model.getSellingListingIds()
-            : "pending".equals(selectedScope) ? model.getPendingListingIds() : model.getActiveListingIds();
-        for (String id : ids) {
-            String value = sanitizeNumber(id);
-            if (!value.isEmpty()) {
-                return value;
-            }
-        }
-        return "";
-    }
-
     private String scopeFromLabel(String label) {
-        if ("我的出售".equals(label)) {
+        if ("我的出售".equals(label) || "出售".equals(label)) {
             return "selling";
         }
-        if ("我的待领取".equals(label) || "我的待处理".equals(label)) {
+        if ("我的待领取".equals(label) || "我的待处理".equals(label) || "待领".equals(label)) {
             return "pending";
         }
         return "active";
@@ -157,5 +164,9 @@ public final class TerminalCustomMarketSectionState {
             }
         }
         return builder.toString();
+    }
+
+    private String normalize(String value) {
+        return value == null ? "" : value.trim();
     }
 }

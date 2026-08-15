@@ -65,6 +65,13 @@ final class MarketItemGridPanel extends AbstractGuiPanel {
         RoundedRectPainter.draw(b, 0xFF324152, 0xFF121B25);
         beginClip(b);
         try {
+            if (items.isEmpty()) {
+                FontRenderer font = Minecraft.getMinecraft().fontRenderer;
+                String emptyText = "当前条件下没有可显示项目";
+                font.drawStringWithShadow(emptyText,
+                    b.getX() + Math.max(0, (b.getWidth() - font.getStringWidth(emptyText)) / 2),
+                    b.getY() + Math.max(8, (b.getHeight() - font.FONT_HEIGHT) / 2), 0xFF8294A7);
+            }
             for (int index = 0; index < items.size(); index++) {
                 MarketBrowseItemModel item = items.get(index);
                 GuiRect cell = cellBounds(index);
@@ -116,15 +123,11 @@ final class MarketItemGridPanel extends AbstractGuiPanel {
         drawCentered(font, font.trimStringToWidth(item.getTitle(), textWidth), cell, cell.getY() + 31, 0xFFE4EDF7);
         String price = item.getCompactLatestPrice();
         drawCentered(font, font.trimStringToWidth(price, textWidth), cell, cell.getY() + 43, 0xFFF0C95B);
-        String changeLabel = item.hasDayChange() ? item.getDayChange() : "今日暂无成交";
+        String changeLabel = item.isStandardized()
+            ? (item.hasDayChange() ? item.getDayChange() : "今日暂无成交") : item.getCardStatus();
         boolean negative = changeLabel.startsWith("-");
         drawCentered(font, font.trimStringToWidth(changeLabel, textWidth), cell, cell.getY() + 55,
-            negative ? 0xFFE56A64 : item.hasDayChange() ? 0xFF62D478 : 0xFF8294A7);
-        drawSparkline(cell.getX() + 8, cell.getBottom() - 17, cell.getWidth() - 16, 11, item.getPricePoints(),
-            negative ? 0xFFE56A64 : 0xFF55B7ED);
-        int dotColor = "双边".equals(item.getLiquidityLabel()) ? 0xFF63D36E
-            : "单边".equals(item.getLiquidityLabel()) ? 0xFFE0B34B : 0xFF657587;
-        Gui.drawRect(cell.getRight() - 8, cell.getBottom() - 8, cell.getRight() - 5, cell.getBottom() - 5, dotColor);
+            negative ? 0xFFE56A64 : item.isStandardized() && item.hasDayChange() ? 0xFF62D478 : 0xFF8294A7);
     }
 
     private void updateHover(GuiScene scene, int mouseX, int mouseY) {
@@ -135,7 +138,7 @@ final class MarketItemGridPanel extends AbstractGuiPanel {
         if (!item.getKey().equals(hoverKey)) { hoverKey = item.getKey(); hoverStartedAt = System.currentTimeMillis(); return; }
         if (System.currentTimeMillis() - hoverStartedAt < HOVER_DELAY_MS) { return; }
         MarketBrowseTooltipPanel tooltip = new MarketBrowseTooltipPanel(item);
-        int tooltipHeight = item.getPricePoints().size() < 2 ? 104 : 132;
+        int tooltipHeight = !item.isStandardized() ? 96 : item.getPricePoints().size() < 2 ? 104 : 154;
         tooltip.setBounds(HoverOverlayPositioner.place(getBounds(), mouseX, mouseY,
             Math.min(214, Math.max(160, getBounds().getWidth() * 35 / 100)), tooltipHeight));
         scene.openHoverOverlay(tooltip);
@@ -169,28 +172,6 @@ final class MarketItemGridPanel extends AbstractGuiPanel {
         font.drawStringWithShadow(text, cell.getX() + Math.max(0, (cell.getWidth() - font.getStringWidth(text)) / 2), y, color);
     }
 
-    private static void drawSparkline(int x, int y, int width, int height,
-        List<com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel.PricePointModel> points,
-        int color) {
-        if (points == null || points.size() < 2 || width <= 2) { return; }
-        long min = Long.MAX_VALUE, max = Long.MIN_VALUE;
-        for (com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel.PricePointModel point : points) {
-            min = Math.min(min, point.getPrice()); max = Math.max(max, point.getPrice());
-        }
-        long range = Math.max(1L, max - min);
-        int lastX = x, lastY = y + height - 1 - (int) ((points.get(0).getPrice() - min) * (height - 2) / range);
-        for (int index = 1; index < points.size(); index++) {
-            int nextX = x + index * width / Math.max(1, points.size() - 1);
-            int nextY = y + height - 1 - (int) ((points.get(index).getPrice() - min) * (height - 2) / range);
-            int steps = Math.max(Math.abs(nextX - lastX), Math.abs(nextY - lastY));
-            for (int step = 0; step <= steps; step++) {
-                int px = lastX + (nextX - lastX) * step / Math.max(1, steps);
-                int py = lastY + (nextY - lastY) * step / Math.max(1, steps);
-                Gui.drawRect(px, py, px + 1, py + 1, color);
-            }
-            lastX = nextX; lastY = nextY;
-        }
-    }
     private void drawScrollbar(GuiScene scene) {
         if (getMaxScrollOffset() <= 0) { return; }
         GuiRect b = getBounds(); int trackX = b.getRight() - 5, trackY = b.getY() + 3, trackH = b.getHeight() - 6;

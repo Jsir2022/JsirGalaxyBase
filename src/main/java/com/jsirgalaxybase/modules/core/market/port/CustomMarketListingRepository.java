@@ -6,6 +6,7 @@ import java.util.Optional;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketDeliveryStatus;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketListing;
 import com.jsirgalaxybase.modules.core.market.domain.CustomMarketListingStatus;
+import com.jsirgalaxybase.modules.core.market.application.CustomMarketBrowsePage;
 
 public interface CustomMarketListingRepository {
 
@@ -24,4 +25,11 @@ public interface CustomMarketListingRepository {
 
     List<CustomMarketListing> findByBuyerAndDeliveryStatus(String buyerPlayerRef,
         CustomMarketDeliveryStatus deliveryStatus, int limit);
+
+    /**
+     * Returns a real database page for the terminal browser. Scope is one of
+     * active, selling or pending; implementations must apply query before
+     * computing the total.
+     */
+    CustomMarketBrowsePage findBrowsePage(String scope, String playerRef, String query, int offset, int limit);
 }

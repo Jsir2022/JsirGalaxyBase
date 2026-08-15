@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 import org.junit.Test;
 
@@ -39,6 +40,23 @@ import com.jsirgalaxybase.modules.core.banking.repository.CoinExchangeRecordRepo
 import com.jsirgalaxybase.modules.core.banking.repository.LedgerEntryRepository;
 
 public class BankingApplicationServiceTest {
+
+    @Test
+    public void playerProvisionerCreatesAnEmptyUuidBoundAccountIdempotently() {
+        FakeBankAccountRepository accountRepository = new FakeBankAccountRepository();
+        BankingApplicationService service = createService(accountRepository, new FakeBankTransactionRepository(),
+            new FakeLedgerEntryRepository(), new FakeCoinExchangeRecordRepository());
+        UUID playerId = UUID.fromString("165b8d9c-92c8-41ab-92a7-622632b32b72");
+
+        BankAccount first = PlayerBankAccountProvisioner.ensurePersonalAccount(service, playerId, "Jsir2022");
+        BankAccount second = PlayerBankAccountProvisioner.ensurePersonalAccount(service, playerId, "Changed Name");
+
+        assertSame(first, second);
+        assertEquals(BankAccountType.PLAYER, first.getAccountType());
+        assertEquals(BankingConstants.OWNER_TYPE_PLAYER_UUID, first.getOwnerType());
+        assertEquals(playerId.toString(), first.getOwnerRef());
+        assertEquals(0L, first.getAvailableBalance());
+    }
 
     @Test
     public void openAccountReturnsExistingAccountWhenInsertLosesRace() {

@@ -120,16 +120,16 @@ public final class TerminalBankSnapshotProvider {
         return new TerminalBankSnapshot(
             "银行快照读取失败",
             "读取失败",
-            "请查看服务端日志中的 banking snapshot 异常",
+            "银行数据暂时无法读取，请稍后重试或联系管理员",
             "读取失败",
             "读取失败",
             "银行快照异常，当前不建议继续执行开户或转账操作",
             createDefaultLines(PLAYER_LEDGER_LIMIT, "个人流水读取失败"),
             "读取失败",
-            "exchange 公开页读取失败",
+            "公开账户读取失败",
             "读取失败",
             "读取失败",
-            createDefaultLines(EXCHANGE_LEDGER_LIMIT, "exchange 流水读取失败"));
+            createDefaultLines(EXCHANGE_LEDGER_LIMIT, "公开账户流水读取失败"));
     }
 
     private String formatBalance(BankAccount account) {

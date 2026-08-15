@@ -208,15 +208,19 @@ public final class TerminalService {
                 marketPayload = marketPayload.clearedAfterClaimSuccess();
             }
         } else if (selectedPage == TerminalPage.MARKET_STANDARDIZED
+            && actionType == TerminalActionType.MARKET_REFRESH_HISTORY) {
+            actionResult = TerminalActionFeedback.info(
+                "个人市场历史已刷新", "订单、成交与撤单状态已按当前筛选重新加载。", 2400L);
+        } else if (selectedPage == TerminalPage.MARKET_STANDARDIZED
             && (actionType == TerminalActionType.MARKET_REFRESH || actionType == TerminalActionType.REFRESH_PAGE)) {
-            actionResult = TerminalActionFeedback.info("标准商品市场已刷新", "当前商品详情、盘口和 CLAIMABLE 摘要已刷新。", 3200L);
+            actionResult = TerminalActionFeedback.info("标准商品市场已刷新", "当前商品详情、盘口和待收货摘要已刷新。", 3200L);
         } else if (selectedPage == TerminalPage.MARKET
             && (actionType == TerminalActionType.MARKET_REFRESH || actionType == TerminalActionType.REFRESH_PAGE)) {
             actionResult = TerminalActionFeedback.info("市场总入口已刷新", "市场共享摘要与入口卡已刷新。", 3200L);
         } else if (selectedPage == TerminalPage.MARKET_CUSTOM
             && (actionType == TerminalActionType.MARKET_CUSTOM_REFRESH || actionType == TerminalActionType.MARKET_REFRESH
                 || actionType == TerminalActionType.REFRESH_PAGE || actionType == TerminalActionType.MARKET_CUSTOM_SELECT_LISTING)) {
-            actionResult = TerminalActionFeedback.info("定制商品市场已刷新", "listing 浏览、详情与个人资产摘要已刷新。", 3200L);
+            actionResult = TerminalActionFeedback.info("定制商品市场已刷新", "挂牌目录、商品详情与个人资产摘要已刷新。", 3200L);
         } else if (selectedPage == TerminalPage.MARKET_CUSTOM
             && actionType == TerminalActionType.MARKET_CUSTOM_PUBLISH_HELD) {
             actionResult = marketPageFacade.publishCustomListing(player, customPayload);
@@ -235,7 +239,7 @@ public final class TerminalService {
                 || actionType == TerminalActionType.MARKET_REFRESH || actionType == TerminalActionType.REFRESH_PAGE)) {
             actionResult = actionType == TerminalActionType.MARKET_EXCHANGE_REFRESH_QUOTE
                 ? marketPageFacade.refreshExchangeQuote(player)
-                : TerminalActionFeedback.info("汇率市场已刷新", "标的、quote、rule 与执行门禁已刷新。", 3200L);
+                : TerminalActionFeedback.info("汇率市场已刷新", "兑换标的、报价规则、限额与执行条件已刷新。", 3200L);
         } else if (selectedPage == TerminalPage.MARKET_EXCHANGE
             && actionType == TerminalActionType.MARKET_EXCHANGE_CONFIRM) {
             actionResult = confirmExchangeHeld(player, sessionToken, exchangePayload);
@@ -467,7 +471,7 @@ public final class TerminalService {
             "bank_migration_state",
             "终端迁移状态",
             "BANK、MARKET_STANDARDIZED、MARKET_CUSTOM、MARKET_EXCHANGE 都已作为正式业务页迁入新壳。",
-            "phase 7 之后，新壳已具备银行、三类市场的真实 action / snapshot / popup 闭环。"));
+            "银行与三类市场均已接入终端操作、确认和状态刷新流程。"));
         return new TerminalOpenApproval.PageSnapshot(
             TerminalPage.HOME.getId(),
             TerminalPage.HOME.getTitle(),
@@ -502,7 +506,7 @@ public final class TerminalService {
                 "market_standardized_focus",
                 "当前交易焦点",
                 snapshot.getSelectedProductName() + " | 买一 " + snapshot.getHighestBid() + " / 卖一 " + snapshot.getLowestAsk(),
-                "24h 成交量 " + snapshot.getVolume24h() + " | CLAIMABLE " + snapshot.getClaimableQuantity()));
+                "24h 成交量 " + snapshot.getVolume24h() + " | 待收货 " + snapshot.getClaimableQuantity()));
         } else if (effectivePage == TerminalPage.MARKET_CUSTOM) {
             TerminalCustomMarketSectionSnapshot customSnapshot = marketContext.customSnapshot == null
                 ? marketPageFacade.createCustomSnapshot(null, TerminalCustomMarketActionPayload.empty(), null)
@@ -558,13 +562,13 @@ public final class TerminalService {
             sections.add(new TerminalOpenApproval.Section(
                 "market_overview_standardized",
                 "标准商品市场入口",
-                "最新成交价 " + snapshot.getLatestTradePrice() + " | CLAIMABLE " + snapshot.getClaimableQuantity(),
-                "MARKET_STANDARDIZED 现在承接存入、限价买卖、即时买卖、撤单与 claim 动作。"));
+                "最新成交价 " + snapshot.getLatestTradePrice() + " | 待收货 " + snapshot.getClaimableQuantity(),
+                "标准商品市场提供目录浏览、即时交易、限价委托、撤单与待收货处理。"));
             sections.add(new TerminalOpenApproval.Section(
                 "market_overview_boundary",
-                "迁移边界",
-                "MARKET 根页继续只做总入口与共享摘要。",
-                "三类市场业务页已迁入；cutover 与旧终端删除仍留给 phase 8 / phase 9。"));
+                "市场分区",
+                "总入口用于选择标准商品、定制商品或汇率市场。",
+                "各市场独立展示目录、详情和可执行操作。"));
         }
         return new TerminalOpenApproval.PageSnapshot(
             TerminalPage.MARKET.getId(),
@@ -685,7 +689,7 @@ public final class TerminalService {
             return base + " | " + detail;
         }
         if (!selectedPage.isBankPage()) {
-            String actionDetail = actionType == TerminalActionType.REFRESH_PAGE ? "已通过最小 snapshot 链刷新当前分区"
+            String actionDetail = actionType == TerminalActionType.REFRESH_PAGE ? "已刷新当前分区"
                 : actionType == TerminalActionType.SELECT_PAGE ? "已切换到当前分区宿主"
                     : "首页壳已进入完整业务页迁移阶段";
             return base + " | " + actionDetail;
@@ -714,18 +718,14 @@ public final class TerminalService {
                 notifications.add(new TerminalOpenApproval.NotificationEntry(
                     "已切换市场分区",
                     selectedPage == TerminalPage.MARKET_STANDARDIZED
-                        ? "selectedPageId 已切换到标准商品市场，主体区现在直接承接真实标准市场 section。"
-                        : "selectedPageId 已切换到市场总入口，主体区继续承接共享摘要和入口卡。",
+                        ? "已进入标准商品市场，可浏览正式目录与实时行情。"
+                        : "已返回市场总入口，可选择标准商品、定制商品或汇率市场。",
                     TerminalNotificationSeverity.INFO.name()));
             }
             notifications.add(new TerminalOpenApproval.NotificationEntry(
-                "市场页已进入 phase 7 新壳",
-                "MARKET 总入口、标准商品、定制商品与汇率市场现在都走 TerminalActionMessage -> TerminalSnapshotMessage 主链。",
+                "市场服务已接入",
+                "市场总入口、标准商品、定制商品与汇率市场均使用统一操作和刷新流程。",
                 TerminalNotificationSeverity.INFO.name()));
-            notifications.add(new TerminalOpenApproval.NotificationEntry(
-                "后续阶段边界仍有效",
-                "phase 8 只做正式 cutover，phase 9 再删除旧 ModularUI terminal 实现。",
-                TerminalNotificationSeverity.WARNING.name()));
             return notifications;
         }
         if (selectedPage.isServerToolsPage()) {
@@ -737,12 +737,12 @@ public final class TerminalService {
             } else if (actionType == TerminalActionType.SELECT_PAGE) {
                 notifications.add(new TerminalOpenApproval.NotificationEntry(
                     "已切换传送分区",
-                    "selectedPageId 已切换到传送页，主体区现在承接系统 warp 浏览与确认。",
+                    "已进入传送页，可浏览传送点并确认跨服传送。",
                     TerminalNotificationSeverity.INFO.name()));
             }
             notifications.add(new TerminalOpenApproval.NotificationEntry(
-                "传送页 v1 已接入",
-                "当前只开放系统 warp 浏览与确认，确认传送复用 ServerTools 现有 warp 主链。",
+                "传送服务已接入",
+                "当前开放系统传送点浏览与确认，传送状态会在页面内回写。",
                 TerminalNotificationSeverity.INFO.name()));
             return notifications;
         }
@@ -755,34 +755,30 @@ public final class TerminalService {
             } else if (actionType == TerminalActionType.SELECT_PAGE) {
                 notifications.add(new TerminalOpenApproval.NotificationEntry(
                     "已切换分区",
-                    "selectedPageId 已切换到银行页，主体区现在由新 TerminalBankSection 承接真实业务内容。",
+                    "已进入银行页，可查看账户、余额与转账状态。",
                     TerminalNotificationSeverity.INFO.name()));
             }
             notifications.add(new TerminalOpenApproval.NotificationEntry(
-                "银行页已迁入新壳",
-                "开户状态、余额摘要、转账表单与确认后回写现在都走 TerminalActionMessage -> TerminalSnapshotMessage 主链。",
+                "银行服务已接入",
+                "开户状态、余额摘要和转账确认均使用统一银行操作和刷新流程。",
                 TerminalNotificationSeverity.INFO.name()));
-            notifications.add(new TerminalOpenApproval.NotificationEntry(
-                "phase 7 市场页已迁入",
-                "BANK 与三类 MARKET 正式业务页都已由新壳承接，本轮不会把旧页重新嵌回新壳。",
-                TerminalNotificationSeverity.WARNING.name()));
             return notifications;
         }
 
         if (actionType == TerminalActionType.SELECT_PAGE) {
             notifications.add(new TerminalOpenApproval.NotificationEntry(
                 "已切换分区",
-                "selectedPageId 已切换到 " + selectedPage.getLabel() + "，主体区现在由 section 宿主负责承接该页面。",
+                "已进入" + selectedPage.getLabel() + "。",
                 TerminalNotificationSeverity.INFO.name()));
         } else if (actionType == TerminalActionType.REFRESH_PAGE) {
             notifications.add(new TerminalOpenApproval.NotificationEntry(
                 "分区快照已刷新",
-                selectedPage.getLabel() + " 当前已通过 TerminalActionMessage -> TerminalSnapshotMessage 完成一次最小刷新。",
+                selectedPage.getLabel() + " 已完成刷新。",
                 TerminalNotificationSeverity.INFO.name()));
         }
         notifications.add(new TerminalOpenApproval.NotificationEntry(
-            "市场与银行页均已迁入新壳",
-            "当前首页壳已经承接 BANK、MARKET_STANDARDIZED、MARKET_CUSTOM、MARKET_EXCHANGE，后续阶段进入 cutover。",
+            "银河终端已就绪",
+            "当前页面数据来自服务器快照，刷新后会保留最新有效响应。",
             TerminalNotificationSeverity.INFO.name()));
         return notifications;
     }
