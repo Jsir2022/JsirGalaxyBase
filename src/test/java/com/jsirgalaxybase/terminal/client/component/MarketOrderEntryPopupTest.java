@@ -48,7 +48,7 @@ public class MarketOrderEntryPopupTest {
 
         assertEquals("1", state.getLimitSellQuantityText());
         assertEquals("256", state.getLimitSellPriceText());
-        assertEquals(7, popup.getChildren().size());
+        assertEquals(12, popup.getChildren().size());
         for (GuiPanel child : popup.getChildren()) {
             assertTrue(!child.isVisible() || child.getBounds().getWidth() > 0);
         }
@@ -71,6 +71,23 @@ public class MarketOrderEntryPopupTest {
         assertEquals(37L, sellPopup.maximumQuantity());
         sellPopup.applyMaximumQuantity();
         assertEquals("37", sellState.getLimitSellQuantityText());
+    }
+
+    @Test
+    public void supportsQuantityFractionsAndExplicitDisabledReasons() {
+        TerminalMarketSectionState state = new TerminalMarketSectionState();
+        MarketOrderEntryPopup popup = new MarketOrderEntryPopup(420, 260, state,
+            TerminalMarketSectionState.OrderSide.SELL, TerminalMarketSectionState.OrderType.LIMIT,
+            "Steel Ingot", "24", "25", "26", "可卖 40", "个人 Base Vault -> 市场交割", 40L, null, null);
+
+        popup.applyQuantityFraction(1, 4);
+        assertEquals("10", state.getLimitSellQuantityText());
+        popup.applyPrice("26");
+        assertEquals("26", state.getLimitSellPriceText());
+        assertEquals("", popup.disabledReason());
+
+        state.setLimitSellQuantityText("41");
+        assertEquals("数量超过账户仓可卖库存", popup.disabledReason());
     }
 
     @Test

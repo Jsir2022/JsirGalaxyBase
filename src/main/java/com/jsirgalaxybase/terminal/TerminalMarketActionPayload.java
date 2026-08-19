@@ -34,6 +34,10 @@ public final class TerminalMarketActionPayload {
     private String historyPageText = "0";
     private String historyPageSizeText = String.valueOf(DEFAULT_HISTORY_PAGE_SIZE);
     private String historyQuery = "";
+    private String centerTab = "OPEN_ORDERS";
+    private String focusedRecordId = "";
+    private String cancelRequestId = "";
+    private String expectedOrderUpdatedAtText = "0";
 
     public TerminalMarketActionPayload(String selectedProductKey, String limitBuyPriceText, String limitBuyQuantityText,
         String custodyIdText, String orderIdText, String limitSellPriceText, String limitSellQuantityText,
@@ -142,6 +146,10 @@ public final class TerminalMarketActionPayload {
         historyPageText = base.historyPageText;
         historyPageSizeText = base.historyPageSizeText;
         historyQuery = base.historyQuery;
+        centerTab = base.centerTab;
+        focusedRecordId = base.focusedRecordId;
+        cancelRequestId = base.cancelRequestId;
+        expectedOrderUpdatedAtText = base.expectedOrderUpdatedAtText;
     }
 
     public static TerminalMarketActionPayload empty() {
@@ -166,7 +174,8 @@ public final class TerminalMarketActionPayload {
                 "");
         }
         if (parts.length != 9 && parts.length != 12 && parts.length != 13 && parts.length != 19
-            && parts.length != 20 && parts.length != 21 && parts.length != 26 && parts.length != 27) {
+            && parts.length != 20 && parts.length != 21 && parts.length != 25
+            && parts.length != 26 && parts.length != 27 && parts.length != 31) {
             return empty();
         }
         TerminalMarketActionPayload decoded = new TerminalMarketActionPayload(
@@ -184,11 +193,12 @@ public final class TerminalMarketActionPayload {
             parts.length >= 12 ? decodePart(parts[11]) : "",
             parts.length >= 13 ? decodePart(parts[12]) : "");
         TerminalMarketActionPayload result = parts.length == 19 || parts.length == 26 || parts.length == 27
+            || parts.length == 31
             ? new TerminalMarketActionPayload(decoded, decodePart(parts[13]), decodePart(parts[14]),
                 decodePart(parts[15]), decodePart(parts[16]), decodePart(parts[17]), decodePart(parts[18]))
             : decoded;
-        int historyStart = parts.length == 26 || parts.length == 27 ? 19
-            : parts.length == 20 || parts.length == 21 ? 13 : -1;
+        int historyStart = parts.length == 26 || parts.length == 27 || parts.length == 31 ? 19
+            : parts.length == 20 || parts.length == 21 || parts.length == 25 ? 13 : -1;
         if (historyStart >= 0) {
             result.historyMode = decodePart(parts[historyStart]);
             result.historyProductScope = decodePart(parts[historyStart + 1]);
@@ -197,8 +207,14 @@ public final class TerminalMarketActionPayload {
             result.historyTime = decodePart(parts[historyStart + 4]);
             result.historyPageText = decodePart(parts[historyStart + 5]);
             result.historyPageSizeText = decodePart(parts[historyStart + 6]);
-            if (parts.length == 21 || parts.length == 27) {
+            if (parts.length == 21 || parts.length == 25 || parts.length == 27 || parts.length == 31) {
                 result.historyQuery = decodePart(parts[historyStart + 7]);
+            }
+            if (parts.length == 25 || parts.length == 31) {
+                result.centerTab = decodePart(parts[historyStart + 8]);
+                result.focusedRecordId = decodePart(parts[historyStart + 9]);
+                result.cancelRequestId = decodePart(parts[historyStart + 10]);
+                result.expectedOrderUpdatedAtText = decodePart(parts[historyStart + 11]);
             }
         }
         return result;
@@ -232,7 +248,9 @@ public final class TerminalMarketActionPayload {
     private String historyEncoding() {
         return "|" + encodePart(historyMode) + "|" + encodePart(historyProductScope) + "|"
             + encodePart(historySide) + "|" + encodePart(historyStatus) + "|" + encodePart(historyTime) + "|"
-            + encodePart(historyPageText) + "|" + encodePart(historyPageSizeText) + "|" + encodePart(historyQuery);
+            + encodePart(historyPageText) + "|" + encodePart(historyPageSizeText) + "|" + encodePart(historyQuery) + "|"
+            + encodePart(centerTab) + "|" + encodePart(focusedRecordId) + "|" + encodePart(cancelRequestId) + "|"
+            + encodePart(expectedOrderUpdatedAtText);
     }
 
     public TerminalMarketActionPayload withOrderTicket(String side, String type, String quantityText,
@@ -258,6 +276,23 @@ public final class TerminalMarketActionPayload {
         result.historyPageText = String.valueOf(Math.max(0, pageIndex));
         result.historyPageSizeText = String.valueOf(Math.max(1, Math.min(50, pageSize)));
         result.historyQuery = normalize(query);
+        return result;
+    }
+
+    public TerminalMarketActionPayload withAccountCenter(String tab, String productScope, String side, String status,
+        String time, String query, int pageIndex, int pageSize, String focusRecordId) {
+        TerminalMarketActionPayload result = withHistory(productScope, side, status, time, query, pageIndex, pageSize);
+        result.historyMode = "ACCOUNT_CENTER";
+        result.centerTab = normalize(tab);
+        result.focusedRecordId = normalize(focusRecordId);
+        return result;
+    }
+
+    public TerminalMarketActionPayload withCancelContext(String orderId, String requestId, long expectedUpdatedAt) {
+        TerminalMarketActionPayload result = copy(limitBuyPriceText, limitBuyQuantityText, custodyIdText, orderId,
+            limitSellPriceText, limitSellQuantityText, instantBuyQuantityText, instantSellQuantityText);
+        result.cancelRequestId = normalize(requestId);
+        result.expectedOrderUpdatedAtText = String.valueOf(Math.max(0L, expectedUpdatedAt));
         return result;
     }
 
@@ -318,7 +353,8 @@ public final class TerminalMarketActionPayload {
     public long parseOrderLimitPrice() { return parseLong(orderLimitPriceText); }
     public String getChartRange() { return chartRange; }
     public String getBrowserSort() { return browserSort; }
-    public boolean isHistoryMode() { return "HISTORY".equals(historyMode); }
+    public boolean isHistoryMode() { return "HISTORY".equals(historyMode) || "ACCOUNT_CENTER".equals(historyMode); }
+    public boolean isAccountCenterMode() { return "ACCOUNT_CENTER".equals(historyMode); }
     public String getHistoryProductScope() { return historyProductScope; }
     public String getHistorySide() { return historySide; }
     public String getHistoryStatus() { return historyStatus; }
@@ -326,6 +362,10 @@ public final class TerminalMarketActionPayload {
     public int getHistoryPage() { return (int) Math.max(0L, parseLong(historyPageText)); }
     public int getHistoryPageSize() { return (int) Math.max(1L, Math.min(50L, parseLong(historyPageSizeText))); }
     public String getHistoryQuery() { return historyQuery; }
+    public String getCenterTab() { return centerTab; }
+    public String getFocusedRecordId() { return focusedRecordId; }
+    public String getCancelRequestId() { return cancelRequestId; }
+    public long getExpectedOrderUpdatedAt() { return Math.max(0L, parseLong(expectedOrderUpdatedAtText)); }
     public boolean hasUnifiedOrderTicket() {
         return ("BUY".equals(orderSide) || "SELL".equals(orderSide))
             && ("MARKET".equals(orderType) || "LIMIT".equals(orderType))

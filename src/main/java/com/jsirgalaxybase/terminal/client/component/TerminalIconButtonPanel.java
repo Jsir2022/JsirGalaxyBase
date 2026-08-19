@@ -4,6 +4,7 @@ import java.util.function.Supplier;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.audio.PositionedSoundRecord;
+import net.minecraft.client.gui.FontRenderer;
 import net.minecraft.util.ResourceLocation;
 
 import com.jsirgalaxybase.client.gui.framework.AbstractGuiPanel;
@@ -19,12 +20,21 @@ final class TerminalIconButtonPanel extends AbstractGuiPanel {
     private final TerminalIconKind iconKind;
     private final Runnable onClick;
     private final Supplier<Boolean> enabledSupplier;
+    private final String label;
+    private final boolean selected;
     private boolean pressed;
 
     TerminalIconButtonPanel(TerminalIconKind iconKind, Runnable onClick, Supplier<Boolean> enabledSupplier) {
+        this(iconKind, onClick, enabledSupplier, "", false);
+    }
+
+    TerminalIconButtonPanel(TerminalIconKind iconKind, Runnable onClick, Supplier<Boolean> enabledSupplier,
+        String label, boolean selected) {
         this.iconKind = iconKind == null ? TerminalIconKind.INFO : iconKind;
         this.onClick = onClick;
         this.enabledSupplier = enabledSupplier;
+        this.label = label == null ? "" : label;
+        this.selected = selected;
     }
 
     @Override
@@ -35,16 +45,24 @@ final class TerminalIconButtonPanel extends AbstractGuiPanel {
         GuiRect bounds = getBounds();
         boolean enabled = isEnabled();
         boolean hovered = enabled && contains(mouseX, mouseY);
-        int border = scene.getTheme().color(ThemeColorKey.PANEL_BORDER);
+        int border = selected ? 0xFF6DB7FF : scene.getTheme().color(ThemeColorKey.PANEL_BORDER);
         int fill = scene.getTheme().color(!enabled ? ThemeColorKey.BUTTON_FILL_DISABLED
             : pressed && hovered ? ThemeColorKey.BUTTON_FILL_PRESSED
-                : hovered ? ThemeColorKey.BUTTON_FILL_HOVER : ThemeColorKey.PANEL_ACCENT);
+                : hovered ? ThemeColorKey.BUTTON_FILL_HOVER : selected ? ThemeColorKey.BUTTON_FILL_HOVER
+                    : ThemeColorKey.PANEL_ACCENT);
         RoundedRectPainter.draw(bounds, border, fill);
         int iconSize = Math.max(8, Math.min(11, Math.min(bounds.getWidth(), bounds.getHeight()) - 5));
-        int iconX = bounds.getX() + (bounds.getWidth() - iconSize) / 2;
+        int iconX = label.isEmpty() ? bounds.getX() + (bounds.getWidth() - iconSize) / 2 : bounds.getX() + 4;
         int iconY = bounds.getY() + (bounds.getHeight() - iconSize) / 2;
         int iconColor = enabled ? TerminalIconPainter.ICON_PRIMARY : TerminalIconPainter.ICON_MUTED;
         TerminalIconPainter.draw(iconKind, iconX, iconY, iconSize, iconColor);
+        Minecraft minecraft = Minecraft.getMinecraft();
+        if (!label.isEmpty() && minecraft != null && minecraft.fontRenderer != null) {
+            FontRenderer font = minecraft.fontRenderer;
+            String visible = font.trimStringToWidth(label, Math.max(8, bounds.getWidth() - iconSize - 9));
+            font.drawStringWithShadow(visible, iconX + iconSize + 3,
+                bounds.getY() + Math.max(0, (bounds.getHeight() - font.FONT_HEIGHT) / 2), iconColor);
+        }
     }
 
     @Override

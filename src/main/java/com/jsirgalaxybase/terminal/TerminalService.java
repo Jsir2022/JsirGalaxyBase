@@ -195,7 +195,7 @@ public final class TerminalService {
             if (actionResult != null && actionResult.getSeverity() == TerminalNotificationSeverity.SUCCESS) {
                 marketPayload = marketPayload.clearedAfterInstantSellSuccess();
             }
-        } else if (selectedPage == TerminalPage.MARKET_STANDARDIZED
+        } else if ((selectedPage == TerminalPage.MARKET_STANDARDIZED || selectedPage == TerminalPage.MARKET_ACCOUNT_CENTER)
             && actionType == TerminalActionType.MARKET_CANCEL_ORDER) {
             actionResult = marketPageFacade.cancelOrder(player, marketPayload);
             if (actionResult != null && actionResult.getSeverity() == TerminalNotificationSeverity.SUCCESS) {
@@ -207,7 +207,7 @@ public final class TerminalService {
             if (actionResult != null && actionResult.getSeverity() == TerminalNotificationSeverity.SUCCESS) {
                 marketPayload = marketPayload.clearedAfterClaimSuccess();
             }
-        } else if (selectedPage == TerminalPage.MARKET_STANDARDIZED
+        } else if ((selectedPage == TerminalPage.MARKET_STANDARDIZED || selectedPage == TerminalPage.MARKET_ACCOUNT_CENTER)
             && actionType == TerminalActionType.MARKET_REFRESH_HISTORY) {
             actionResult = TerminalActionFeedback.info(
                 "个人市场历史已刷新", "订单、成交与撤单状态已按当前筛选重新加载。", 2400L);
@@ -496,17 +496,21 @@ public final class TerminalService {
             ? marketPageFacade.createSnapshot(null, effectivePage, TerminalMarketActionPayload.empty(), null)
             : marketContext.snapshot;
         List<TerminalOpenApproval.Section> sections = new ArrayList<TerminalOpenApproval.Section>();
-        if (effectivePage == TerminalPage.MARKET_STANDARDIZED) {
+        if (effectivePage == TerminalPage.MARKET_STANDARDIZED || effectivePage == TerminalPage.MARKET_ACCOUNT_CENTER) {
             sections.add(new TerminalOpenApproval.Section(
-                "market_standardized_runtime",
-                "标准商品运行态",
+                effectivePage == TerminalPage.MARKET_ACCOUNT_CENTER ? "market_account_center_runtime" : "market_standardized_runtime",
+                effectivePage == TerminalPage.MARKET_ACCOUNT_CENTER ? "订单与资产中心" : "标准商品运行态",
                 snapshot.getServiceState(),
                 snapshot.getSummaryNotice()));
             sections.add(new TerminalOpenApproval.Section(
-                "market_standardized_focus",
-                "当前交易焦点",
-                snapshot.getSelectedProductName() + " | 买一 " + snapshot.getHighestBid() + " / 卖一 " + snapshot.getLowestAsk(),
-                "24h 成交量 " + snapshot.getVolume24h() + " | 待收货 " + snapshot.getClaimableQuantity()));
+                effectivePage == TerminalPage.MARKET_ACCOUNT_CENTER ? "market_account_center_summary" : "market_standardized_focus",
+                effectivePage == TerminalPage.MARKET_ACCOUNT_CENTER ? "当前委托与交付摘要" : "当前交易焦点",
+                effectivePage == TerminalPage.MARKET_ACCOUNT_CENTER
+                    ? "当前委托 " + snapshot.getHistoryTotalEntries() + " 条 | 冻结资金 " + snapshot.getFrozenFunds()
+                    : snapshot.getSelectedProductName() + " | 买一 " + snapshot.getHighestBid() + " / 卖一 " + snapshot.getLowestAsk(),
+                effectivePage == TerminalPage.MARKET_ACCOUNT_CENTER
+                    ? "待收货 " + snapshot.getClaimableQuantity() + "；分页由服务端真实总数计算。"
+                    : "24h 成交量 " + snapshot.getVolume24h() + " | 待收货 " + snapshot.getClaimableQuantity()));
         } else if (effectivePage == TerminalPage.MARKET_CUSTOM) {
             TerminalCustomMarketSectionSnapshot customSnapshot = marketContext.customSnapshot == null
                 ? marketPageFacade.createCustomSnapshot(null, TerminalCustomMarketActionPayload.empty(), null)

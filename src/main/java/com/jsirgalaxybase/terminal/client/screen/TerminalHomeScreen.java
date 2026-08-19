@@ -21,6 +21,7 @@ import com.jsirgalaxybase.terminal.client.component.CustomListingPricePopup;
 import com.jsirgalaxybase.terminal.client.component.TerminalMarketSectionState;
 import com.jsirgalaxybase.terminal.client.component.MarketLiveRefreshController;
 import com.jsirgalaxybase.terminal.client.component.MarketOrderEntryPopup;
+import com.jsirgalaxybase.terminal.client.component.MarketCancelableOrdersPopup;
 import com.jsirgalaxybase.terminal.client.component.TerminalPanelFactory;
 import com.jsirgalaxybase.terminal.client.component.TerminalPopupFactory;
 import com.jsirgalaxybase.terminal.client.component.TerminalServerToolsSectionState;
@@ -137,6 +138,8 @@ public class TerminalHomeScreen extends CanvasScreen {
         if (marketLiveRefreshController.tick(canAutoRefreshCurrentMarket())) {
             sendCurrentMarketRefresh();
         }
+        marketSectionState.setMarketFreshness(marketLiveRefreshController.getStatusLabel(),
+            marketLiveRefreshController.getFreshness() == MarketLiveRefreshController.Freshness.STALE);
     }
 
     @Override
@@ -180,6 +183,14 @@ public class TerminalHomeScreen extends CanvasScreen {
                 @Override
                 public void run() {
                     closeScreen();
+                }
+            },
+            new Runnable() {
+                @Override
+                public void run() {
+                    openAccountCenter(TerminalPage.fromId(model.getSelectedPageId()) == TerminalPage.VAULT
+                        ? TerminalMarketSectionState.AccountCenterTab.ASSETS_AND_DELIVERY
+                        : TerminalMarketSectionState.AccountCenterTab.OPEN_ORDERS);
                 }
             }));
         root.addChild(TerminalShellPanels.createSectionBody(
@@ -286,7 +297,11 @@ public class TerminalHomeScreen extends CanvasScreen {
 
                 @Override
                 public void openCancelOrderConfirm(String orderId) {
-                    openCancelOrderConfirmPopup(orderId);
+                    if (orderId == null || orderId.trim().isEmpty()) {
+                        openCurrentProductCancelPopup();
+                    } else {
+                        openCancelOrderConfirmPopup(orderId);
+                    }
                 }
 
                 @Override
@@ -489,6 +504,12 @@ public class TerminalHomeScreen extends CanvasScreen {
                     marketSectionState.getExchangeState().toPayload().encode()));
                 return;
             }
+            if (selected == TerminalPage.MARKET_ACCOUNT_CENTER) {
+                sendActionToServer(new TerminalActionMessage(model.getSessionToken(), selected.getId(),
+                    TerminalActionType.MARKET_REFRESH_HISTORY.getId(),
+                    marketSectionState.toHistoryPayload().encodeHistory()));
+                return;
+            }
             sendActionToServer(new TerminalActionMessage(
                 model.getSessionToken(),
                 model.getSelectedPageId(),
@@ -582,7 +603,27 @@ public class TerminalHomeScreen extends CanvasScreen {
             TerminalActionType.SELECT_PAGE.getId(),
             targetPage == TerminalPage.MARKET_CUSTOM ? marketSectionState.getCustomState().toPayload().encode()
                 : targetPage == TerminalPage.MARKET_EXCHANGE ? marketSectionState.getExchangeState().toPayload().encode()
-                    : marketSectionState.toPayload().encode()));
+                    : targetPage == TerminalPage.MARKET_ACCOUNT_CENTER ? marketSectionState.toHistoryPayload().encodeHistory()
+                        : marketSectionState.toPayload().encode()));
+    }
+
+    private void openAccountCenter(TerminalMarketSectionState.AccountCenterTab tab) {
+        marketSectionState.selectAccountCenterTab(tab);
+        switchMarketRoute(TerminalPage.MARKET_ACCOUNT_CENTER.getId());
+    }
+
+    public void openAccountCenterFocused(TerminalMarketSectionState.AccountCenterTab tab, String recordId) {
+        marketSectionState.selectAccountCenterTab(tab);
+        marketSectionState.setFocusedRecordId(recordId);
+        marketSectionState.setHistoryQuery(recordId == null ? "" : recordId.replaceFirst("^[COV]", ""));
+        switchMarketRoute(TerminalPage.MARKET_ACCOUNT_CENTER.getId());
+    }
+
+    @Override
+    protected void mouseClicked(int mouseX, int mouseY, int mouseButton) {
+        if (!hasOpenPopup() && mouseButton == 0
+            && TerminalHudOverlayHandler.INSTANCE.clickTerminalNotification(mouseX, mouseY, width, height)) return;
+        super.mouseClicked(mouseX, mouseY, mouseButton);
     }
 
     private void selectCustomListingForRefresh(String scope, String listingId) {
@@ -682,7 +723,7 @@ public class TerminalHomeScreen extends CanvasScreen {
                 "数量: " + marketSectionState.getLimitBuyQuantityText(),
                 "盘口: 买一 " + marketModel.getHighestBid() + " / 卖一 " + marketModel.getLowestAsk(),
                 "资金预览: " + marketModel.getLimitBuyPreview(),
-                "来源: 银行可用余额；确认后冻结本金与 taker 手续费。"),
+                "来源: 银行可用余额；本金和手续费上限仅作预留，手续费只按实际成交收取。"),
             "确认买单",
             "取消",
             new Runnable() {
@@ -712,8 +753,10 @@ public class TerminalHomeScreen extends CanvasScreen {
         String marketPrice = buy ? marketModel.getLowestAsk() : marketModel.getHighestBid();
         long availableAsset = buy ? currentPlayerBalance() : parsePositiveLong(marketModel.getSourceAvailable());
         ModalPopupPanel popup = new MarketOrderEntryPopup(width, height, marketSectionState, side, type,
-            marketModel.getSelectedProductName(), marketPrice,
+            marketModel.getSelectedProductName(), marketModel.getHighestBid(), marketModel.getLatestTradePrice(),
+            marketModel.getLowestAsk(),
             buy ? "余额 " + availableAsset : "可卖 " + marketModel.getSourceAvailable(),
+            buy ? "银行 -> 市场交割" : "个人 Base Vault -> 市场交割",
             availableAsset,
             new Runnable() {
                 @Override
@@ -930,17 +973,26 @@ public class TerminalHomeScreen extends CanvasScreen {
         if (marketModel == null || orderId == null || orderId.trim().isEmpty()) {
             return;
         }
-        marketSectionState.setPendingCancelOrderId(orderId);
+        marketSectionState.prepareCancelOrder(orderId, findOrderUpdatedAt(marketModel, orderId));
+        String orderLine = findOrderLine(marketModel, orderId);
+        String[] orderParts = orderLine.split("\\|");
+        String side = orderPart(orderParts, 2);
+        String total = stripOrderLabel(orderPart(orderParts, 4));
+        String filled = stripOrderLabel(orderPart(orderParts, 5));
+        String remaining = stripOrderLabel(orderPart(orderParts, 6));
+        String reserved = stripOrderLabel(orderPart(orderParts, 13));
+        boolean buyOrder = "BUY".equalsIgnoreCase(side);
         ModalPopupPanel popup = TerminalPopupFactory.createConfirmationPopup(
             width,
             height,
             "确认撤销当前订单",
             "确认后将撤销当前订单，并在服务端处理完成后刷新市场页面。",
             Arrays.asList(
-                "orderId: " + orderId,
-                "明细: " + findOrderLine(marketModel, orderId),
-                "当前商品: " + marketModel.getSelectedProductName(),
-                "结果: 买单返还剩余冻结资金；卖单返还未成交库存到账户仓。"),
+                "商品: " + marketModel.getSelectedProductName(),
+                "订单: #" + shortOrderId(orderId) + " / " + (buyOrder ? "买入" : "卖出"),
+                "成交/总量: " + filled + "/" + total + "；剩余: " + remaining,
+                "预计返还: " + (buyOrder ? reserved + " GT" : remaining + " 件商品"),
+                "返还目标: " + (buyOrder ? "银行可用余额" : "个人 Base Vault；满仓时保留待恢复")),
             "确认撤单",
             "取消",
             new Runnable() {
@@ -961,6 +1013,19 @@ public class TerminalHomeScreen extends CanvasScreen {
                 }
             });
         openPopup(popup);
+    }
+
+    private void openCurrentProductCancelPopup() {
+        TerminalMarketSectionModel marketModel = getSelectedMarketModel();
+        if (marketModel == null) return;
+        openPopup(new MarketCancelableOrdersPopup(TerminalHomeLayout.compute(width, height, model).panelBounds, marketModel,
+            new MarketCancelableOrdersPopup.Handler() {
+                @Override public void select(String orderId) {
+                    closePopup();
+                    openCancelOrderConfirmPopup(orderId);
+                }
+                @Override public void close() { closePopup(); }
+            }));
     }
 
     private void openClaimConfirmPopup(String custodyId) {
@@ -1391,6 +1456,32 @@ public class TerminalHomeScreen extends CanvasScreen {
             }
         }
         return "当前没有订单明细。";
+    }
+
+    private long findOrderUpdatedAt(TerminalMarketSectionModel marketModel, String orderId) {
+        String line = findOrderLine(marketModel, orderId);
+        String[] parts = line.split("\\|");
+        if (parts.length <= 10) return 0L;
+        try {
+            return Long.parseLong(parts[10].trim());
+        } catch (NumberFormatException ignored) {
+            return 0L;
+        }
+    }
+
+    private String orderPart(String[] parts, int index) {
+        return index < parts.length && parts[index] != null ? parts[index].trim() : "--";
+    }
+
+    private String stripOrderLabel(String value) {
+        String normalized = value == null ? "" : value.trim();
+        int separator = normalized.indexOf(' ');
+        return separator < 0 ? normalized : normalized.substring(separator + 1).trim();
+    }
+
+    private String shortOrderId(String orderId) {
+        String normalized = orderId == null ? "" : orderId.trim();
+        return normalized.length() <= 8 ? normalized : normalized.substring(normalized.length() - 8);
     }
 
     private static final class BackdropPanel extends PanelContainer {

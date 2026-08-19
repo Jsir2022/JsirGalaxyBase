@@ -4,6 +4,10 @@
 
 ## 当前最建议先看的内容
 
+- `terminal-number-display-standard-v1.md`
+  - 终端数字显示的语义化规范；定义盘口/图表三位有效数字的 `K -> M -> G -> T` 紧凑数量，以及银行、价格、订单和确认流程必须保留的精确千分位
+- `standardized-market-self-match-bug-2026-08-18.md`
+  - 标准市场自成交候选未绕过的 P0 BUG 记录；包含实机复现、银行同账户结算异常证据、正确的自动跳过规则和修复验收用例
 - `modern-trading-terminal-visual-gap-baseline-2026-08-08.md`
   - 以最新 `/home/u24/图片/市场第三版.png` 为唯一视觉目标，对比当前浏览、Hover、详情三张实机图，逐项记录 UI、行情数据、交易票据与账户仓自动交割差距及最终验收清单
 - `modern-trading-terminal-redesign-v1.md`

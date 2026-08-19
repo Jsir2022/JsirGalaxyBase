@@ -13,6 +13,9 @@ import com.jsirgalaxybase.modules.core.banking.infrastructure.jdbc.JdbcConnectio
 import com.jsirgalaxybase.modules.core.banking.infrastructure.jdbc.JdbcConnectionManager;
 import com.jsirgalaxybase.modules.core.market.application.MarketOperationException;
 import com.jsirgalaxybase.modules.core.market.domain.MarketTradeRecord;
+import com.jsirgalaxybase.modules.core.market.domain.MarketTradeHistoryPage;
+import com.jsirgalaxybase.modules.core.market.domain.MarketAccountCenterQuery;
+import com.jsirgalaxybase.modules.core.market.domain.MarketOrderSide;
 import com.jsirgalaxybase.modules.core.market.domain.StandardizedMarketProduct;
 import com.jsirgalaxybase.modules.core.market.port.MarketTradeRecordRepository;
 
@@ -202,6 +205,72 @@ public class JdbcMarketTradeRecordRepository extends AbstractJdbcRepository impl
                 }
             }
         });
+    }
+
+    @Override
+    public MarketTradeHistoryPage findPersonalTradeHistory(final String playerRef,
+        final MarketAccountCenterQuery query) {
+        return connectionManager.withConnection(new JdbcConnectionCallback<MarketTradeHistoryPage>() {
+            @Override public MarketTradeHistoryPage doInConnection(java.sql.Connection connection) throws SQLException {
+                String where = personalTradeWhere(query);
+                PreparedStatement count = connection.prepareStatement(
+                    "SELECT COUNT(*) FROM market_trade_record WHERE " + where);
+                int total;
+                try {
+                    bindPersonalTrade(count, playerRef, query, false);
+                    ResultSet rows = count.executeQuery();
+                    try { rows.next(); total = rows.getInt(1); } finally { rows.close(); }
+                } finally { count.close(); }
+                int page = total <= 0 ? 0 : Math.min(query.getPageIndex(), (total - 1) / query.getPageSize());
+                PreparedStatement select = connection.prepareStatement(
+                    "SELECT * FROM market_trade_record WHERE " + where
+                        + " ORDER BY created_at DESC, trade_id DESC LIMIT ? OFFSET ?");
+                try {
+                    int parameter = bindPersonalTrade(select, playerRef, query, true);
+                    select.setInt(parameter++, query.getPageSize());
+                    select.setInt(parameter, page * query.getPageSize());
+                    ResultSet rows = select.executeQuery();
+                    try {
+                        List<MarketTradeRecord> trades = new ArrayList<MarketTradeRecord>();
+                        while (rows.next()) trades.add(mapTrade(rows));
+                        return new MarketTradeHistoryPage(trades, total, page, query.getPageSize());
+                    } finally { rows.close(); }
+                } finally { select.close(); }
+            }
+        });
+    }
+
+    private String personalTradeWhere(MarketAccountCenterQuery query) {
+        StringBuilder where = new StringBuilder();
+        if (query.getSide() == MarketOrderSide.BUY) where.append("buyer_player_ref = ?");
+        else if (query.getSide() == MarketOrderSide.SELL) where.append("seller_player_ref = ?");
+        else where.append("(buyer_player_ref = ? OR seller_player_ref = ?)");
+        if (!query.getProductKey().isEmpty()) where.append(" AND product_key = ?");
+        if (!query.getSearchText().isEmpty()) {
+            where.append(" AND (product_key ILIKE ? ESCAPE '!' OR CAST(trade_id AS TEXT) LIKE ? ESCAPE '!'"
+                + " OR CAST(buy_order_id AS TEXT) LIKE ? ESCAPE '!' OR CAST(sell_order_id AS TEXT) LIKE ? ESCAPE '!')");
+        }
+        if (query.getCreatedAfter() != null) where.append(" AND created_at >= ?");
+        return where.toString();
+    }
+
+    private int bindPersonalTrade(PreparedStatement statement, String playerRef, MarketAccountCenterQuery query,
+        boolean select) throws SQLException {
+        int parameter = 1;
+        statement.setString(parameter++, playerRef);
+        if (query.getSide() == null) statement.setString(parameter++, playerRef);
+        if (!query.getProductKey().isEmpty()) statement.setString(parameter++, query.getProductKey());
+        if (!query.getSearchText().isEmpty()) {
+            String pattern = "%" + escapeLike(query.getSearchText()) + "%";
+            statement.setString(parameter++, pattern); statement.setString(parameter++, pattern);
+            statement.setString(parameter++, pattern); statement.setString(parameter++, pattern);
+        }
+        if (query.getCreatedAfter() != null) statement.setTimestamp(parameter++, java.sql.Timestamp.from(query.getCreatedAfter()));
+        return parameter;
+    }
+
+    private String escapeLike(String value) {
+        return value.replace("!", "!!").replace("%", "!%").replace("_", "!_");
     }
 
     private List<MarketTradeRecord> findTrades(final String sql, final String productKey, final Instant since,

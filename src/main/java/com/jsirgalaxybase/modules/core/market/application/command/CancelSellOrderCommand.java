@@ -6,12 +6,19 @@ public class CancelSellOrderCommand {
     private final String playerRef;
     private final String sourceServerId;
     private final long orderId;
+    private final long expectedUpdatedAtEpochSecond;
 
     public CancelSellOrderCommand(String requestId, String playerRef, String sourceServerId, long orderId) {
+        this(requestId, playerRef, sourceServerId, orderId, 0L);
+    }
+
+    public CancelSellOrderCommand(String requestId, String playerRef, String sourceServerId, long orderId,
+        long expectedUpdatedAtEpochSecond) {
         this.requestId = requestId;
         this.playerRef = playerRef;
         this.sourceServerId = sourceServerId;
         this.orderId = orderId;
+        this.expectedUpdatedAtEpochSecond = Math.max(0L, expectedUpdatedAtEpochSecond);
     }
 
     public String getRequestId() {
@@ -29,4 +36,6 @@ public class CancelSellOrderCommand {
     public long getOrderId() {
         return orderId;
     }
+
+    public long getExpectedUpdatedAtEpochSecond() { return expectedUpdatedAtEpochSecond; }
 }

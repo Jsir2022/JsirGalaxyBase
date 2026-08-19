@@ -5,11 +5,14 @@ import java.time.Instant;
 /** Authenticated, server-side filters for the personal standardized-market order history. */
 public final class MarketOrderHistoryQuery {
 
+    public static final int MAX_SEARCH_LENGTH = 96;
+
     public enum StatusGroup {
         ALL,
         OPEN,
         FILLED,
-        CLOSED
+        CLOSED,
+        HISTORICAL
     }
 
     private final String productKey;
@@ -31,7 +34,9 @@ public final class MarketOrderHistoryQuery {
         this.side = side;
         this.status = status == null ? StatusGroup.ALL : status;
         this.createdAfter = createdAfter;
-        this.searchText = searchText == null ? "" : searchText.trim();
+        String normalizedSearch = searchText == null ? "" : searchText.trim();
+        this.searchText = normalizedSearch.length() <= MAX_SEARCH_LENGTH ? normalizedSearch
+            : normalizedSearch.substring(0, MAX_SEARCH_LENGTH);
         this.pageIndex = Math.max(0, pageIndex);
         this.pageSize = Math.max(1, Math.min(50, pageSize));
     }

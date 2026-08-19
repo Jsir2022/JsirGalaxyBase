@@ -15,6 +15,8 @@ import com.jsirgalaxybase.modules.core.market.application.MarketOperationExcepti
 import com.jsirgalaxybase.modules.core.market.domain.MarketOperationLog;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOperationStatus;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOperationType;
+import com.jsirgalaxybase.modules.core.market.domain.MarketOperationHistoryPage;
+import com.jsirgalaxybase.modules.core.market.domain.MarketAccountCenterQuery;
 import com.jsirgalaxybase.modules.core.market.port.MarketOperationLogRepository;
 
 public class JdbcMarketOperationLogRepository extends AbstractJdbcRepository implements MarketOperationLogRepository {
@@ -172,6 +174,75 @@ public class JdbcMarketOperationLogRepository extends AbstractJdbcRepository imp
                 }
             }
         });
+    }
+
+    @Override
+    public MarketOperationHistoryPage findPersonalExceptions(final String playerRef,
+        final MarketAccountCenterQuery query) {
+        return connectionManager.withConnection(new JdbcConnectionCallback<MarketOperationHistoryPage>() {
+            @Override public MarketOperationHistoryPage doInConnection(java.sql.Connection connection) throws SQLException {
+                String where = personalExceptionWhere(query);
+                PreparedStatement count = connection.prepareStatement(
+                    "SELECT COUNT(*) FROM market_operation_log WHERE " + where);
+                int total;
+                try {
+                    bindPersonalException(count, playerRef, query);
+                    ResultSet rows = count.executeQuery();
+                    try { rows.next(); total = rows.getInt(1); } finally { rows.close(); }
+                } finally { count.close(); }
+                int page = total <= 0 ? 0 : Math.min(query.getPageIndex(), (total - 1) / query.getPageSize());
+                PreparedStatement select = connection.prepareStatement(
+                    "SELECT * FROM market_operation_log WHERE " + where
+                        + " ORDER BY updated_at DESC, operation_id DESC LIMIT ? OFFSET ?");
+                try {
+                    int parameter = bindPersonalException(select, playerRef, query);
+                    select.setInt(parameter++, query.getPageSize());
+                    select.setInt(parameter, page * query.getPageSize());
+                    ResultSet rows = select.executeQuery();
+                    try {
+                        List<MarketOperationLog> operations = new ArrayList<MarketOperationLog>();
+                        while (rows.next()) operations.add(mapOperation(rows));
+                        return new MarketOperationHistoryPage(operations, total, page, query.getPageSize());
+                    } finally { rows.close(); }
+                } finally { select.close(); }
+            }
+        });
+    }
+
+    private String personalExceptionWhere(MarketAccountCenterQuery query) {
+        StringBuilder where = new StringBuilder("player_ref = ?");
+        if (query.getStatusGroup() == MarketAccountCenterQuery.StatusGroup.RECOVERY_REQUIRED) {
+            where.append(" AND operation_status = 'RECOVERY_REQUIRED'");
+        } else {
+            where.append(" AND operation_status IN ('FAILED','RECOVERY_REQUIRED')");
+        }
+        if (!query.getSearchText().isEmpty()) {
+            where.append(" AND (LOWER(request_id) LIKE ? ESCAPE '!' OR LOWER(COALESCE(message,'')) LIKE ? ESCAPE '!'"
+                + " OR CAST(operation_id AS TEXT) LIKE ? ESCAPE '!' OR CAST(related_order_id AS TEXT) LIKE ? ESCAPE '!'"
+                + " OR CAST(related_custody_id AS TEXT) LIKE ? ESCAPE '!')");
+        }
+        if (query.getCreatedAfter() != null) where.append(" AND updated_at >= ?");
+        return where.toString();
+    }
+
+    private int bindPersonalException(PreparedStatement statement, String playerRef, MarketAccountCenterQuery query)
+        throws SQLException {
+        int parameter = 1;
+        statement.setString(parameter++, playerRef);
+        if (!query.getSearchText().isEmpty()) {
+            String pattern = "%" + escapeLike(query.getSearchText().toLowerCase(java.util.Locale.ROOT)) + "%";
+            statement.setString(parameter++, pattern);
+            statement.setString(parameter++, pattern);
+            statement.setString(parameter++, pattern);
+            statement.setString(parameter++, pattern);
+            statement.setString(parameter++, pattern);
+        }
+        if (query.getCreatedAfter() != null) statement.setTimestamp(parameter++, java.sql.Timestamp.from(query.getCreatedAfter()));
+        return parameter;
+    }
+
+    private String escapeLike(String value) {
+        return value.replace("!", "!!").replace("%", "!%").replace("_", "!_");
     }
 
     private Optional<MarketOperationLog> findOne(final String sql, final long id, final String requestId) {

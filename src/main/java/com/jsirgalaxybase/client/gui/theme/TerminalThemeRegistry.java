@@ -24,7 +24,7 @@ public final class TerminalThemeRegistry {
         colors.put(ThemeColorKey.SCREEN_OVERLAY, 0xAA071017);
         colors.put(ThemeColorKey.PANEL_FILL, 0xF0182733);
         colors.put(ThemeColorKey.PANEL_ACCENT, 0xF0223443);
-        colors.put(ThemeColorKey.POPUP_FILL, 0xF01D2B37);
+        colors.put(ThemeColorKey.POPUP_FILL, 0xFF1D2B37);
         colors.put(ThemeColorKey.PANEL_BORDER, 0xFF5F7890);
         colors.put(ThemeColorKey.TEXT_PRIMARY, 0xFFEAF3F8);
         colors.put(ThemeColorKey.TEXT_SECONDARY, 0xFFB8C8D5);

@@ -278,6 +278,52 @@ public class StandardizedSpotMarketServiceTest {
     }
 
     @Test
+    public void cancelBuyOrderRejectsStaleVersionBeforeReleasingFunds() {
+        FakeMarketOrderBookRepository orders = new FakeMarketOrderBookRepository();
+        FakeMarketCustodyInventoryRepository custody = new FakeMarketCustodyInventoryRepository();
+        FakeMarketOperationLogRepository operations = new FakeMarketOperationLogRepository();
+        FakeMarketTradeRecordRepository trades = new FakeMarketTradeRecordRepository();
+        FakeMarketSettlementFacade settlement = new FakeMarketSettlementFacade();
+        settlement.registerPlayer("buyer");
+        StandardizedSpotMarketService service = createService(orders, custody, operations, trades,
+            new DirectMarketTransactionRunner(), settlement);
+        MarketOrder created = service.createBuyOrder(new CreateBuyOrderCommand(
+            "stale-create", "buyer", "test-server", "minecraft:stone:0", 10L, true, 100L)).getOrder();
+
+        try {
+            service.cancelBuyOrder(new CancelBuyOrderCommand("stale-cancel", "buyer", "test-server",
+                created.getOrderId(), created.getUpdatedAt().getEpochSecond() + 1L));
+            fail("expected stale order version rejection");
+        } catch (MarketOperationException expected) {
+            assertTrue(expected.getMessage().contains("changed after cancellation confirmation"));
+        }
+
+        assertEquals(0, settlement.releaseCommands.size());
+        assertEquals(MarketOrderStatus.OPEN, orders.findById(created.getOrderId()).get().getStatus());
+    }
+
+    @Test
+    public void cancelBuyOrderRequestIdReplayDoesNotReleaseFundsTwice() {
+        FakeMarketOrderBookRepository orders = new FakeMarketOrderBookRepository();
+        FakeMarketCustodyInventoryRepository custody = new FakeMarketCustodyInventoryRepository();
+        FakeMarketOperationLogRepository operations = new FakeMarketOperationLogRepository();
+        FakeMarketTradeRecordRepository trades = new FakeMarketTradeRecordRepository();
+        FakeMarketSettlementFacade settlement = new FakeMarketSettlementFacade();
+        settlement.registerPlayer("buyer");
+        StandardizedSpotMarketService service = createService(orders, custody, operations, trades,
+            new DirectMarketTransactionRunner(), settlement);
+        MarketOrder created = service.createBuyOrder(new CreateBuyOrderCommand(
+            "replay-create", "buyer", "test-server", "minecraft:stone:0", 10L, true, 100L)).getOrder();
+        CancelBuyOrderCommand command = new CancelBuyOrderCommand("replay-cancel", "buyer", "test-server",
+            created.getOrderId(), created.getUpdatedAt().getEpochSecond());
+
+        service.cancelBuyOrder(command);
+        service.cancelBuyOrder(command);
+
+        assertEquals(1, settlement.releaseCommands.size());
+    }
+
+    @Test
     public void createBuyOrderKeepsLongTerminalRequestBusinessReferenceWithinBankLimit() {
         FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
         FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
@@ -295,6 +341,26 @@ public class StandardizedSpotMarketServiceTest {
         assertEquals(1, settlementFacade.freezeCommands.size());
         assertTrue(settlementFacade.freezeCommands.get(0).getBusinessRef().length() <= 64);
         assertEquals(terminalRequestId + ":freeze", settlementFacade.freezeCommands.get(0).getRequestId());
+    }
+
+    @Test
+    public void createBuyOrderReservesFeeCapacityButDoesNotChargeFeeBeforeExecution() {
+        FakeMarketOrderBookRepository orders = new FakeMarketOrderBookRepository();
+        FakeMarketCustodyInventoryRepository custody = new FakeMarketCustodyInventoryRepository();
+        FakeMarketOperationLogRepository operations = new FakeMarketOperationLogRepository();
+        FakeMarketTradeRecordRepository trades = new FakeMarketTradeRecordRepository();
+        FakeMarketSettlementFacade settlement = new FakeMarketSettlementFacade();
+        settlement.registerPlayer("buyer");
+        StandardizedSpotMarketService service = createService(orders, custody, operations, trades,
+            new DirectMarketTransactionRunner(), settlement);
+
+        MarketOrder order = service.createBuyOrder(new CreateBuyOrderCommand(
+            "fee-reserve-only", "buyer", "test-server", "minecraft:stone:0", 10L, true, 100L)).getOrder();
+
+        assertEquals(1008L, order.getReservedFunds());
+        assertEquals(1008L, settlement.freezeCommands.get(0).getAmount());
+        assertTrue(settlement.settleCommands.isEmpty());
+        assertTrue(settlement.taxCommands.isEmpty());
     }
 
     @Test
@@ -330,6 +396,140 @@ public class StandardizedSpotMarketServiceTest {
         assertEquals(2, settlementFacade.settleCommands.size());
         assertEquals(1, settlementFacade.taxCommands.size());
         assertEquals(1, settlementFacade.releaseCommands.size());
+    }
+
+    @Test
+    public void incomingSellSkipsOwnBestBidAndMatchesNextExternalBid() {
+        FakeMarketOrderBookRepository orders = new FakeMarketOrderBookRepository();
+        FakeMarketCustodyInventoryRepository custody = new FakeMarketCustodyInventoryRepository();
+        FakeMarketOperationLogRepository operations = new FakeMarketOperationLogRepository();
+        FakeMarketTradeRecordRepository trades = new FakeMarketTradeRecordRepository();
+        FakeMarketSettlementFacade settlement = new FakeMarketSettlementFacade();
+        settlement.registerPlayer("self");
+        settlement.registerPlayer("external-buyer");
+        StandardizedSpotMarketService service = createService(orders, custody, operations, trades,
+            new DirectMarketTransactionRunner(), settlement);
+
+        MarketOrder ownBestBid = service.createBuyOrder(new CreateBuyOrderCommand(
+            "self-best-bid", "self", "test-server", "minecraft:stone:0", 5L, true, 100L)).getOrder();
+        MarketOrder externalBid = service.createBuyOrder(new CreateBuyOrderCommand(
+            "external-next-bid", "external-buyer", "test-server", "minecraft:stone:0", 5L, true, 90L)).getOrder();
+        depositInventory(service, "self-sell-deposit", "self", "minecraft:stone:0", 5L, true);
+
+        StandardizedSpotMarketService.CreateSellOrderResult result = service.createSellOrder(
+            new CreateSellOrderCommand("self-incoming-sell", "self", "test-server",
+                "minecraft:stone:0", 5L, true, 80L));
+
+        assertEquals(MarketOrderStatus.OPEN, orders.findById(ownBestBid.getOrderId()).get().getStatus());
+        assertEquals(5L, orders.findById(ownBestBid.getOrderId()).get().getOpenQuantity());
+        assertEquals(MarketOrderStatus.FILLED, orders.findById(externalBid.getOrderId()).get().getStatus());
+        assertEquals(MarketOrderStatus.FILLED, result.getOrder().getStatus());
+        assertEquals(1, result.getTradeRecords().size());
+        assertEquals("external-buyer", result.getTradeRecords().get(0).getBuyerPlayerRef());
+        assertEquals("self", result.getTradeRecords().get(0).getSellerPlayerRef());
+        assertEquals(90L, result.getTradeRecords().get(0).getUnitPrice());
+    }
+
+    @Test
+    public void incomingSellQuarantinesUnderfundedRestingBidAndMatchesNextValidBid() {
+        FakeMarketOrderBookRepository orders = new FakeMarketOrderBookRepository();
+        FakeMarketCustodyInventoryRepository custody = new FakeMarketCustodyInventoryRepository();
+        FakeMarketOperationLogRepository operations = new FakeMarketOperationLogRepository();
+        FakeMarketTradeRecordRepository trades = new FakeMarketTradeRecordRepository();
+        FakeMarketSettlementFacade settlement = new FakeMarketSettlementFacade();
+        settlement.registerPlayer("underfunded-buyer");
+        settlement.registerPlayer("valid-buyer");
+        settlement.registerPlayer("seller");
+        StandardizedSpotMarketService service = createService(orders, custody, operations, trades,
+            new DirectMarketTransactionRunner(), settlement);
+
+        Instant oldTime = Instant.now().minusSeconds(10L);
+        MarketOrder underfunded = orders.save(new MarketOrder(0L, MarketOrderSide.BUY, MarketOrderStatus.OPEN,
+            "underfunded-buyer", TestProducts.STONE, true, 100L, 5L, 5L, 0L, 500L, 0L, "fixture",
+            oldTime, oldTime));
+        MarketOrder valid = service.createBuyOrder(new CreateBuyOrderCommand(
+            "valid-next-bid", "valid-buyer", "test-server", "minecraft:stone:0", 5L, true, 90L)).getOrder();
+        depositInventory(service, "quarantine-sell-deposit", "seller", "minecraft:stone:0", 5L, true);
+
+        StandardizedSpotMarketService.CreateSellOrderResult result = service.createSellOrder(
+            new CreateSellOrderCommand("quarantine-incoming-sell", "seller", "test-server",
+                "minecraft:stone:0", 5L, true, 80L));
+
+        MarketOrder quarantined = orders.findById(underfunded.getOrderId()).get();
+        assertEquals(MarketOrderStatus.EXCEPTION, quarantined.getStatus());
+        assertEquals(0L, quarantined.getOpenQuantity());
+        assertEquals(0L, quarantined.getReservedFunds());
+        assertEquals(MarketOrderStatus.FILLED, orders.findById(valid.getOrderId()).get().getStatus());
+        assertEquals(MarketOrderStatus.FILLED, result.getOrder().getStatus());
+        assertEquals(1, result.getTradeRecords().size());
+        assertEquals(90L, result.getTradeRecords().get(0).getUnitPrice());
+        assertEquals(MarketOperationType.ORDER_QUARANTINE, operations.findByRequestId(
+            "market-order-quarantine:" + underfunded.getOrderId()).get().getOperationType());
+        assertTrue(containsRequestId(settlement.releaseCommands,
+            "market-order-quarantine:" + underfunded.getOrderId() + ":release"));
+    }
+
+    @Test
+    public void incomingBuySkipsOwnBestAskAndMatchesNextExternalAsk() {
+        FakeMarketOrderBookRepository orders = new FakeMarketOrderBookRepository();
+        FakeMarketCustodyInventoryRepository custody = new FakeMarketCustodyInventoryRepository();
+        FakeMarketOperationLogRepository operations = new FakeMarketOperationLogRepository();
+        FakeMarketTradeRecordRepository trades = new FakeMarketTradeRecordRepository();
+        FakeMarketSettlementFacade settlement = new FakeMarketSettlementFacade();
+        settlement.registerPlayer("self");
+        settlement.registerPlayer("external-seller");
+        StandardizedSpotMarketService service = createService(orders, custody, operations, trades,
+            new DirectMarketTransactionRunner(), settlement);
+
+        depositInventory(service, "self-ask-deposit", "self", "minecraft:stone:0", 5L, true);
+        MarketOrder ownBestAsk = service.createSellOrder(new CreateSellOrderCommand(
+            "self-best-ask", "self", "test-server", "minecraft:stone:0", 5L, true, 80L)).getOrder();
+        depositInventory(service, "external-ask-deposit", "external-seller", "minecraft:stone:0", 5L, true);
+        MarketOrder externalAsk = service.createSellOrder(new CreateSellOrderCommand(
+            "external-next-ask", "external-seller", "test-server", "minecraft:stone:0", 5L, true, 90L)).getOrder();
+
+        StandardizedSpotMarketService.CreateBuyOrderResult result = service.createBuyOrder(
+            new CreateBuyOrderCommand("self-incoming-buy", "self", "test-server",
+                "minecraft:stone:0", 5L, true, 100L));
+
+        assertEquals(MarketOrderStatus.OPEN, orders.findById(ownBestAsk.getOrderId()).get().getStatus());
+        assertEquals(5L, orders.findById(ownBestAsk.getOrderId()).get().getOpenQuantity());
+        assertEquals(MarketOrderStatus.FILLED, orders.findById(externalAsk.getOrderId()).get().getStatus());
+        assertEquals(MarketOrderStatus.FILLED, result.getOrder().getStatus());
+        assertEquals(1, result.getTradeRecords().size());
+        assertEquals("self", result.getTradeRecords().get(0).getBuyerPlayerRef());
+        assertEquals("external-seller", result.getTradeRecords().get(0).getSellerPlayerRef());
+        assertEquals(90L, result.getTradeRecords().get(0).getUnitPrice());
+    }
+
+    @Test
+    public void crossingOnlyOwnOrderLeavesBothOrdersOpenWithoutSettlement() {
+        FakeMarketOrderBookRepository orders = new FakeMarketOrderBookRepository();
+        FakeMarketCustodyInventoryRepository custody = new FakeMarketCustodyInventoryRepository();
+        FakeMarketOperationLogRepository operations = new FakeMarketOperationLogRepository();
+        FakeMarketTradeRecordRepository trades = new FakeMarketTradeRecordRepository();
+        FakeMarketSettlementFacade settlement = new FakeMarketSettlementFacade();
+        settlement.registerPlayer("self");
+        StandardizedSpotMarketService service = createService(orders, custody, operations, trades,
+            new DirectMarketTransactionRunner(), settlement);
+
+        MarketOrder ownBuy = service.createBuyOrder(new CreateBuyOrderCommand(
+            "self-only-buy", "self", "test-server", "minecraft:stone:0", 5L, true, 100L)).getOrder();
+        depositInventory(service, "self-only-sell-deposit", "self", "minecraft:stone:0", 5L, true);
+
+        StandardizedSpotMarketService.CreateSellOrderResult sell = service.createSellOrder(
+            new CreateSellOrderCommand("self-only-sell", "self", "test-server",
+                "minecraft:stone:0", 5L, true, 80L));
+
+        assertEquals(MarketOrderStatus.OPEN, orders.findById(ownBuy.getOrderId()).get().getStatus());
+        assertEquals(5L, orders.findById(ownBuy.getOrderId()).get().getOpenQuantity());
+        assertEquals(MarketOrderStatus.OPEN, sell.getOrder().getStatus());
+        assertEquals(5L, sell.getOrder().getOpenQuantity());
+        assertEquals(MarketCustodyStatus.ESCROW_SELL, sell.getCustody().getStatus());
+        assertTrue(sell.getTradeRecords().isEmpty());
+        assertTrue(trades.records.isEmpty());
+        assertTrue(settlement.settleCommands.isEmpty());
+        assertTrue(settlement.taxCommands.isEmpty());
     }
 
     @Test
@@ -1041,6 +1241,15 @@ public class StandardizedSpotMarketServiceTest {
         String requestId, String playerRef, String productKey, long quantity, boolean stackable) {
         return service.depositInventory(new DepositMarketInventoryCommand(requestId, playerRef, "test-server",
             productKey, quantity, stackable));
+    }
+
+    private static boolean containsRequestId(List<FrozenBalanceCommand> commands, String requestId) {
+        for (FrozenBalanceCommand command : commands) {
+            if (requestId.equals(command.getRequestId())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static final class PermissiveProductCatalog implements StandardizedMarketProductCatalog {

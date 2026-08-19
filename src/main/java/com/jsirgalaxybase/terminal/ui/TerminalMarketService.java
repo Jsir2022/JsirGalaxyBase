@@ -54,16 +54,26 @@ import com.jsirgalaxybase.modules.core.market.domain.MarketOrderHistoryQuery;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOrderSide;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOrderStatus;
 import com.jsirgalaxybase.modules.core.market.domain.MarketTradeRecord;
+import com.jsirgalaxybase.modules.core.market.domain.MarketTradeHistoryPage;
+import com.jsirgalaxybase.modules.core.market.domain.MarketOperationHistoryPage;
+import com.jsirgalaxybase.modules.core.market.domain.MarketOperationLog;
+import com.jsirgalaxybase.modules.core.market.domain.MarketAccountCenterQuery;
+import com.jsirgalaxybase.modules.core.market.domain.MarketAccountCenterSnapshot;
 import com.jsirgalaxybase.modules.core.market.domain.StandardizedMarketProduct;
 import com.jsirgalaxybase.modules.core.market.domain.ExchangeMarketExecutionResult;
 import com.jsirgalaxybase.modules.core.market.infrastructure.MarketInfrastructure;
 import com.jsirgalaxybase.modules.core.vault.application.BaseVaultService;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultSlot;
+import com.jsirgalaxybase.modules.core.vault.domain.VaultOperation;
+import com.jsirgalaxybase.modules.core.vault.domain.VaultOperationHistoryPage;
+import com.jsirgalaxybase.modules.core.vault.domain.VaultOperationStatus;
+import com.jsirgalaxybase.modules.core.vault.application.VaultItemStackCodec;
 import com.jsirgalaxybase.modules.core.vault.infrastructure.VaultCustomMarketDeliveryPort;
 import com.jsirgalaxybase.modules.core.market.port.MarketCustodyInventoryRepository;
 import com.jsirgalaxybase.modules.core.market.port.AccountInventoryResolver;
 import com.jsirgalaxybase.modules.core.market.port.MarketOrderBookRepository;
 import com.jsirgalaxybase.modules.core.market.port.MarketTradeRecordRepository;
+import com.jsirgalaxybase.modules.core.market.port.MarketOperationLogRepository;
 
 import cpw.mods.fml.common.registry.GameData;
 import cpw.mods.fml.common.registry.GameRegistry;
@@ -232,10 +242,10 @@ final class TerminalMarketService {
             selectedProductKey,
             Instant.now().minusSeconds(24L * 60L * 60L),
             64);
-        List<MarketOrder> myOrders = context.orderRepository.findOrdersByOwner(playerRef, ORDER_LIMIT);
-        if ((myOrders == null || myOrders.isEmpty()) && selectedProductKey != null && !selectedProductKey.isEmpty()) {
-            myOrders = context.orderRepository.findOrdersByOwnerAndProductKey(playerRef, selectedProductKey, ORDER_LIMIT);
-        }
+        // Product detail is deliberately not the cross-product order center.  It may only
+        // offer cancellation for this product's still-actionable orders.
+        List<MarketOrder> myOrders = context.orderRepository.findOrdersByOwnerAndProductKey(
+            playerRef, selectedProductKey, ORDER_LIMIT);
         List<MarketCustodyInventory> claimables = context.custodyRepository.findByOwnerProductKeyAndStatuses(
             playerRef,
             selectedProductKey,
@@ -349,6 +359,222 @@ final class TerminalMarketService {
             page == null ? 0 : page.getTotalEntries(),
             page == null ? request.getHistoryPage() : page.getPageIndex(),
             page == null ? pageSize : page.getPageSize());
+    }
+
+    MarketAccountCenterSnapshot createAccountCenterSnapshot(EntityPlayer player, TerminalMarketActionPayload payload) {
+        MarketContext context = resolveContext();
+        TerminalMarketActionPayload request = payload == null ? TerminalMarketActionPayload.empty() : payload;
+        MarketAccountCenterQuery.Tab tab = parseCenterTab(request.getCenterTab());
+        MarketAccountCenterQuery query = new MarketAccountCenterQuery(tab, request.getHistoryQuery(),
+            "CURRENT".equals(request.getHistoryProductScope()) ? request.getSelectedProductKey() : "",
+            parseHistorySide(request.getHistorySide()), parseCenterStatus(request.getHistoryStatus()),
+            historyCutoff(request.getHistoryTime()), request.getHistoryPage(), request.getHistoryPageSize(),
+            request.getFocusedRecordId());
+        if (!context.isReady()) {
+            return new MarketAccountCenterSnapshot(tab, null,
+                new MarketAccountCenterSnapshot.PageMetadata(0, query.getPageIndex(), query.getPageSize()),
+                null, null, null, null);
+        }
+        String playerRef = resolvePlayerRef(player);
+        MarketAccountCenterSnapshot.AccountSummary summary = buildCenterSummary(player, context, playerRef);
+        if (tab == MarketAccountCenterQuery.Tab.FILLS) {
+            MarketTradeHistoryPage page = context.tradeRecordRepository.findPersonalTradeHistory(playerRef, query);
+            List<MarketAccountCenterSnapshot.FillRow> rows = new ArrayList<MarketAccountCenterSnapshot.FillRow>();
+            for (MarketTradeRecord trade : page.getTrades()) {
+                boolean buy = playerRef.equals(trade.getBuyerPlayerRef());
+                rows.add(new MarketAccountCenterSnapshot.FillRow(trade, buy ? MarketOrderSide.BUY : MarketOrderSide.SELL,
+                    buy ? trade.getBuyOrderId() : trade.getSellOrderId()));
+            }
+            return new MarketAccountCenterSnapshot(tab, summary, new MarketAccountCenterSnapshot.PageMetadata(
+                page.getTotalEntries(), page.getPageIndex(), page.getPageSize()), null, rows, null, null);
+        }
+        if (tab == MarketAccountCenterQuery.Tab.ASSETS_AND_DELIVERY) {
+            return buildDeliveryCenterSnapshot(context, playerRef, query, summary);
+        }
+        MarketOrderHistoryQuery.StatusGroup orderStatus = tab == MarketAccountCenterQuery.Tab.OPEN_ORDERS
+            ? MarketOrderHistoryQuery.StatusGroup.OPEN : parseCenterHistoryOrderStatus(request.getHistoryStatus());
+        MarketOrderHistoryPage page = context.orderRepository.findOrderHistory(playerRef,
+            new MarketOrderHistoryQuery(query.getProductKey(), query.getSide(), orderStatus, query.getCreatedAfter(),
+                query.getSearchText(), query.getPageIndex(), query.getPageSize()));
+        List<MarketAccountCenterSnapshot.OrderRow> openRows = new ArrayList<MarketAccountCenterSnapshot.OrderRow>();
+        List<MarketAccountCenterSnapshot.HistoryRow> historyRows = new ArrayList<MarketAccountCenterSnapshot.HistoryRow>();
+        for (MarketOrder order : page.getOrders()) {
+            if (tab == MarketAccountCenterQuery.Tab.OPEN_ORDERS) openRows.add(new MarketAccountCenterSnapshot.OrderRow(order));
+            else historyRows.add(new MarketAccountCenterSnapshot.HistoryRow(order));
+        }
+        return new MarketAccountCenterSnapshot(tab, summary, new MarketAccountCenterSnapshot.PageMetadata(
+            page.getTotalEntries(), page.getPageIndex(), page.getPageSize()), openRows, null, null, historyRows);
+    }
+
+    private MarketAccountCenterSnapshot buildDeliveryCenterSnapshot(MarketContext context, String playerRef,
+        MarketAccountCenterQuery query, MarketAccountCenterSnapshot.AccountSummary summary) {
+        List<MarketAccountCenterSnapshot.DeliveryRow> all = new ArrayList<MarketAccountCenterSnapshot.DeliveryRow>();
+        List<MarketCustodyInventory> claims = context.custodyRepository.findByOwnerAndStatus(playerRef,
+            MarketCustodyStatus.CLAIMABLE);
+        int matchingClaims = 0;
+        boolean includePending = query.getStatusGroup() == MarketAccountCenterQuery.StatusGroup.ALL
+            || query.getStatusGroup() == MarketAccountCenterQuery.StatusGroup.ACTIVE;
+        for (MarketCustodyInventory claim : claims) {
+            if (!includePending) continue;
+            if (!query.getProductKey().isEmpty() && !query.getProductKey().equals(claim.getProduct().getProductKey())) continue;
+            if (!query.getSearchText().isEmpty()
+                && !claim.getProduct().getProductKey().toLowerCase(Locale.ROOT)
+                    .contains(query.getSearchText().toLowerCase(Locale.ROOT))
+                && !String.valueOf(claim.getCustodyId()).contains(query.getSearchText())) continue;
+            matchingClaims++;
+            all.add(new MarketAccountCenterSnapshot.DeliveryRow("C" + claim.getCustodyId(), "PENDING_DELIVERY",
+                "CLAIMABLE", "待收货；Base Vault 满仓时保持此状态", claim.getProduct(), claim.getQuantity(),
+                claim.getRelatedOrderId(), claim.getUpdatedAt()));
+        }
+        int needed = Math.min((query.getPageIndex() + 1) * query.getPageSize(),
+            (MarketAccountCenterQuery.MAX_PAGE_INDEX + 1) * MarketAccountCenterQuery.MAX_PAGE_SIZE);
+        MarketOperationHistoryPage operations = collectMarketExceptions(context, playerRef, query, needed);
+        for (MarketOperationLog operation : operations.getOperations()) {
+            all.add(new MarketAccountCenterSnapshot.DeliveryRow("O" + operation.getOperationId(),
+                operation.getOperationType().name(), operation.getStatus().name(), safeOperationMessage(operation),
+                null, 0L, operation.getRelatedOrderId(), operation.getUpdatedAt()));
+        }
+        VaultOperationStatus vaultStatus = query.getStatusGroup() == MarketAccountCenterQuery.StatusGroup.RECOVERY_REQUIRED
+            ? VaultOperationStatus.RECOVERY_REQUIRED : null;
+        VaultOperationHistoryPage vaultOperations = collectVaultExceptions(context, playerRef, query, vaultStatus, needed);
+        for (VaultOperation operation : vaultOperations.getOperations()) {
+            all.add(new MarketAccountCenterSnapshot.DeliveryRow("V" + operation.getOperationId(),
+                "BASE_VAULT_" + operation.getOperationType(), operation.getStatus().name(),
+                operation.getMessage(), productFromVaultOperation(operation), operation.getQuantity(), 0L,
+                operation.getUpdatedAt()));
+        }
+        boolean vaultFull = summary.getVaultTotalSlots() > 0
+            && summary.getVaultUsedSlots() >= summary.getVaultTotalSlots() && !claims.isEmpty();
+        boolean fullMatchesSearch = query.getSearchText().isEmpty()
+            || "base vault 满仓 vault_full".contains(query.getSearchText().toLowerCase(Locale.ROOT));
+        if (vaultFull && includePending && fullMatchesSearch) {
+            all.add(new MarketAccountCenterSnapshot.DeliveryRow("VAULT_FULL", "VAULT_FULL", "EXCEPTION",
+                "Base Vault 已满，待收货资产将保留在受审计托管中", null, 0L, 0L, Instant.now()));
+        }
+        Collections.sort(all, (left, right) -> {
+            Instant leftTime = left.getUpdatedAt() == null ? Instant.EPOCH : left.getUpdatedAt();
+            Instant rightTime = right.getUpdatedAt() == null ? Instant.EPOCH : right.getUpdatedAt();
+            return rightTime.compareTo(leftTime);
+        });
+        int total = matchingClaims + operations.getTotalEntries() + vaultOperations.getTotalEntries()
+            + (vaultFull && includePending && fullMatchesSearch ? 1 : 0);
+        int page = total <= 0 ? 0 : Math.min(query.getPageIndex(), (total - 1) / query.getPageSize());
+        int start = Math.min(all.size(), page * query.getPageSize());
+        int end = Math.min(all.size(), start + query.getPageSize());
+        return new MarketAccountCenterSnapshot(query.getTab(), summary,
+            new MarketAccountCenterSnapshot.PageMetadata(total, page, query.getPageSize()), null, null,
+            new ArrayList<MarketAccountCenterSnapshot.DeliveryRow>(all.subList(start, end)), null);
+    }
+
+    private MarketOperationHistoryPage collectMarketExceptions(MarketContext context, String playerRef,
+        MarketAccountCenterQuery query, int needed) {
+        List<MarketOperationLog> collected = new ArrayList<MarketOperationLog>();
+        int total = 0;
+        for (int pageIndex = 0; collected.size() < needed; pageIndex++) {
+            MarketOperationHistoryPage page = context.operationLogRepository.findPersonalExceptions(playerRef,
+                new MarketAccountCenterQuery(query.getTab(), query.getSearchText(), "", null, query.getStatusGroup(),
+                    query.getCreatedAfter(), pageIndex, MarketAccountCenterQuery.MAX_PAGE_SIZE,
+                    query.getFocusedRecordId()));
+            total = page.getTotalEntries();
+            collected.addAll(page.getOperations());
+            if (collected.size() >= total || page.getOperations().isEmpty()) break;
+        }
+        return new MarketOperationHistoryPage(collected, total, 0, Math.max(1, needed));
+    }
+
+    private VaultOperationHistoryPage collectVaultExceptions(MarketContext context, String playerRef,
+        MarketAccountCenterQuery query, VaultOperationStatus status, int needed) {
+        List<VaultOperation> collected = new ArrayList<VaultOperation>();
+        int total = 0;
+        for (int pageIndex = 0; collected.size() < needed; pageIndex++) {
+            VaultOperationHistoryPage page = context.vaultService.findPersonalExceptionalOperations(playerRef,
+                query.getSearchText(), status, query.getCreatedAfter(), pageIndex,
+                MarketAccountCenterQuery.MAX_PAGE_SIZE);
+            total = page.getTotalEntries();
+            collected.addAll(page.getOperations());
+            if (collected.size() >= total || page.getOperations().isEmpty()) break;
+        }
+        return new VaultOperationHistoryPage(collected, total, 0, Math.max(1, needed));
+    }
+
+    private StandardizedMarketProduct productFromVaultOperation(VaultOperation operation) {
+        if (operation == null || operation.getItemSnapshot() == null || operation.getItemSnapshot().trim().isEmpty()) {
+            return null;
+        }
+        try {
+            ItemStack stack = VaultItemStackCodec.decode(operation.getItemSnapshot());
+            Object registry = stack == null ? null : Item.itemRegistry.getNameForObject(stack.getItem());
+            return registry == null ? null : new StandardizedMarketProduct(String.valueOf(registry), stack.getItemDamage());
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private MarketAccountCenterSnapshot.AccountSummary buildCenterSummary(EntityPlayer player, MarketContext context,
+        String playerRef) {
+        int used = 0;
+        int totalSlots = 0;
+        try {
+            BaseVaultService.VaultView vault = context.vaultService.viewPersonalVault(playerRef);
+            totalSlots = vault.getSlots().size();
+            for (VaultSlot slot : vault.getSlots()) if (slot != null && slot.getStack() != null) used++;
+        } catch (RuntimeException ignored) { }
+        int pending = context.custodyRepository.findByOwnerAndStatus(playerRef, MarketCustodyStatus.CLAIMABLE).size();
+        int recovery = context.operationLogRepository.findPersonalExceptions(playerRef,
+            new MarketAccountCenterQuery(MarketAccountCenterQuery.Tab.ASSETS_AND_DELIVERY, "", "", null,
+                MarketAccountCenterQuery.StatusGroup.ALL, null, 0, 1, "")).getTotalEntries();
+        recovery += context.vaultService.findPersonalExceptionalOperations(playerRef, "", null, null, 0, 1)
+            .getTotalEntries();
+        TerminalBankSnapshot bank = TerminalBankSnapshotProvider.INSTANCE.create(player);
+        long frozenFunds = bank.getPlayerStatus() != null && bank.getPlayerStatus().contains("冻结")
+            ? parsePositiveAmount(bank.getPlayerStatus()) : context.orderRepository.sumReservedFundsByOwner(playerRef);
+        return new MarketAccountCenterSnapshot.AccountSummary(parsePositiveAmount(bank.getPlayerBalance()),
+            frozenFunds, used, totalSlots,
+            context.orderRepository.countActiveOrdersByOwner(playerRef), pending, recovery);
+    }
+
+    private long parsePositiveAmount(String value) {
+        if (value == null || value.trim().isEmpty()) return 0L;
+        StringBuilder digits = new StringBuilder();
+        boolean started = false;
+        for (int index = 0; index < value.length(); index++) {
+            char ch = value.charAt(index);
+            if (ch >= '0' && ch <= '9') {
+                digits.append(ch);
+                started = true;
+            } else if (ch == ',' && started) {
+                continue;
+            } else if (started) {
+                break;
+            }
+        }
+        if (digits.length() == 0) return 0L;
+        try { return Math.max(0L, Long.parseLong(digits.toString())); }
+        catch (NumberFormatException ignored) { return 0L; }
+    }
+
+    private MarketAccountCenterQuery.Tab parseCenterTab(String value) {
+        try { return MarketAccountCenterQuery.Tab.valueOf(value == null ? "OPEN_ORDERS" : value); }
+        catch (IllegalArgumentException ignored) { return MarketAccountCenterQuery.Tab.OPEN_ORDERS; }
+    }
+
+    private MarketAccountCenterQuery.StatusGroup parseCenterStatus(String value) {
+        if ("OPEN".equals(value)) return MarketAccountCenterQuery.StatusGroup.ACTIVE;
+        if ("FILLED".equals(value)) return MarketAccountCenterQuery.StatusGroup.FILLED;
+        if ("CLOSED".equals(value)) return MarketAccountCenterQuery.StatusGroup.CLOSED;
+        if ("RECOVERY_REQUIRED".equals(value)) return MarketAccountCenterQuery.StatusGroup.RECOVERY_REQUIRED;
+        return MarketAccountCenterQuery.StatusGroup.ALL;
+    }
+
+    private MarketOrderHistoryQuery.StatusGroup parseCenterHistoryOrderStatus(String value) {
+        if ("FILLED".equals(value)) return MarketOrderHistoryQuery.StatusGroup.FILLED;
+        if ("CLOSED".equals(value)) return MarketOrderHistoryQuery.StatusGroup.CLOSED;
+        return MarketOrderHistoryQuery.StatusGroup.HISTORICAL;
+    }
+
+    private String safeOperationMessage(MarketOperationLog operation) {
+        String message = operation == null ? "" : operation.getMessage();
+        return message == null || message.trim().isEmpty() ? "需要人工检查的市场资产操作" : message.trim();
     }
 
     private MarketOrderSide parseHistorySide(String value) {
@@ -627,10 +853,11 @@ final class TerminalMarketService {
                 "买单已提交",
                 "orderId="
                     + result.getOrder().getOrderId()
-                    + "，冻结 "
+                    + "，当前剩余资金预留 "
                     + formatAmount(result.getOrder().getReservedFunds())
                     + " STARCOIN"
                     + (result.getTradeRecords().isEmpty() ? "。" : "，已立即撮合 " + result.getTradeRecords().size() + " 笔。")
+                    + "手续费只按实际成交收取，未成交预留会在撤单或完成后释放。"
                     + describePendingDeliveries(pendingDeliveries),
                 3600L);
         } catch (RuntimeException exception) {
@@ -970,6 +1197,11 @@ final class TerminalMarketService {
     }
 
     TerminalActionFeedback cancelOrder(EntityPlayer player, long orderId) {
+        return cancelOrder(player, orderId, "", 0L);
+    }
+
+    TerminalActionFeedback cancelOrder(EntityPlayer player, long orderId, String requestId,
+        long expectedUpdatedAtEpochSecond) {
         EntityPlayerMP serverPlayer = requireServerPlayer(player);
         if (serverPlayer == null) {
             return TerminalActionFeedback.of(
@@ -990,13 +1222,31 @@ final class TerminalMarketService {
             if (!order.isPresent()) {
                 throw new MarketOperationException("orderId 对应的订单不存在");
             }
+            String playerRef = serverPlayer.getUniqueID().toString();
+            if (!playerRef.equals(order.get().getOwnerPlayerRef())) {
+                throw new MarketOperationException("当前订单不属于登录玩家");
+            }
+            if ((order.get().getStatus() != MarketOrderStatus.OPEN
+                && order.get().getStatus() != MarketOrderStatus.PARTIALLY_FILLED)
+                || order.get().getOpenQuantity() <= 0L) {
+                return TerminalActionFeedback.of(TerminalNotificationSeverity.WARNING, "订单状态已变化",
+                    "该订单已不可撤销，订单中心将刷新为服务端最新状态。", 4200L);
+            }
+            long currentVersion = order.get().getUpdatedAt() == null ? 0L : order.get().getUpdatedAt().getEpochSecond();
+            if (expectedUpdatedAtEpochSecond > 0L && currentVersion != expectedUpdatedAtEpochSecond) {
+                return TerminalActionFeedback.of(TerminalNotificationSeverity.WARNING, "订单状态已变化",
+                    "确认期间订单发生了成交或状态更新，请核对最新剩余量后重新撤单。", 4200L);
+            }
+            String effectiveRequestId = requestId == null || requestId.trim().isEmpty()
+                ? newRequestId("terminal-market-cancel") : requestId.trim();
             if (order.get().getSide() == MarketOrderSide.BUY) {
                 StandardizedSpotMarketService.CancelBuyOrderResult result = context.spotMarketService.cancelBuyOrder(
                     new CancelBuyOrderCommand(
-                        newRequestId("terminal-market-buy-cancel"),
-                        serverPlayer.getUniqueID().toString(),
+                        effectiveRequestId,
+                        playerRef,
                         context.sourceServerId,
-                        orderId));
+                        orderId,
+                        expectedUpdatedAtEpochSecond));
                 return TerminalActionFeedback.of(
                     TerminalNotificationSeverity.SUCCESS,
                     "买单已撤销",
@@ -1007,12 +1257,13 @@ final class TerminalMarketService {
 
             StandardizedSpotMarketService.CancelSellOrderResult result = context.spotMarketService.cancelSellOrder(
                 new CancelSellOrderCommand(
-                    newRequestId("terminal-market-sell-cancel"),
-                    serverPlayer.getUniqueID().toString(),
+                    effectiveRequestId,
+                    playerRef,
                     context.sourceServerId,
-                    orderId));
+                    orderId,
+                    expectedUpdatedAtEpochSecond));
             boolean returned = returnCancelledSellToAccountInventory(context,
-                serverPlayer.getUniqueID().toString(), result.getCustody());
+                playerRef, result.getCustody());
             return TerminalActionFeedback.of(
                 returned ? TerminalNotificationSeverity.SUCCESS : TerminalNotificationSeverity.WARNING,
                 "卖单已撤销",
@@ -1885,8 +2136,9 @@ final class TerminalMarketService {
         }
         long gross = unitPrice * quantity;
         long fee = calculateFee(gross, TAKER_FEE_BASIS_POINTS);
-        return "冻结预计 " + formatAmount(gross + fee) + " STARCOIN = 本金 " + formatAmount(gross) + " + taker 费 " + formatAmount(fee)
-            + "。若与卖盘交叉，将立即撮合；否则进入订单簿等待。";
+        return "最多预留 " + formatAmount(gross + fee) + " STARCOIN = 委托本金 " + formatAmount(gross)
+            + " + 成交手续费上限 " + formatAmount(fee)
+            + "。未成交不收费，剩余预留在撤单或完成后释放。";
     }
 
     private String buildLimitSellPreview(TerminalMarketSnapshotRequest controller, String selectedProductKey,
@@ -1964,7 +2216,10 @@ final class TerminalMarketService {
                         + " | 总 " + formatAmount(order.getOriginalQuantity()) + " | 成 " + formatAmount(order.getFilledQuantity())
                         + " | 剩 " + formatAmount(order.getOpenQuantity()) + " | " + order.getStatus() + " | "
                         + formatInstant(order.getCreatedAt()) + " | "
-                        + resolveProductDisplayName(marketService, order.getProduct()));
+                        + resolveProductDisplayName(marketService, order.getProduct()) + " | "
+                        + (order.getUpdatedAt() == null ? 0L : order.getUpdatedAt().getEpochSecond()) + " | "
+                        + order.getProduct().getRegistryName() + " | " + order.getProduct().getMeta() + " | 预留 "
+                        + formatAmount(order.getReservedFunds()));
                 if (lines.size() >= ORDER_LIMIT) {
                     break;
                 }
@@ -2351,6 +2606,7 @@ final class TerminalMarketService {
             marketInfrastructure.getOrderBookRepository(),
             marketInfrastructure.getCustodyInventoryRepository(),
             marketInfrastructure.getTradeRecordRepository(),
+            marketInfrastructure.getOperationLogRepository(),
             vaultService,
             institutionCoreModule.getAccountInventoryResolver(),
             institutionCoreModule.getBankingSourceServerId(),
@@ -2425,6 +2681,7 @@ final class TerminalMarketService {
         private final MarketOrderBookRepository orderRepository;
         private final MarketCustodyInventoryRepository custodyRepository;
         private final MarketTradeRecordRepository tradeRecordRepository;
+        private final MarketOperationLogRepository operationLogRepository;
         private final BaseVaultService vaultService;
         private final AccountInventoryResolver accountInventoryResolver;
         private final String sourceServerId;
@@ -2433,12 +2690,14 @@ final class TerminalMarketService {
 
         private MarketContext(StandardizedSpotMarketService spotMarketService, MarketOrderBookRepository orderRepository,
             MarketCustodyInventoryRepository custodyRepository, MarketTradeRecordRepository tradeRecordRepository,
+            MarketOperationLogRepository operationLogRepository,
             BaseVaultService vaultService, AccountInventoryResolver accountInventoryResolver, String sourceServerId,
             String unavailableMessage, boolean ready) {
             this.spotMarketService = spotMarketService;
             this.orderRepository = orderRepository;
             this.custodyRepository = custodyRepository;
             this.tradeRecordRepository = tradeRecordRepository;
+            this.operationLogRepository = operationLogRepository;
             this.vaultService = vaultService;
             this.accountInventoryResolver = accountInventoryResolver;
             this.sourceServerId = sourceServerId;
@@ -2447,7 +2706,7 @@ final class TerminalMarketService {
         }
 
         private static MarketContext unavailable(String unavailableMessage) {
-            return new MarketContext(null, null, null, null, null, null, null, unavailableMessage, false);
+            return new MarketContext(null, null, null, null, null, null, null, null, unavailableMessage, false);
         }
 
         private boolean isReady() {

@@ -109,7 +109,8 @@ public final class TerminalMarketActionMessageFactory {
         if (screenModel == null || marketModel == null || marketSectionState == null) {
             return false;
         }
-        return TerminalPage.MARKET_STANDARDIZED == TerminalPage.fromId(screenModel.getSelectedPageId());
+        TerminalPage page = TerminalPage.fromId(screenModel.getSelectedPageId());
+        return TerminalPage.MARKET_STANDARDIZED == page || TerminalPage.MARKET_ACCOUNT_CENTER == page;
     }
 
     private static TerminalActionMessage createMarketActionMessage(TerminalHomeScreenModel screenModel,

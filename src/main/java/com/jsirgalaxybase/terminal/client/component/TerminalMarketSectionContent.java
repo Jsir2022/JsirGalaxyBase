@@ -5,6 +5,8 @@ import java.util.Collections;
 import java.util.List;
 
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel;
+import com.jsirgalaxybase.terminal.client.TerminalNumberFormat;
+import com.jsirgalaxybase.terminal.TerminalMarketAccountCenterRow;
 
 final class TerminalMarketSectionContent {
 
@@ -228,6 +230,13 @@ final class TerminalMarketSectionContent {
         return entries;
     }
 
+    static List<OrderEntry> buildAccountCenterEntries(TerminalMarketSectionModel model) {
+        if (model == null) return Collections.emptyList();
+        List<OrderEntry> entries = new ArrayList<OrderEntry>(model.getAccountCenterRows().size());
+        for (TerminalMarketAccountCenterRow row : model.getAccountCenterRows()) entries.add(new OrderEntry(row));
+        return entries;
+    }
+
     static List<String> buildRuleLines(TerminalMarketSectionModel model) {
         if (model == null) {
             return Collections.singletonList("当前没有规则提示。");
@@ -422,13 +431,15 @@ final class TerminalMarketSectionContent {
 
         ProductEntry(TerminalMarketSectionModel.CatalogProductModel product, boolean selected) {
             this.key = product == null ? "" : normalize(product.getProductKey());
-            this.label = product == null ? "" : normalize(product.getDisplayName());
+            String fallback = product == null ? "" : normalize(product.getDisplayName());
+            this.label = product == null ? "" : TerminalMarketVisuals.resolveLocalizedItemName(
+                TerminalMarketVisuals.itemRef(product.getRegistryName(), product.getMeta()), fallback);
             this.title = this.label.isEmpty() ? this.key : this.label;
             String unit = product == null ? "" : normalize(product.getUnitLabel());
             this.referencePrice = product == null ? 0L : product.getReferencePrice();
             this.subtitle = unit.isEmpty() ? "标准单位" : unit;
             this.stateLabel = selected ? "已选中" : product == null ? "不可用" : product.getTradability();
-            this.iconRef = product == null ? "" : normalize(product.getRegistryName()) + "@" + product.getMeta();
+            this.iconRef = product == null ? "" : TerminalMarketVisuals.itemRef(product.getRegistryName(), product.getMeta());
             this.enabled = product != null && product.isEnabled();
             this.selected = selected;
         }
@@ -503,6 +514,9 @@ final class TerminalMarketSectionContent {
         private final String originalQuantity;
         private final String filledQuantity;
         private final String remainingQuantity;
+        private final long updatedAtEpochSeconds;
+        private final String registryName;
+        private final int meta;
 
         OrderEntry(String orderId, String detail, boolean cancelable) {
             this.orderId = normalize(orderId);
@@ -518,6 +532,23 @@ final class TerminalMarketSectionContent {
             this.originalQuantity = stripLabel(part(parts, 4), "总");
             this.filledQuantity = stripLabel(part(parts, 5), "成");
             this.remainingQuantity = stripLabel(part(parts, 6), "剩");
+            this.updatedAtEpochSeconds = parseLong(part(parts, 10));
+            this.registryName = part(parts, 11);
+            this.meta = (int) Math.max(0L, parseLong(part(parts, 12)));
+        }
+
+        OrderEntry(TerminalMarketAccountCenterRow row) {
+            this.orderId = normalize(row.getRecordId()); this.detail = ""; this.cancelable = row.isCancelable();
+            this.registryName = normalize(row.getRegistryName()); this.meta = row.getMeta();
+            this.productKey = registryName.isEmpty() ? "" : registryName + ":" + meta;
+            this.side = normalize(row.getSide()).toUpperCase(java.util.Locale.ROOT);
+            this.status = normalize(row.getStatus()).toUpperCase(java.util.Locale.ROOT);
+            this.createdAt = normalize(row.getCreatedAt()); this.displayName = productKey;
+            this.unitPrice = TerminalNumberFormat.exact(row.getUnitPrice());
+            this.originalQuantity = TerminalNumberFormat.exact(row.getOriginalQuantity());
+            this.filledQuantity = TerminalNumberFormat.exact(row.getFilledQuantity());
+            this.remainingQuantity = TerminalNumberFormat.exact(row.getRemainingQuantity());
+            this.updatedAtEpochSeconds = row.getUpdatedAtEpochSeconds();
         }
 
         String getOrderId() {
@@ -529,7 +560,8 @@ final class TerminalMarketSectionContent {
         }
 
         boolean isCancelable() {
-            return cancelable && !orderId.isEmpty();
+            return cancelable && !orderId.isEmpty() && parseLong(remainingQuantity) > 0L
+                && ("OPEN".equals(status) || "PARTIALLY_FILLED".equals(status));
         }
 
         String getProductKey() { return productKey; }
@@ -541,6 +573,9 @@ final class TerminalMarketSectionContent {
         String getOriginalQuantity() { return originalQuantity; }
         String getFilledQuantity() { return filledQuantity; }
         String getRemainingQuantity() { return remainingQuantity; }
+        long getUpdatedAtEpochSeconds() { return updatedAtEpochSeconds; }
+        String getRegistryName() { return registryName; }
+        int getMeta() { return meta; }
 
         String getSideLabel() {
             return "BUY".equals(side) ? "买" : "SELL".equals(side) ? "卖" : "--";
@@ -554,6 +589,37 @@ final class TerminalMarketSectionContent {
             if ("REJECTED".equals(status)) return "已拒绝";
             if ("EXPIRED".equals(status)) return "已过期";
             return status.isEmpty() ? "--" : status;
+        }
+
+        String getStatusMarkerLabel() {
+            if ("OPEN".equals(status)) return "进行中·未成交";
+            if ("PARTIALLY_FILLED".equals(status)) return "进行中·部分成交";
+            if ("FILLED".equals(status) || "COMPLETED".equals(status)) return "完成·已成交";
+            if ("CANCELLED".equals(status) || "CANCELED".equals(status)) return "结束·已撤销";
+            if ("REJECTED".equals(status)) return "结束·已拒绝";
+            if ("EXPIRED".equals(status)) return "结束·已过期";
+            return getStatusLabel();
+        }
+
+        String getFillProgressLabel() {
+            long original = parseLong(originalQuantity);
+            long filled = parseLong(filledQuantity);
+            if (original <= 0L) return filledQuantity + "/" + originalQuantity;
+            long percent = java.math.BigInteger.valueOf(filled)
+                .multiply(java.math.BigInteger.valueOf(100L))
+                .divide(java.math.BigInteger.valueOf(original))
+                .longValue();
+            percent = Math.max(0L, Math.min(100L, percent));
+            return filledQuantity + "/" + originalQuantity + " " + percent + "%";
+        }
+
+        private static long parseLong(String value) {
+            if (value == null) return 0L;
+            try {
+                return Long.parseLong(value.replace(",", "").trim());
+            } catch (NumberFormatException ignored) {
+                return 0L;
+            }
         }
 
         boolean matches(TerminalMarketSectionState state, String selectedProductKey) {

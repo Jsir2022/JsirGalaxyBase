@@ -46,6 +46,20 @@ public final class TerminalHudNotificationManager {
         return visible;
     }
 
+    public static synchronized boolean click(NotificationView view) {
+        if (view == null || view.notification == null || view.notification.getOnClick() == null) return false;
+        Iterator<ActiveNotification> iterator = ACTIVE_NOTIFICATIONS.iterator();
+        while (iterator.hasNext()) {
+            ActiveNotification active = iterator.next();
+            if (active.notification == view.notification) {
+                iterator.remove();
+                view.notification.getOnClick().run();
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean sameNotification(TerminalNotification first, TerminalNotification second) {
         return first.getSeverity() == second.getSeverity() && first.getTitle().equals(second.getTitle())
             && first.getBody().equals(second.getBody());

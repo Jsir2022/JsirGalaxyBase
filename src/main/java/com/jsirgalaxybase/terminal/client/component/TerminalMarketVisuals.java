@@ -1,5 +1,6 @@
 package com.jsirgalaxybase.terminal.client.component;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 import net.minecraft.client.gui.Gui;
@@ -8,6 +9,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.util.EnumChatFormatting;
 
 import com.jsirgalaxybase.client.gui.framework.RoundedRectPainter;
+import com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel;
 
 final class TerminalMarketVisuals {
 
@@ -28,6 +30,13 @@ final class TerminalMarketVisuals {
         "com.jsirgalaxybase.terminal.client.component.TerminalMarketClientIconRenderer";
     private static Method drawItemIconMethod;
     private static boolean drawItemIconUnavailable;
+    private static Method gregTechLocalizedNameMethod;
+    private static Method gregTechTranslationMethod;
+    private static Method gregTechAssociationMethod;
+    private static Field gregTechItemDataMaterialField;
+    private static Field gregTechMaterialStackMaterialField;
+    private static Method gregTechMaterialFormatMethod;
+    private static boolean gregTechLocalizedNameUnavailable;
 
     private TerminalMarketVisuals() {}
 
@@ -92,7 +101,11 @@ final class TerminalMarketVisuals {
         ItemStack stack = resolveItemStack(iconRef);
         if (stack != null) {
             try {
-                String localized = EnumChatFormatting.getTextWithoutFormattingCodes(stack.getDisplayName());
+                String localized = resolveGregTechLocalizedName(stack);
+                if (localized == null || localized.trim().isEmpty()) {
+                    localized = stack.getDisplayName();
+                }
+                localized = EnumChatFormatting.getTextWithoutFormattingCodes(localized);
                 if (localized != null && !localized.trim().isEmpty()) {
                     return localized.trim();
                 }
@@ -102,6 +115,81 @@ final class TerminalMarketVisuals {
         }
         String safeFallback = fallback == null ? "" : fallback.trim();
         return safeFallback.isEmpty() ? "--" : safeFallback;
+    }
+
+    static String itemRef(String registryName, int meta) {
+        String normalized = registryName == null ? "" : registryName.trim();
+        return normalized.isEmpty() ? "" : normalized + "@" + Math.max(0, meta);
+    }
+
+    static String resolveSelectedProductName(TerminalMarketSectionModel model) {
+        if (model == null) return "未选中商品";
+        String selectedKey = model.getSelectedProductKey();
+        for (TerminalMarketSectionModel.CatalogProductModel product : model.getCatalogProducts()) {
+            if (product != null && product.getProductKey().equals(selectedKey)) {
+                return resolveLocalizedItemName(itemRef(product.getRegistryName(), product.getMeta()),
+                    product.getDisplayName());
+            }
+        }
+        return resolveLocalizedItemName(selectedKey, model.getSelectedProductName());
+    }
+
+    private static String resolveGregTechLocalizedName(ItemStack stack) {
+        if (stack == null || stack.getItem() == null
+            || !stack.getItem().getClass().getName().startsWith("gregtech.")) return null;
+        Method method = resolveGregTechLocalizedNameMethod();
+        if (method == null || gregTechTranslationMethod == null) return null;
+        try {
+            Object key = method.invoke(null, stack);
+            if (!(key instanceof String)) return null;
+            Object value = gregTechTranslationMethod.invoke(null, key);
+            if (!(value instanceof String)) return null;
+            String translated = (String) value;
+            if (translated.contains("%material") || translated.contains("%s")) {
+                translated = applyGregTechMaterialName(stack, translated);
+            }
+            return translated;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static Method resolveGregTechLocalizedNameMethod() {
+        if (gregTechLocalizedNameUnavailable) return null;
+        if (gregTechLocalizedNameMethod != null) return gregTechLocalizedNameMethod;
+        try {
+            Class<?> manager = Class.forName("gregtech.api.util.GTLanguageManager");
+            gregTechLocalizedNameMethod = manager.getMethod("getTranslateableItemStackName", ItemStack.class);
+            gregTechTranslationMethod = manager.getMethod("getTranslation", String.class);
+            Class<?> unificator = Class.forName("gregtech.api.util.GTOreDictUnificator");
+            Class<?> itemData = Class.forName("gregtech.api.objects.ItemData");
+            Class<?> materialStack = Class.forName("gregtech.api.objects.MaterialStack");
+            Class<?> materials = Class.forName("gregtech.api.enums.Materials");
+            gregTechAssociationMethod = unificator.getMethod("getAssociation", ItemStack.class);
+            gregTechItemDataMaterialField = itemData.getField("mMaterial");
+            gregTechMaterialStackMaterialField = materialStack.getField("mMaterial");
+            gregTechMaterialFormatMethod = materials.getMethod("getLocalizedNameForItem", String.class);
+            return gregTechLocalizedNameMethod;
+        } catch (Exception ignored) {
+            gregTechLocalizedNameUnavailable = true;
+            return null;
+        }
+    }
+
+    private static String applyGregTechMaterialName(ItemStack stack, String format) {
+        if (gregTechAssociationMethod == null || gregTechMaterialFormatMethod == null) return format;
+        try {
+            Object itemData = gregTechAssociationMethod.invoke(null, stack);
+            if (itemData == null) return format;
+            Object materialStack = gregTechItemDataMaterialField.get(itemData);
+            if (materialStack == null) return format;
+            Object material = gregTechMaterialStackMaterialField.get(materialStack);
+            if (material == null) return format;
+            Object value = gregTechMaterialFormatMethod.invoke(material, format);
+            return value instanceof String ? (String) value : format;
+        } catch (Exception ignored) {
+            return format;
+        }
     }
 
     static void drawMarketIcon(int x, int y, int size, int kind) {

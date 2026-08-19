@@ -142,7 +142,10 @@ BEGIN
                 VALUES (
                     'BUY', 'OPEN', 'MARKET_DEMO_MAKER', catalog_record.product_key, catalog_record.registry_name,
                     catalog_record.meta, catalog_record.stackable, bid_price, unit_quantity * depth_index,
-                    unit_quantity * depth_index, 0, bid_price * unit_quantity * depth_index, 0,
+                    unit_quantity * depth_index, 0,
+                    bid_price * unit_quantity * depth_index
+                        + (bid_price * unit_quantity * depth_index * 80 / 10000),
+                    0,
                     'market-demo-fixture-v3');
             END IF;
         END LOOP;
@@ -168,6 +171,18 @@ BEGIN
             END LOOP;
         END IF;
     END LOOP;
+
+    -- v2/v3 originally reserved principal only. Repair every still-active
+    -- managed fixture bid to the same worst-case taker-fee contract used by
+    -- real buy orders.
+    UPDATE market_order
+    SET reserved_funds = unit_price * open_quantity
+            + (unit_price * open_quantity * 80 / 10000),
+        updated_at = now()
+    WHERE source_server_id IN ('market-demo-fixture-v2', 'market-demo-fixture-v3')
+      AND order_side = 'BUY'
+      AND order_status IN ('OPEN', 'PARTIALLY_FILLED')
+      AND open_quantity > 0;
 
     SELECT COALESCE(sum(reserved_funds), 0) INTO total_reserved
     FROM market_order

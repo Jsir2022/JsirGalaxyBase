@@ -259,6 +259,7 @@ public class StandardizedSpotMarketService {
                 public CancelSellOrderResult get() {
                     MarketOrder order = orderRepository.lockById(command.getOrderId());
                     ensureSellOrderOwner(order, playerRef);
+                    ensureExpectedOrderVersion(order, command.getExpectedUpdatedAtEpochSecond());
                     ensureCancellableOrder(order);
 
                     MarketCustodyInventory custody = custodyRepository.findEscrowSellByOrderId(command.getOrderId())
@@ -410,6 +411,7 @@ public class StandardizedSpotMarketService {
                 public CancelBuyOrderResult get() {
                     MarketOrder order = orderRepository.lockById(command.getOrderId());
                     ensureBuyOrderOwner(order, playerRef);
+                    ensureExpectedOrderVersion(order, command.getExpectedUpdatedAtEpochSecond());
                     ensureCancellableOrder(order);
                     long releasedFunds = order.getReservedFunds();
                     BankAccount buyerAccount = settlementFacade.requirePlayerAccount(playerRef);
@@ -738,6 +740,9 @@ public class StandardizedSpotMarketService {
             if (!isOrderMatchable(lockedResting, updatedIncomingOrder, buyIsIncoming)) {
                 continue;
             }
+            if (quarantineUnderfundedRestingBuyIfNeeded(lockedResting, sourceServerId)) {
+                continue;
+            }
 
             MarketCustodyInventory restingCustody = null;
             if (lockedResting.getSide() == MarketOrderSide.SELL) {
@@ -848,6 +853,45 @@ public class StandardizedSpotMarketService {
             lastTradeId);
     }
 
+    private boolean quarantineUnderfundedRestingBuyIfNeeded(MarketOrder restingOrder, String sourceServerId) {
+        if (restingOrder.getSide() != MarketOrderSide.BUY) {
+            return false;
+        }
+        long requiredReservation = calculateBuyerReservation(restingOrder.getUnitPrice(),
+            restingOrder.getOpenQuantity());
+        if (restingOrder.getReservedFunds() >= requiredReservation) {
+            return false;
+        }
+
+        String quarantineRequestId = "market-order-quarantine:" + restingOrder.getOrderId();
+        if (restingOrder.getReservedFunds() > 0L) {
+            BankAccount buyerAccount = settlementFacade.requirePlayerAccount(restingOrder.getOwnerPlayerRef());
+            settlementFacade.releaseBuyerFunds(new FrozenBalanceCommand(
+                quarantineRequestId + ":release",
+                BankTransactionType.MARKET_FUNDS_RELEASE,
+                BankBusinessType.MARKET_ORDER_CANCEL_RELEASE,
+                buyerAccount.getAccountId(), sourceServerId, "market", "market",
+                restingOrder.getOwnerPlayerRef(), restingOrder.getReservedFunds(),
+                "release underfunded quarantined buy order reserve",
+                buildOrderBusinessRef("buy-quarantine", String.valueOf(restingOrder.getOrderId())),
+                "{\"requiredReservation\":" + requiredReservation + "}"));
+        }
+
+        MarketOrder quarantined = orderRepository.update(restingOrder.withLifecycle(MarketOrderStatus.EXCEPTION,
+            0L, restingOrder.getFilledQuantity(), 0L, Instant.now()));
+        if (!operationLogRepository.findByRequestId(quarantineRequestId).isPresent()) {
+            Instant now = Instant.now();
+            operationLogRepository.save(new MarketOperationLog(0L, quarantineRequestId,
+                MarketOperationType.ORDER_QUARANTINE, MarketOperationStatus.COMPLETED, sourceServerId,
+                restingOrder.getOwnerPlayerRef(),
+                "quarantine|reason=UNDERFUNDED_BUY_RESERVE|required=" + requiredReservation
+                    + "|reserved=" + restingOrder.getReservedFunds(),
+                quarantined.getOrderId(), 0L, 0L,
+                "underfunded resting buy order removed from matching; reserve released", now, now));
+        }
+        return true;
+    }
+
     private MarketOrder releaseFilledBuyOrderIfNeeded(MarketOrder buyOrder, String sourceServerId, long parentOperationId,
         int sequence) {
         if (buyOrder.getSide() != MarketOrderSide.BUY || buyOrder.getOpenQuantity() > 0L || buyOrder.getReservedFunds() <= 0L) {
@@ -902,6 +946,9 @@ public class StandardizedSpotMarketService {
 
     private boolean isOrderMatchable(MarketOrder restingOrder, MarketOrder incomingOrder, boolean buyIsIncoming) {
         if (restingOrder.getOpenQuantity() <= 0L) {
+            return false;
+        }
+        if (restingOrder.getOwnerPlayerRef().equals(incomingOrder.getOwnerPlayerRef())) {
             return false;
         }
         if (buyIsIncoming) {
@@ -983,6 +1030,7 @@ public class StandardizedSpotMarketService {
         }
         String message = exception.getMessage();
         return "order is not cancellable in current status".equals(message)
+            || "order changed after cancellation confirmation".equals(message)
             || "order is not owned by playerRef".equals(message)
             || "order is not a sell order".equals(message)
             || "order is not a buy order".equals(message);
@@ -1065,6 +1113,17 @@ public class StandardizedSpotMarketService {
     private void ensureCancellableOrder(MarketOrder order) {
         if (order.getStatus() != MarketOrderStatus.OPEN && order.getStatus() != MarketOrderStatus.PARTIALLY_FILLED) {
             throw new MarketOperationException("order is not cancellable in current status");
+        }
+        if (order.getOpenQuantity() <= 0L) {
+            throw new MarketOperationException("order has no open quantity to cancel");
+        }
+    }
+
+    private void ensureExpectedOrderVersion(MarketOrder order, long expectedUpdatedAtEpochSecond) {
+        if (expectedUpdatedAtEpochSecond <= 0L) return;
+        long actual = order.getUpdatedAt() == null ? 0L : order.getUpdatedAt().getEpochSecond();
+        if (actual != expectedUpdatedAtEpochSecond) {
+            throw new MarketOperationException("order changed after cancellation confirmation");
         }
     }
 

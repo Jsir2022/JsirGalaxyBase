@@ -12,8 +12,49 @@ import org.junit.Test;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalCustomMarketSectionModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalExchangeMarketSectionModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel;
+import com.jsirgalaxybase.terminal.TerminalMarketAccountCenterRow;
 
 public class TerminalMarketSectionContentTest {
+
+    @Test
+    public void accountCenterRowsUseStructuredItemAndOrderFieldsInsteadOfLegacyDisplayLines() {
+        TerminalMarketSectionModel model = TerminalMarketSectionModel.placeholder("market_account_center")
+            .withHistoryPage(Arrays.asList("not a parseable legacy row"), Arrays.asList("42"), Arrays.asList("1"),
+                1, 0, 4)
+            .withAccountCenter("OPEN_ORDERS", "100", "20", 1, 27, 1, 0, 0,
+                Arrays.asList("OPEN_ORDER"), Arrays.asList("minecraft:iron_ingot@0"))
+            .withAccountCenterRows(Arrays.asList(new TerminalMarketAccountCenterRow("42", "OPEN_ORDER",
+                "minecraft:iron_ingot", 0, "BUY", "LIMIT", 12L, 10L, 3L, 7L,
+                "PARTIALLY_FILLED", "2026-08-16T00:00:00Z", 42L, 36L, 0L, "", true, 100L, 84L)));
+
+        TerminalMarketSectionContent.OrderEntry row =
+            TerminalMarketSectionContent.buildAccountCenterEntries(model).get(0);
+        assertEquals("minecraft:iron_ingot:0", row.getProductKey());
+        assertEquals("3/10 30%", row.getFillProgressLabel());
+        assertEquals(100L, row.getUpdatedAtEpochSeconds());
+        assertTrue(row.isCancelable());
+    }
+
+    @Test
+    public void accountCenterStructuredRowsKeepExactGroupedValuesAndSafeProgress() {
+        TerminalMarketSectionModel model = TerminalMarketSectionModel.placeholder("market_account_center")
+            .withHistoryPage(Arrays.asList("structured"), Arrays.asList("99"), Arrays.asList("1"), 1, 0, 4)
+            .withAccountCenter("OPEN_ORDERS", "1840230", "175636", 1248, 4096, 1, 0, 0,
+                Arrays.asList("OPEN_ORDER"), Arrays.asList("minecraft:iron_ingot@0"))
+            .withAccountCenterRows(Arrays.asList(new TerminalMarketAccountCenterRow("99", "OPEN_ORDER",
+                "minecraft:iron_ingot", 0, "BUY", "LIMIT", 1200L, Long.MAX_VALUE,
+                Long.MAX_VALUE - 1L, 1L, "PARTIALLY_FILLED", "2026-08-19T00:00:00Z", 99L,
+                0L, 0L, "", true, 100L, Long.MAX_VALUE)));
+
+        TerminalMarketSectionContent.OrderEntry row =
+            TerminalMarketSectionContent.buildAccountCenterEntries(model).get(0);
+        assertEquals("1,200", row.getUnitPrice());
+        assertEquals("9,223,372,036,854,775,807", row.getOriginalQuantity());
+        assertEquals("9,223,372,036,854,775,806/9,223,372,036,854,775,807 99%",
+            row.getFillProgressLabel());
+        assertEquals("1", row.getRemainingQuantity());
+        assertTrue(row.isCancelable());
+    }
 
     @Test
     public void personalHistoryEntriesParseFilterAndExposeExactCancellationTarget() {
@@ -38,8 +79,11 @@ public class TerminalMarketSectionContentTest {
         assertEquals("10", open.getOriginalQuantity());
         assertEquals("7", open.getRemainingQuantity());
         assertEquals("部分成交", open.getStatusLabel());
+        assertEquals("进行中·部分成交", open.getStatusMarkerLabel());
+        assertEquals("3/10 30%", open.getFillProgressLabel());
         assertTrue(open.isCancelable());
         assertFalse(oldFilled.isCancelable());
+        assertEquals("完成·已成交", oldFilled.getStatusMarkerLabel());
         assertTrue(open.matches(state, state.getSelectedProductKey()));
         assertTrue(oldFilled.matches(state, state.getSelectedProductKey()));
 

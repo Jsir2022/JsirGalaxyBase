@@ -370,7 +370,13 @@ public class TerminalSnapshotMessage implements IMessage {
                     snapshot.getMyOrderCancelableFlags(),
                     snapshot.getHistoryTotalEntries(),
                     snapshot.getHistoryPageIndex(),
-                    snapshot.getHistoryPageSize());
+                    snapshot.getHistoryPageSize())
+                .withAccountCenter(snapshot.getAccountCenterTab(), snapshot.getCenterBankAvailable(),
+                    snapshot.getCenterFrozenFunds(), snapshot.getCenterVaultUsedSlots(),
+                    snapshot.getCenterVaultTotalSlots(), snapshot.getCenterActiveOrders(),
+                    snapshot.getCenterPendingDeliveries(), snapshot.getCenterRecoveryItems(),
+                    snapshot.getCenterRowKinds(), snapshot.getCenterRowIconRefs())
+                .withAccountCenterRows(snapshot.getAccountCenterRows());
     }
 
     private static List<TerminalMarketSectionModel.CatalogProductModel> toCatalogProducts(

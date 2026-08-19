@@ -10,6 +10,7 @@ import com.jsirgalaxybase.client.gui.framework.AbstractGuiPanel;
 import com.jsirgalaxybase.client.gui.framework.GuiRect;
 import com.jsirgalaxybase.client.gui.framework.GuiScene;
 import com.jsirgalaxybase.client.gui.framework.RoundedRectPainter;
+import com.jsirgalaxybase.terminal.client.TerminalNumberFormat;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel;
 
 /** Passive, read-only market comparison card. */
@@ -36,7 +37,8 @@ final class MarketBrowseTooltipPanel extends AbstractGuiPanel {
         draw(font, "最新 " + item.getCompactLatestPrice(), b.getX() + 8, b.getY() + 35, 0xFFF1CA62);
         draw(font, "今日 " + change, b.getRight() - 8 - font.getStringWidth("今日 " + change), b.getY() + 35,
             changeColor);
-        draw(font, "零点基准 " + (item.getDayOpenPrice() > 0L ? item.getDayOpenPrice() : "--"), b.getX() + 8,
+        draw(font, "零点基准 " + (item.getDayOpenPrice() > 0L
+            ? TerminalNumberFormat.exact(item.getDayOpenPrice()) : "--"), b.getX() + 8,
             b.getY() + 47, 0xFFBFCBDA);
         draw(font, "买一 " + item.getCompactBestBid(), b.getX() + 8, b.getY() + 59, 0xFF70D58A);
         draw(font, "卖一 " + item.getCompactBestAsk(), b.getX() + 8, b.getY() + 71, 0xFFE6746E);

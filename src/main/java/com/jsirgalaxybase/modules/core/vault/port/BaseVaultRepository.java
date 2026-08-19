@@ -6,7 +6,9 @@ import java.util.Optional;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultAccount;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultAccountType;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultOperation;
+import com.jsirgalaxybase.modules.core.vault.domain.VaultOperationHistoryPage;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultOperationSlotChange;
+import com.jsirgalaxybase.modules.core.vault.domain.VaultOperationStatus;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultSlot;
 
 public interface BaseVaultRepository {
@@ -26,4 +28,9 @@ public interface BaseVaultRepository {
     VaultOperation updateOperation(VaultOperation operation);
 
     void saveOperationSlotChanges(long operationId, List<VaultOperationSlotChange> changes);
+
+    default VaultOperationHistoryPage findExceptionalOperations(long accountId, String searchText,
+        VaultOperationStatus status, java.time.Instant createdAfter, int pageIndex, int pageSize) {
+        return new VaultOperationHistoryPage(java.util.Collections.<VaultOperation>emptyList(), 0, pageIndex, pageSize);
+    }
 }

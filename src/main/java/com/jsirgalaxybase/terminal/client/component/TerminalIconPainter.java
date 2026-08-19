@@ -52,6 +52,9 @@ final class TerminalIconPainter {
             case BANK:
                 drawBank(x, y, s, color);
                 break;
+            case ORDER_ASSET:
+                drawOrderAsset(x, y, s, color);
+                break;
             case HELP:
                 drawHelp(x, y, s, color);
                 break;
@@ -151,6 +154,19 @@ final class TerminalIconPainter {
             "...#.#.#...",
             "...#.#.#...",
             "..#######.."}, x, y, s, color);
+    }
+
+    private static void drawOrderAsset(int x, int y, int s, int color) {
+        drawPattern(new String[] {
+            ".#########.",
+            ".#.......#.",
+            ".#.##....#.",
+            ".#....####.",
+            ".#.##....#.",
+            ".#....####.",
+            ".#.##....#.",
+            ".#.......#.",
+            ".#########."}, x, y, s, color);
     }
 
     private static void drawHelp(int x, int y, int s, int color) {

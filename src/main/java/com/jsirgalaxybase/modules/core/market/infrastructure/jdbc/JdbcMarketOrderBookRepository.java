@@ -271,7 +271,7 @@ public class JdbcMarketOrderBookRepository extends AbstractJdbcRepository implem
         StringBuilder sql = new StringBuilder("WHERE owner_player_ref = ?");
         if (!query.getProductKey().isEmpty()) sql.append(" AND product_key = ?");
         if (!query.getSearchText().isEmpty()) {
-            sql.append(" AND (LOWER(product_key) LIKE ? ESCAPE '!' OR EXISTS (")
+            sql.append(" AND (LOWER(product_key) LIKE ? ESCAPE '!' OR CAST(order_id AS TEXT) LIKE ? ESCAPE '!' OR EXISTS (")
                 .append("SELECT 1 FROM standardized_market_catalog catalog ")
                 .append("WHERE catalog.product_key = market_order.product_key ")
                 .append("AND LOWER(catalog.display_name) LIKE ? ESCAPE '!'))");
@@ -281,6 +281,7 @@ public class JdbcMarketOrderBookRepository extends AbstractJdbcRepository implem
             case OPEN: sql.append(" AND order_status IN ('OPEN','PARTIALLY_FILLED')"); break;
             case FILLED: sql.append(" AND order_status = 'FILLED'"); break;
             case CLOSED: sql.append(" AND order_status IN ('CANCELLED','EXCEPTION')"); break;
+            case HISTORICAL: sql.append(" AND order_status IN ('FILLED','CANCELLED','EXCEPTION')"); break;
             default: break;
         }
         if (query.getCreatedAfter() != null) sql.append(" AND created_at >= ?");
@@ -294,6 +295,7 @@ public class JdbcMarketOrderBookRepository extends AbstractJdbcRepository implem
         if (!query.getProductKey().isEmpty()) statement.setString(index++, query.getProductKey());
         if (!query.getSearchText().isEmpty()) {
             String pattern = "%" + escapeLike(query.getSearchText().toLowerCase(java.util.Locale.ROOT)) + "%";
+            statement.setString(index++, pattern);
             statement.setString(index++, pattern);
             statement.setString(index++, pattern);
         }
@@ -335,6 +337,31 @@ public class JdbcMarketOrderBookRepository extends AbstractJdbcRepository implem
                 }
             }
         });
+    }
+
+    @Override
+    public int countActiveOrdersByOwner(final String ownerPlayerRef) {
+        return (int) Math.min(Integer.MAX_VALUE, ownerAggregate(ownerPlayerRef, "COUNT(*)"));
+    }
+
+    @Override
+    public long sumReservedFundsByOwner(final String ownerPlayerRef) {
+        return ownerAggregate(ownerPlayerRef, "COALESCE(SUM(reserved_funds), 0)");
+    }
+
+    private long ownerAggregate(final String ownerPlayerRef, final String expression) {
+        return connectionManager.withConnection(new JdbcConnectionCallback<Long>() {
+            @Override public Long doInConnection(java.sql.Connection connection) throws SQLException {
+                PreparedStatement statement = connection.prepareStatement("SELECT " + expression
+                    + " FROM market_order WHERE owner_player_ref = ? AND order_status IN ('OPEN','PARTIALLY_FILLED')"
+                    + " AND open_quantity > 0");
+                try {
+                    statement.setString(1, ownerPlayerRef);
+                    ResultSet rows = statement.executeQuery();
+                    try { rows.next(); return Long.valueOf(rows.getLong(1)); } finally { rows.close(); }
+                } finally { statement.close(); }
+            }
+        }).longValue();
     }
 
     private void bindOrder(PreparedStatement statement, MarketOrder order) throws SQLException {

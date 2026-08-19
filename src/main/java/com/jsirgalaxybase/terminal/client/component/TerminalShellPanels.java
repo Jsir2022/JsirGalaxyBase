@@ -19,6 +19,7 @@ import com.jsirgalaxybase.client.gui.theme.ThemeTextureKey;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalHomeScreenModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalServerToolsSectionModel;
+import com.jsirgalaxybase.terminal.ui.TerminalPage;
 
 public final class TerminalShellPanels {
 
@@ -145,6 +146,12 @@ public final class TerminalShellPanels {
     public static PanelContainer createStatusBand(TerminalPanelFactory panels, GuiRect bounds,
         final TerminalHomeScreenModel model, final Runnable refreshAction, Runnable infoAction,
         Runnable backAction, Runnable closeAction) {
+        return createStatusBand(panels, bounds, model, refreshAction, infoAction, backAction, closeAction, null);
+    }
+
+    public static PanelContainer createStatusBand(TerminalPanelFactory panels, GuiRect bounds,
+        final TerminalHomeScreenModel model, final Runnable refreshAction, Runnable infoAction,
+        Runnable backAction, Runnable closeAction, Runnable accountCenterAction) {
         PanelContainer band = new WindowTitleBarPanel();
         band.setBounds(bounds);
         final TerminalHomeScreenModel.StatusBandModel statusBand = model.getStatusBand();
@@ -152,6 +159,11 @@ public final class TerminalShellPanels {
         boolean marketPage = snapshot.hasMarketSectionModel() || snapshot.hasCustomMarketSectionModel()
             || snapshot.hasExchangeMarketSectionModel();
         boolean refreshVisible = snapshot.hasServerToolsSectionModel() || marketPage;
+        TerminalPage selectedPage = TerminalPage.fromId(model.getSelectedPageId());
+        boolean centerVisible = accountCenterAction != null
+            && (selectedPage == TerminalPage.MARKET || selectedPage == TerminalPage.MARKET_STANDARDIZED
+                || selectedPage == TerminalPage.MARKET_ACCOUNT_CENTER || selectedPage == TerminalPage.VAULT);
+        boolean centerSelected = selectedPage == TerminalPage.MARKET_ACCOUNT_CENTER;
         int controlInset = bounds.getHeight() <= 12 ? 1 : 2;
         int controlMaxHeight = Math.max(6, bounds.getHeight() - controlInset * 2);
         int iconButton = Math.max(8, Math.min(12, controlMaxHeight));
@@ -165,7 +177,10 @@ public final class TerminalShellPanels {
         int backX = closeX - iconGap - iconButton;
         int infoX = backX - iconGap - iconButton;
         int refreshX = refreshVisible ? infoX - iconGap - iconButton : infoX;
-        int signalX = (refreshVisible ? refreshX : infoX) - signalWidth - 5;
+        int centerWidth = centerVisible ? Math.max(54, Math.min(66, bounds.getWidth() / 10)) : 0;
+        int centerX = centerVisible ? (refreshVisible ? refreshX : infoX) - iconGap - centerWidth
+            : (refreshVisible ? refreshX : infoX);
+        int signalX = (centerVisible ? centerX : (refreshVisible ? refreshX : infoX)) - signalWidth - 5;
         int badgeX = signalX - badgeWidth - 5;
         int textWidth = Math.max(40, badgeX - bounds.getX() - 2);
         band.addChild(panels.createLabel(
@@ -217,6 +232,13 @@ public final class TerminalShellPanels {
             TerminalIconButtonPanel refreshButton = new TerminalIconButtonPanel(TerminalIconKind.REFRESH, refreshAction, null);
             refreshButton.setBounds(new GuiRect(refreshX, buttonY, iconButton, iconButton));
             band.addChild(refreshButton);
+        }
+        if (centerVisible) {
+            TerminalIconButtonPanel centerButton = new TerminalIconButtonPanel(TerminalIconKind.ORDER_ASSET,
+                accountCenterAction, null, selectedPage == TerminalPage.VAULT ? "资产中心" : "订单中心",
+                centerSelected);
+            centerButton.setBounds(new GuiRect(centerX, buttonY, centerWidth, iconButton));
+            band.addChild(centerButton);
         }
         TerminalIconButtonPanel infoButton = new TerminalIconButtonPanel(TerminalIconKind.HELP, infoAction, null);
         infoButton.setBounds(new GuiRect(infoX, buttonY, iconButton, iconButton));

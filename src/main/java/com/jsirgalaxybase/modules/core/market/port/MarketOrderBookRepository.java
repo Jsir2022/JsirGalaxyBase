@@ -51,4 +51,8 @@ public interface MarketOrderBookRepository {
 	default List<String> findDistinctProductKeysByOwner(String ownerPlayerRef, int limit) {
 		return Collections.emptyList();
 	}
+
+	default int countActiveOrdersByOwner(String ownerPlayerRef) { return 0; }
+
+	default long sumReservedFundsByOwner(String ownerPlayerRef) { return 0L; }
 }

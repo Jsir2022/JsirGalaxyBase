@@ -5,6 +5,8 @@ import java.util.Optional;
 
 import com.jsirgalaxybase.modules.core.market.domain.MarketOperationStatus;
 import com.jsirgalaxybase.modules.core.market.domain.MarketOperationLog;
+import com.jsirgalaxybase.modules.core.market.domain.MarketOperationHistoryPage;
+import com.jsirgalaxybase.modules.core.market.domain.MarketAccountCenterQuery;
 
 public interface MarketOperationLogRepository {
 
@@ -17,4 +19,9 @@ public interface MarketOperationLogRepository {
 	Optional<MarketOperationLog> findByRequestId(String requestId);
 
 	List<MarketOperationLog> findByStatuses(List<MarketOperationStatus> statuses, int limit);
+
+	default MarketOperationHistoryPage findPersonalExceptions(String playerRef, MarketAccountCenterQuery query) {
+		return new MarketOperationHistoryPage(java.util.Collections.<MarketOperationLog>emptyList(), 0,
+			query.getPageIndex(), query.getPageSize());
+	}
 }

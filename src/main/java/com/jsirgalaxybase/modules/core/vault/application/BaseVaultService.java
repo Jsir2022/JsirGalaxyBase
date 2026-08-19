@@ -11,6 +11,7 @@ import com.jsirgalaxybase.modules.core.market.repository.MarketTransactionRunner
 import com.jsirgalaxybase.modules.core.vault.domain.VaultAccount;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultAccountType;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultOperation;
+import com.jsirgalaxybase.modules.core.vault.domain.VaultOperationHistoryPage;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultOperationStatus;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultOperationSlotChange;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultSlot;
@@ -57,6 +58,13 @@ public final class BaseVaultService {
 
     public VaultView viewPersonalVault(String playerRef) {
         return viewVault(VaultAccountType.PERSONAL, playerRef);
+    }
+
+    public VaultOperationHistoryPage findPersonalExceptionalOperations(String playerRef, String searchText,
+        VaultOperationStatus status, Instant createdAfter, int pageIndex, int pageSize) {
+        VaultAccount account = repository.ensureAccount(VaultAccountType.PERSONAL, requireText(playerRef, "playerRef"));
+        return repository.findExceptionalOperations(account.getAccountId(), searchText, status, createdAfter,
+            Math.max(0, pageIndex), Math.max(1, Math.min(50, pageSize)));
     }
 
     /**

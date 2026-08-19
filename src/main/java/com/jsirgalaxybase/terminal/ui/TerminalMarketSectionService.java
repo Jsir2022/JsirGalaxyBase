@@ -13,12 +13,18 @@ import com.jsirgalaxybase.terminal.TerminalCustomMarketSectionSnapshot;
 import com.jsirgalaxybase.terminal.TerminalExchangeMarketActionPayload;
 import com.jsirgalaxybase.terminal.TerminalExchangeMarketSectionSnapshot;
 import com.jsirgalaxybase.terminal.TerminalMarketActionPayload;
+import com.jsirgalaxybase.terminal.TerminalMarketAccountCenterRow;
 import com.jsirgalaxybase.terminal.TerminalMarketSectionSnapshot;
 import com.jsirgalaxybase.terminal.TerminalMarketBrowseEntry;
 import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketCatalogEntry;
 import com.jsirgalaxybase.modules.core.market.application.StandardizedMarketAdmissionDecision;
 import com.jsirgalaxybase.modules.core.market.application.CustomMarketService;
 import com.jsirgalaxybase.modules.core.market.application.TaskCoinCatalog;
+import com.jsirgalaxybase.modules.core.market.domain.MarketAccountCenterSnapshot;
+import com.jsirgalaxybase.modules.core.market.domain.MarketOrder;
+import com.jsirgalaxybase.modules.core.market.domain.MarketOrderStatus;
+import com.jsirgalaxybase.modules.core.market.domain.MarketTradeRecord;
+import com.jsirgalaxybase.modules.core.market.domain.StandardizedMarketProduct;
 import com.jsirgalaxybase.modules.core.vault.application.BaseVaultService;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultSlot;
 
@@ -105,7 +111,14 @@ public final class TerminalMarketSectionService {
             snapshot.catalogPage.hasPreviousPage(),
                 snapshot.catalogPage.hasNextPage())
             .withVaultAssets(toVaultAssets(player));
-        if (selectedPage == TerminalPage.MARKET_STANDARDIZED && draftPayload.isHistoryMode()) {
+        if (selectedPage == TerminalPage.MARKET_ACCOUNT_CENTER && !draftPayload.isHistoryMode()) {
+            draftPayload = draftPayload.withAccountCenter("OPEN_ORDERS", "ALL", "ALL", "ALL", "ALL", "", 0,
+                TerminalMarketActionPayload.DEFAULT_HISTORY_PAGE_SIZE, "");
+        }
+        if (selectedPage == TerminalPage.MARKET_ACCOUNT_CENTER) {
+            applyAccountCenter(result, TerminalMarketService.INSTANCE.createAccountCenterSnapshot(player, draftPayload));
+        } else if (selectedPage == TerminalPage.MARKET_STANDARDIZED
+            && draftPayload.isHistoryMode()) {
             TerminalMarketService.OrderHistorySnapshot history =
                 TerminalMarketService.INSTANCE.createOrderHistorySnapshot(player, draftPayload);
             result.withHistoryPage(
@@ -118,6 +131,91 @@ public final class TerminalMarketSectionService {
         }
         return result;
     }
+
+    private void applyAccountCenter(TerminalMarketSectionSnapshot target, MarketAccountCenterSnapshot center) {
+        List<String> lines = new ArrayList<String>();
+        List<String> ids = new ArrayList<String>();
+        List<String> cancelable = new ArrayList<String>();
+        List<String> kinds = new ArrayList<String>();
+        List<String> icons = new ArrayList<String>();
+        List<TerminalMarketAccountCenterRow> structuredRows = new ArrayList<TerminalMarketAccountCenterRow>();
+        for (MarketAccountCenterSnapshot.OrderRow row : center.getOpenOrders()) {
+            addOrderRow(row.getOrder(), "OPEN_ORDER", lines, ids, cancelable, kinds, icons);
+            structuredRows.add(toStructuredOrderRow(row.getOrder(), "OPEN_ORDER"));
+        }
+        for (MarketAccountCenterSnapshot.HistoryRow row : center.getHistory()) {
+            addOrderRow(row.getOrder(), "HISTORY", lines, ids, cancelable, kinds, icons);
+            structuredRows.add(toStructuredOrderRow(row.getOrder(), "HISTORY"));
+        }
+        for (MarketAccountCenterSnapshot.FillRow row : center.getFills()) {
+            MarketTradeRecord trade = row.getTrade();
+            StandardizedMarketProduct product = trade.getProduct();
+            long gross = trade.getUnitPrice() * trade.getQuantity();
+            lines.add("#" + trade.getTradeId() + " | " + product.getProductKey() + " | " + row.getSide()
+                + " | 成交价 " + trade.getUnitPrice() + " | 数量 " + trade.getQuantity() + " | 金额 " + gross
+                + " | 手续费 " + trade.getFeeAmount() + " | 已交付 | " + instant(trade.getCreatedAt())
+                + " | 订单 #" + row.getOrderId());
+            ids.add(String.valueOf(trade.getTradeId())); cancelable.add("0"); kinds.add("FILL");
+            icons.add(icon(product));
+            structuredRows.add(new TerminalMarketAccountCenterRow(String.valueOf(trade.getTradeId()), "FILL",
+                product.getRegistryName(), product.getMeta(), row.getSide().name(), "TRADE", trade.getUnitPrice(),
+                trade.getQuantity(), trade.getQuantity(), 0L, "COMPLETED", instant(trade.getCreatedAt()),
+                row.getOrderId(), gross, trade.getFeeAmount(), "已交付", false,
+                trade.getCreatedAt() == null ? 0L : trade.getCreatedAt().getEpochSecond(), 0L));
+        }
+        for (MarketAccountCenterSnapshot.DeliveryRow row : center.getDeliveries()) {
+            StandardizedMarketProduct product = row.getProduct();
+            lines.add("#" + row.getRecordId() + " | " + (product == null ? "--" : product.getProductKey())
+                + " | -- | 类型 " + row.getKind() + " | 数量 " + row.getQuantity() + " | 订单 "
+                + row.getRelatedOrderId() + " | -- | " + row.getStatus() + " | " + instant(row.getUpdatedAt())
+                + " | " + row.getMessage());
+            ids.add(row.getRecordId()); cancelable.add("0"); kinds.add("DELIVERY"); icons.add(icon(product));
+            structuredRows.add(new TerminalMarketAccountCenterRow(row.getRecordId(), "DELIVERY",
+                product == null ? "" : product.getRegistryName(), product == null ? 0 : product.getMeta(), "",
+                row.getKind(), 0L, row.getQuantity(), 0L, row.getQuantity(), row.getStatus(),
+                instant(row.getUpdatedAt()), row.getRelatedOrderId(), 0L, 0L, row.getMessage(), false,
+                row.getUpdatedAt() == null ? 0L : row.getUpdatedAt().getEpochSecond(), 0L));
+        }
+        MarketAccountCenterSnapshot.AccountSummary summary = center.getSummary();
+        target.withHistoryPage(lines, ids, cancelable, center.getPage().getTotalEntries(),
+            center.getPage().getPageIndex(), center.getPage().getPageSize())
+            .withAccountCenter(center.getTab().name(), String.valueOf(summary.getAvailableFunds()),
+                String.valueOf(summary.getFrozenFunds()), summary.getVaultUsedSlots(), summary.getVaultTotalSlots(),
+                summary.getActiveOrders(), summary.getPendingDeliveries(), summary.getRecoveryItems(), kinds, icons);
+        target.withAccountCenterRows(structuredRows);
+    }
+
+    private TerminalMarketAccountCenterRow toStructuredOrderRow(MarketOrder order, String kind) {
+        StandardizedMarketProduct product = order.getProduct();
+        boolean canCancel = (order.getStatus() == MarketOrderStatus.OPEN
+            || order.getStatus() == MarketOrderStatus.PARTIALLY_FILLED) && order.getOpenQuantity() > 0L;
+        return new TerminalMarketAccountCenterRow(String.valueOf(order.getOrderId()), kind, product.getRegistryName(),
+            product.getMeta(), order.getSide().name(), "LIMIT", order.getUnitPrice(), order.getOriginalQuantity(),
+            order.getFilledQuantity(), order.getOpenQuantity(), order.getStatus().name(), instant(order.getCreatedAt()),
+            order.getOrderId(), order.getUnitPrice() * order.getFilledQuantity(), 0L, "", canCancel,
+            order.getUpdatedAt() == null ? 0L : order.getUpdatedAt().getEpochSecond(), order.getReservedFunds());
+    }
+
+    private void addOrderRow(MarketOrder order, String kind, List<String> lines, List<String> ids,
+        List<String> cancelable, List<String> kinds, List<String> icons) {
+        StandardizedMarketProduct product = order.getProduct();
+        lines.add("#" + order.getOrderId() + " | " + product.getProductKey() + " | " + order.getSide()
+            + " | 价 " + order.getUnitPrice() + " | 总 " + order.getOriginalQuantity() + " | 成 "
+            + order.getFilledQuantity() + " | 剩 " + order.getOpenQuantity() + " | " + order.getStatus()
+            + " | " + instant(order.getCreatedAt()) + " | " + product.getProductKey() + " | "
+            + (order.getUpdatedAt() == null ? 0L : order.getUpdatedAt().getEpochSecond()) + " | "
+            + product.getRegistryName() + " | " + product.getMeta() + " | 预留 " + order.getReservedFunds());
+        ids.add(String.valueOf(order.getOrderId()));
+        cancelable.add((order.getStatus() == MarketOrderStatus.OPEN
+            || order.getStatus() == MarketOrderStatus.PARTIALLY_FILLED) && order.getOpenQuantity() > 0L ? "1" : "0");
+        kinds.add(kind); icons.add(icon(product));
+    }
+
+    private String icon(StandardizedMarketProduct product) {
+        return product == null ? "" : product.getRegistryName() + "@" + product.getMeta();
+    }
+
+    private String instant(java.time.Instant value) { return value == null ? "--" : value.toString(); }
 
     public TerminalActionFeedback submitLimitBuy(EntityPlayer player, TerminalMarketActionPayload payload) {
         TerminalMarketActionPayload marketPayload = payload == null ? TerminalMarketActionPayload.empty() : payload;
@@ -166,7 +264,8 @@ public final class TerminalMarketSectionService {
 
     public TerminalActionFeedback cancelOrder(EntityPlayer player, TerminalMarketActionPayload payload) {
         TerminalMarketActionPayload marketPayload = payload == null ? TerminalMarketActionPayload.empty() : payload;
-        return TerminalMarketService.INSTANCE.cancelOrder(player, marketPayload.parseOrderId());
+        return TerminalMarketService.INSTANCE.cancelOrder(player, marketPayload.parseOrderId(),
+            marketPayload.getCancelRequestId(), marketPayload.getExpectedOrderUpdatedAt());
     }
 
     public TerminalCustomMarketSectionSnapshot createCustomSnapshot(EntityPlayer player,

@@ -3,6 +3,7 @@ package com.jsirgalaxybase.terminal.client.component;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Supplier;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.audio.PositionedSoundRecord;
@@ -36,15 +37,26 @@ final class MarketItemGridPanel extends AbstractGuiPanel {
 
     private final List<MarketBrowseItemModel> items;
     private final Listener listener;
+    private final Supplier<String> emptyMessageSupplier;
     private int scrollOffset;
     private String hoverKey = "";
     private long hoverStartedAt;
     private String pressedKey = "";
 
     MarketItemGridPanel(List<MarketBrowseItemModel> items, Listener listener) {
+        this(items, listener, new Supplier<String>() {
+            @Override
+            public String get() {
+                return "当前条件下没有可显示项目";
+            }
+        });
+    }
+
+    MarketItemGridPanel(List<MarketBrowseItemModel> items, Listener listener, Supplier<String> emptyMessageSupplier) {
         this.items = items == null ? Collections.<MarketBrowseItemModel>emptyList()
             : Collections.unmodifiableList(new ArrayList<MarketBrowseItemModel>(items));
         this.listener = listener;
+        this.emptyMessageSupplier = emptyMessageSupplier;
     }
 
     static int getColumns() { return COLUMNS; }
@@ -67,7 +79,8 @@ final class MarketItemGridPanel extends AbstractGuiPanel {
         try {
             if (items.isEmpty()) {
                 FontRenderer font = Minecraft.getMinecraft().fontRenderer;
-                String emptyText = "当前条件下没有可显示项目";
+                String emptyText = emptyMessageSupplier == null ? "" : emptyMessageSupplier.get();
+                if (emptyText == null || emptyText.trim().isEmpty()) { emptyText = "当前条件下没有可显示项目"; }
                 font.drawStringWithShadow(emptyText,
                     b.getX() + Math.max(0, (b.getWidth() - font.getStringWidth(emptyText)) / 2),
                     b.getY() + Math.max(8, (b.getHeight() - font.FONT_HEIGHT) / 2), 0xFF8294A7);

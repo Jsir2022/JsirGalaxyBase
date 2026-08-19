@@ -5,6 +5,76 @@
 这份文件用于记录 `JsirGalaxyBase` 的持续开发摘要。
 从本次开始，后续每次实际代码变更都应补一条简要 work log。
 
+### 2026-08-19 - 复盘并收口终端数字显示遗漏
+
+- 复盘语义化数字规范的全部客户端落点，确认旧的独立 `K/M` 算法已经清除，服务端快照、网络结构和操作请求继续携带原始整数。
+- 修复三类遗漏：订单与资产中心顶部银行/冻结/Vault 摘要及结构化订单、成交、交付行改为精确千分位；紧凑行情区的 24h 成交额与成交量统一复用三位有效数字规则；Vault 格位缩略图使用紧凑数量并在格位右下角缩放对齐，已选操作数量保留精确千分位。
+- 修复结构化订单在极大数量下计算 `filled * 100 / original` 可能长整型溢出的边界，改用无溢出的整数比例计算；新增大额精确分组和 `Long.MAX_VALUE` 成交进度回归测试。
+- 验证与部署：`git diff --check`、Docker Gradle 全量 `test` 与 `assemble` 通过；测试结果为 361 项、0 失败、0 错误、32 项按环境跳过。构建产物、Lobby、S2 与 Prism 客户端四处 SHA-256 均为 `6b504b524bb74c50a8e6642d2b664dbeb8939aeb4d852a582baf8bff2df6598f`。Lobby 到达 `Done (1.433s)!`；S2 已收到相同 JAR，但仍因既有 `World/level.dat` ZLIB 截断、`level.dat_old` EOF 及后续世界为空异常退出。本轮未触碰 S1，也没有启动或重启客户端；部署时客户端本来就在运行，需玩家正常重启后加载新 JAR。
+
+### 2026-08-18 - 建立终端语义化数字显示规范并改造市场紧凑读数
+
+- 实时库确认铁锭买单 #228 并非空数量：原始 2990、已成交 960、剩余 2030。客户端原始盘口行包含 `80 x2,030`，但三列盘口的通用标签在临界宽度按空格换行，只有价格可见，数量被放到不可见的第二行。
+- 新增 `docs/terminal-number-display-standard-v1.md`，把数字显示拆成紧凑数量、精确分组值和精确操作值：盘口、图表坐标、最新成交窄列表使用三位有效数字的 `K -> M -> G -> T -> P -> E`；银行余额、冻结资金、价格、订单中心和确认流程保留精确千分位。
+- 新增共享客户端数字格式器；盘口现在显示无空格的 `80x2.03K`，行情坐标和最新成交数量复用同一规则，市场深度向零截断以免夸大流动性。无空格形式消除窄列按空格换行的根因；盘口点击仍读取未经缩写的服务端原始行，因此打开订单时保持精确价格 80、数量 2030；行情悬停也改回精确成交量和成交额。
+- 验证与部署：`git diff --check`、Docker Gradle 全量 `test` 与 `assemble` 通过；测试结果为 360 项、0 失败、0 错误、32 项按环境跳过。构建产物、Lobby、S2 与 Prism 客户端四处 SHA-256 均为 `e10dbcb0793c23007f9c54e7209c8cba2235ae873355d84ac8c30637b2c86732`。Lobby 到达 `Done (1.520s)!`；S2 已收到相同 JAR，但仍因既有 `World/level.dat` ZLIB 截断、`level.dat_old` EOF 及后续世界为空异常退出。本轮未触碰 S1，也没有启动或重启客户端；部署时客户端本来就在运行，需由玩家正常重启后加载新 JAR。
+
+### 2026-08-18 - 修复测试买单手续费预留阻断真实卖单
+
+- 实机日志确认卖价 20 的正常卖单在跳过玩家自己的 80 买单后，被测试做市买单 #58 阻断；根因是 `market-demo-fixture-v2/v3` 只冻结限价本金，没有预留买方成交手续费。失败事务已整体回滚，没有生成卖单、成交、银行划转或托管变化。
+- 测试做市脚本现在按真实买单合同预留“剩余限价本金 + 最高 taker 手续费”，并已修复实时库 v2/v3 的全部活动测试买单；铁锭 #58 从 2331 调整为 2349，测试做市账户银行冻结总额同步为订单预留总额。加强后的审计显示 `active_buy_orders_under_reserved=0`、`buy_order_owners_without_bank_frozen_coverage=0`。
+- 撮合增加最后防线：锁定的静止买单若仍不足额，则以幂等请求释放残余冻结、标为 `EXCEPTION`、记录 `ORDER_QUARANTINE`，并继续匹配下一张有效外部买单，不再让无过错卖家承担坏盘口状态。
+- 手续费制度保持“成交后收费”：买单入簿时只冻结本金和最坏手续费容量，不产生税费流水；逐笔成交只收真实 maker/taker 费用，未成交数量、价格改善及未使用费用预留在成交完成或撤单时释放。终端确认和回执改称“资金预留”，明确预留不等于已经收费；卖方费用继续从真实成交收入中扣除。
+- 新增挂单未收费、坏买单隔离后继续成交的回归测试，并扩展活动买单逐单预留和银行聚合冻结审计。本轮实时严格审计仍报告4条 8月12日旧自成交事故的 `RECOVERY_REQUIRED`，与本次手续费修复无关，未擅自执行玩家资产恢复。
+- 验证与部署：`bash -n scripts/market-demo-fixture.sh scripts/market-audit.sh`、`git diff --check`、Docker Gradle 定向测试及全量 `test` 均通过；全量结果为 352 项、0 失败、0 错误、32 项按环境跳过。构建产物、Lobby、S2 与 Prism 客户端四处 SHA-256 均为 `2fc49e717b1357b70d5ec5c9e45da94c39bb62849781880c4a30dce49be001af`。Lobby 到达 `Done (1.437s)!`；S2 已收到相同 JAR，但仍因既有 `World/level.dat` ZLIB 截断、`level.dat_old` EOF 及其后 WR-CBE 世界为空异常退出。本轮未触碰 S1，也未启动客户端。
+
+### 2026-08-18 - 记录交易所级能力缺口、结算制度与远期复杂产品边界
+
+- 更新 `docs/modern-trading-terminal-redesign-v1.md`，把标准市场从撮合核心走向交易所级系统仍缺少的能力按正式路线收口：版本化规则、盘前风险网关、全局事件序列、独立对账、操纵监控、运行韧性、自动化接口准入，以及异常成交和申诉制度。
+- 明确实施优先级：AE/机器订单开放前先完成限额与 Kill Switch、权威事件序列和独立对账，再推进监察、制度治理、争议处理、容灾演练及强制价格带/重开竞价。
+- 记录当前标准市场不是 T+1：买卖双方在入簿前分别足额冻结资金和真实商品，成交事务立即完成资金、费用、订单、卖方托管扣减、成交记录和买方 `CLAIMABLE` 权利；随后自动投递 Base Vault，投递失败只进入待领取/恢复，不推翻已完成结算。
+- 将做空、融资杠杆和期权明确排除在当前范围之外，同时作为远期研究项保留；禁止用负库存、负余额或未足额冻结订单进行简化伪实现，并记录未来重新评估各自所需的借贷、保证金、清算、行权和违约制度前提。本轮仅更新设计文档与工作日志，未修改代码或部署。
+
+### 2026-08-18 - 记录标准市场自成交未绕过 BUG
+
+- 新增 `docs/standardized-market-self-match-bug-2026-08-18.md`，记录批量测试中同一玩家提交交叉买卖单后被错误送入银行同账户冻结结算、最终显示“同步失败”的现场现象。
+- 明确缺陷位于市场撮合候选选择阶段：市场层必须自动跳过同一账户的对手单，并继续按价格优先、时间优先寻找下一笔合格外部订单；银行层同账户转账拒绝继续保留为最终安全防线。
+- 固定修复边界与八组验收场景，覆盖只有自有对手单、后续存在外部订单、部分成交、并发状态变化、账本与托管零副作用及终端反馈。本轮只更新 BUG 文档、文档索引和工作日志，未修改或部署代码。
+
+### 2026-08-18 - 修复标准市场自成交候选未绕过
+
+- `StandardizedSpotMarketService` 在候选订单锁定并重验后比较服务端订单所有者；候选属于主动单所有者时直接跳过，并继续按仓储层既有价格优先、时间优先顺序扫描后续外部订单。
+- 不取消、不改价也不移动被跳过的自有订单；可交叉范围内只有自己的对手单时，新限价单与原订单均保持开放，不产生成交、税费、资产转移或同账户银行结算。
+- 新增双向绕过及“只有自己的交叉单”三组回归测试。Docker Gradle 定向 `StandardizedSpotMarketServiceTest` 与完整 `test` 均通过；数据库结构、银行安全校验和客户端协议未改动。
+- `git diff --check` 通过；构建产物、Lobby、S2 与 Prism 客户端四处 SHA-256 均为 `f0a32851567e2a1158136791eee96ae822474db1fc8a1f6ae446cc3c7cd9c29d`。Lobby 到达 `Done (1.384s)`；S2 已部署相同 JAR，但仍因既有 `level.dat` ZLIB 截断与 `level.dat_old` EOF 损坏退出。本轮未触碰 S1，也未启动客户端。
+
+### 2026-08-18 - 记录标准市场扫盘与静止单定价实测规则
+
+- 更新 `docs/modern-trading-terminal-redesign-v1.md`，把批量交易实测确认的连续订单簿语义固定为正式设计：买入限价是最高可接受价、卖出限价是最低可接受价，成交逐档使用订单簿中静止对手单的价格，而不是把全部成交强制写成主动单限价。
+- 增加 `100 x100` 扫过 `90 x10 / 91 x20 / 95 x30` 的示例：前三档分别按 90、91、95 成交，剩余 `40` 才以买价 100 留在盘口；后来外部卖单可以按该静止买价成交，但责任仅限剩余数量与已冻结资金。
+- 记录价格优先、同价时间优先、自成交自动绕过，以及与 SEC 限价定义和 Nasdaq 价格/时间优先、自成交防止、静止单价格成交示例的对应关系；同时明确项目不宣称实现 NBBO、跨市场路由、竞价、熔断、价格保护或完整美国证券法规。本轮仅更新设计与工作日志，未修改或部署代码。
+
+### 2026-08-18 - 记录 7x24 标准市场竞价、熔断与自动化风控方向
+
+- 更新 `docs/modern-trading-terminal-redesign-v1.md`，明确 7x24 市场继续以连续价格/时间优先订单簿为主，不照搬每日开收盘；集合竞价用于新商品、个品种熔断后、关键服务故障恢复、重大规则变化及长期缺少可信价格后的重开定价。
+- 固定 `CONTINUOUS -> LIMITED -> PAUSED -> AUCTION -> CONTINUOUS` 个商品状态机：暂停不回滚已成交交易，始终允许撤销未成交余量；重开竞价公开预估清算价、配对量、失衡方向和倒计时，并按最大成交量、最小失衡、最接近可信参考价的顺序确定单一价格。
+- 参考 LULD、NYSE MWCB、Nasdaq Halt Cross 与交易前风控，但不照抄依赖成熟指数和交易日收盘的 `7% / 13% / 20%` 参数。价格带先以影子模式记录，可信参考价需满足成交笔数、数量与金额门槛，防止一单位成交操纵熔断。
+- 明确首版全市场暂停优先服务结算完整性：数据库、银行、Vault/AE 预留、恢复账本或行情新鲜度无法证明安全时，按最小影响范围进入降级或暂停，恢复后必要时通过集合竞价重开。
+- 在 `docs/market-three-part-architecture.md` 增加市场保护与重开能力；未来 AE/API 必须经过统一认证订单合同、原子预留、幂等版本、心跳租约、速率/敞口限制、cancel-on-disconnect 与账户级 Kill Switch，并监控刷单、分层挂单、关联账户对敲及小额标记价格。本轮仅固化设计与阶段顺序，未修改或部署代码。
+
+### 2026-08-15 - 市场快速撤单与订单资产中心产品修订
+
+- 更新 `docs/market-action-receipt-and-personal-history-v1.md`：商品详情第三动作由“历史”修订为“撤单”，但只打开当前商品、当前玩家且仍有剩余量的活动委托弹窗，继续要求精确订单目标和服务端二次校验。
+- 将既有个人历史页升级规划为市场与仓库共用的“订单与资产中心”，明确当前委托、成交记录、资产与交付、历史查询四个标签，并增加银行、Base Vault、活动委托和待交付的紧凑账户摘要。
+- 历史成交退为辅助查询；高频买卖与快速撤单留在商品详情，跨商品订单和资产管理进入独立全页，泡泡回执负责单次动作反馈。本轮仅更新产品与交互合同，未修改运行代码。
+
+### 2026-08-15 - 标准市场实机视觉验收纠偏
+
+- 根据实机截图重新区分“功能完成”和“界面完成”：详情页账户区移除整句动作反馈，只保留行情同步状态与待入库数量，完整原因继续由通知和订单历史承载。
+- 买卖弹窗重排为行情上下文、订单参数、结算预览和最终动作四个层级；数量比例、盘口价格快捷项与对应输入框就近排列，并保留服务端最终校验提示。
+- 个人订单中心将四个整行大筛选器压缩为左对齐工具栏，右侧显示当前生效筛选摘要；搜索、重置和表格不再争夺同一层级。
+- 本轮不修改撮合、银行、Base Vault、托管或订单协议，只收口三个已经在实机截图中确认层级过弱的客户端渲染路径。
+
 ### 2026-08-14 - 标准市场连续行情桶与零成交时段
 
 - 新增 `docs/standardized-market-continuous-candles-v1.md`，锁定 1h/24h/7d 分别采用 12 个 5 分钟桶、24 个 1 小时桶和 28 个 6 小时桶；横轴始终按固定桶等距显示。
@@ -2268,3 +2338,53 @@
 - 盘口标题统一为“买盘 / 最新成交 / 卖盘”，账户区统一为“可用库存 / 冻结资金 / 当前委托 / 待入库”，并以库存箱、入库箭头和订单单据图标替代三个含义相同的状态点。
 - 验证：`git diff --check` 通过；Docker Gradle 完整 `test` 通过（`BUILD SUCCESSFUL`）。
 - 部署：构建产物已同步到 Lobby、S2 与客户端，三处 SHA-256 均为 `4e416c24eeb56d4f4f18cd1d8aa01c1d514015bcbe6608993f076cabf9d75826`；Lobby 已启动至 `Done`。S2 仍因既有 `World/level.dat` 与 `level.dat_old` ZLIB/EOF 损坏退出，本轮未擅自重建或回滚世界。
+# Standardized market UX completion baseline (2026-08-15)
+
+- Added `docs/standardized-market-ux-completion-v1.md` as the independent completion matrix for order entry, freshness, order history, notifications, localized discovery, charts, explicit states, and non-color-only status.
+- The work deliberately preserves server-authoritative pricing, fees, inventory, banking, matching, delivery, and recovery semantics.
+- Manual visual acceptance remains a final step after targeted tests and Lobby/S2/client deployment.
+
+### 2026-08-15 - Standardized market UX completion implementation
+
+- Completed the modern order ticket with percentage quantity shortcuts, bid/latest/ask price shortcuts, explicit source/destination, gross estimate, server fee policy, and concrete disabled reasons. Server-side settlement remains authoritative.
+- Added explicit live-data freshness states (`FRESH`, `REFRESHING`, `DELAYED`, `STALE`) and prevented localized search text from being replaced while the stable product-key request is in flight.
+- Improved personal order history with localized product names, percentage fill progress, lifecycle markers, and cancellation only for orders with an open remainder.
+- Replaced generic blank browser panels with distinct catalog, search, filter, and stale-data empty states. Important states continue to include text or numeric meaning in addition to color.
+- Validation: `git diff --check`; Docker Gradle targeted tests passed for `TerminalMarketSectionStateTest`, `TerminalMarketSectionContentTest`, `MarketLiveRefreshControllerTest`, `MarketOrderEntryPopupTest`, `TerminalShellPanelsScrollTest`, `TerminalHomeScreenLayoutTest`, `TerminalHomeScreenModelTest`, `TerminalMarketActionMessageFactoryTest`, `TerminalServiceTest`, and `TerminalMarketServiceTest`.
+- Dynamic visual acceptance is intentionally left to the user after deployment: localized search, ticket shortcuts and disabled reasons, freshness transitions, history filters/cancellation, notifications, chart interaction, and empty/stale states.
+- Deployment verification: runtime artifact SHA-256 `a975e711dd8adbc59d4828164fddd00ff8fe16a0ea0584c92e68cded7a174fd6` matches the Lobby, S2, and Prism client copies. Lobby reached `Done (1.406s)`. S2 received the same artifact but remains `EXITED` because the pre-existing `World/level.dat` and `level.dat_old` both fail with ZLIB/EOF corruption; no S2 world repair, replacement, or rollback was attempted.
+
+### 2026-08-16 - 标准市场撤单与订单资产中心首轮路由收口
+
+- 商品详情的第三主动作改为 `撤单`，详情快照只读取当前商品的个人委托；没有 `OPEN` 或 `PARTIALLY_FILLED` 剩余量时显示明确空态，不会误指向其他商品的订单。
+- 新增受限的 `MarketAccountCenterQuery` 与 `MarketAccountCenterSnapshot` 合同：账户所有者不在客户端查询中，搜索词、页码和每页数量均在服务端值对象中收敛；快照以服务端总数计算页数。
+- 新增 `MARKET_ACCOUNT_CENTER` 路由并复用已有服务器分页查询和逐行撤单链，页面标题与状态栏明确为“订单与资产中心”。旧历史 payload 保留兼容解码，标准市场撮合、银行、Base Vault 与恢复服务未改写。
+- 验证：`git diff --check` 通过。Docker Gradle 编译在本轮环境中启动后未在工具的 30 秒输出窗口内返回最终状态，未部署 Lobby、S2 或客户端。
+
+### 2026-08-16 - 标准市场撤单与订单资产中心完整整改
+
+- 商品详情固定为 `买入 / 卖出 / 撤单`；当前商品撤单弹窗只展示本人 `OPEN` / `PARTIALLY_FILLED` 且剩余量大于零的委托，支持表格区滚动。二次确认展示短订单号、方向、成交/总量、剩余量、预计返还和真实返还目标。
+- 撤单请求新增幂等 `requestId` 与订单更新时间版本；终端与业务服务均重新校验玩家归属、状态、剩余量和版本。确认期间变化会警告并刷新；过期版本被归类为安全拒绝，不会把正常订单误标为异常，也不会重复解冻或返还。
+- 新增独立全屏 `订单与资产中心`：六项账户摘要、`当前委托 / 成交记录 / 资产与交付 / 历史查询` 四页签、统一筛选栏、唯一表格滚动区与固定分页脚。市场与 Vault 顶栏图标分别直达当前委托和资产交付页签。
+- 新增受限的 `MarketAccountCenterQuery`、四类结构化 `MarketAccountCenterSnapshot` 行及结构化网络 DTO。商品身份使用 `registry + meta`，客户端创建真实 `ItemStack` 并本地化名称；中心 UI 不再拆解旧历史显示字符串。旧历史 payload 仅保留兼容解码。
+- 当前委托与历史、成交、市场异常、Base Vault 异常均由服务端当前玩家身份查询并使用真实总数分页。资产页合并待收货、Vault 满仓、市场返还/银行解冻失败、Vault `FAILED` 与 `RECOVERY_REQUIRED`；不自动执行恢复动作。
+- Toast 支持点击进入对应页签、按记录号筛选并高亮目标。定制挂牌和汇率兑换继续保持原业务入口，不混入标准订单中心。
+- 自动验证新增查询上限、`0/1/4/5/8/9/11` 分页边界、`11/4=3`、结构化协议往返、过期版本撤单和重复请求不重复解冻测试。定向 Docker Gradle 已执行 83 项并全部通过；最终完整测试、diff 检查和部署结果见本次交付记录。
+- 最终验证：`git diff --check` 通过；Docker Gradle 完整 `test` 通过（298 项完成，32 项按既有条件跳过，无失败）；Lobby 市场烟测通过，数据库 8 个启用标准商品全部被运行时准入，8 类商品均有真实成交数据。
+- 部署：`scripts/deploy-jgb.sh --targets lobby,s2,client` 已构建并同步 runtime jar，源码产物、Lobby、S2 与客户端四处 SHA-256 均为 `b435264bb2e6166f291295ad5f7044699791cda6abdaf435c14196e8d650ae9b`；未启动客户端，也未触碰 S1。Lobby 达到 `Done (1.423s)`。S2 收到同一产物后仍因既有世界 NBT 的 `Unexpected end of ZLIB input stream` / `EOFException` 退出，本轮未修复、替换或回滚其世界。
+
+### 2026-08-17 - 订单中心入口、撤单弹窗实底与 GregTech 中文名复核整改
+
+- 根据实际客户端截图复核，确认首轮交付仍有三处不合格：订单中心入口只是 8–12 像素的无文字标题栏图标且中心路由自身不显示入口；当前商品撤单弹窗覆盖了 `drawSelf` 却未绘制父级弹窗底板；GregTech 商品仍可能直接落回目录英文名。
+- 市场与 Vault 标题栏入口改为带订单图标的 `订单中心` / `资产中心` 宽按钮，订单中心路由自身继续显示入口并使用亮蓝边框与高亮填充，避免把侧栏的“市场”选中态误称为订单中心高亮。
+- 撤单弹窗恢复父级 `ModalPopupPanel` 底板绘制；`POPUP_FILL` 从 alpha `0xF0` 调整为 `0xFF`（100% 不透明）。屏幕外层压暗遮罩保持 `0xAA`（170/255，约 66.7% 不透明），两者语义分离。
+- 已核对 Prism 实例 `options.txt` 为 `lang:zh_CN`。商品浏览、详情、撤单标题和结构化商品行统一使用 `registry@meta` 解析真实 `ItemStack`；GregTech 元物品通过其 `GTLanguageManager` 读取中文格式，并使用 OreDict 关联材质替换 `%material`，例如 `Material.steel=钢` 与 `%material锭` 组合为 `钢锭`，不再把服务端英文目录名作为正常显示结果。
+- 验证：`git diff --check` 通过；Docker Gradle 定向测试通过 `TerminalMarketVisualsTest`、`TerminalShellPanelsScrollTest`、`TerminalMarketSectionContentTest`、`TerminalThemeRegistryTest`；Docker Gradle 完整 `test` 通过（`BUILD SUCCESSFUL`）。未启动客户端或自动截图。
+- 部署：`scripts/deploy-jgb.sh --targets lobby,s2,client` 已构建并同步；构建产物、Lobby、S2 与 Prism 客户端四处 SHA-256 均为 `69a9a68f82c24a57f24c2661dbb3592c6b7280c75ac91d21e50eca7f484bc4a3`，客户端文件时间为 `2026-08-17 12:28:16 +0800`。Lobby 达到 `Done (1.365s)`；S2 仍因既有 `level.dat` / `level.dat_old` 的 `Unexpected end of ZLIB input stream` / `EOFException` 未到 Done，故部署脚本最终返回非零。未启动客户端、未自动截图，目标列表未包含 S1。
+
+### 2026-08-17 - 撤单弹窗终端内约束与订单中心内容区扩容
+
+- 根据实际客户端截图修正缩放布局：当前商品撤单弹窗不再以整个 Minecraft 屏幕为定位边界，改为使用 `TerminalHomeLayout.panelBounds`。弹窗四边始终留在终端内部，高度按实际委托行数计算，最多直接展示 5 行，更多记录只在表格区滚动；单行/空态不再占满终端高度。
+- 订单与资产中心重新分配纵向预算：账户摘要卡由 34 压缩至 28，页签由 20 压缩至 18；宽度不少于 600 时，搜索、搜索/重置动作及商品、方向、状态、时间筛选合并为单行。表头偏移从 120 降至 80，窄界面保留双行工具栏并使用 103 偏移，固定页脚和服务端分页语义不变。
+- 新增弹窗宿主边界/内容驱动高度测试，以及订单中心宽窄布局的表格预算测试。Docker Gradle 定向测试与完整 `test` 均通过（`BUILD SUCCESSFUL`）；`git diff --check` 通过。未启动客户端或自动截图。
+- 部署：`scripts/deploy-jgb.sh --targets lobby,s2,client` 已构建并同步；构建产物、Lobby、S2、Prism 客户端四处 SHA-256 均为 `59ca489d69a3d485a6b1f755e6764ed35ce868c3ea2f9ac474b96d8cf43115bf`，客户端文件时间为 `2026-08-17 22:40:57 +0800`。Lobby 达到 `Done (1.548s)`；S2 仍因既有世界 NBT 的 ZLIB `EOFException` 未到 Done，部署脚本因此返回非零。未启动客户端、未自动截图，部署目标未包含 S1。

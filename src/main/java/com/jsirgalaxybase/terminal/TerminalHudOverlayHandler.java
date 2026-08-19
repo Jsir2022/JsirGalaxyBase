@@ -73,6 +73,27 @@ public class TerminalHudOverlayHandler {
         }
     }
 
+    public boolean clickTerminalNotification(int mouseX, int mouseY, int screenWidth, int screenHeight) {
+        List<TerminalHudNotificationManager.NotificationView> notifications = TerminalHudNotificationManager.pollVisible(
+            System.currentTimeMillis(), MAX_VISIBLE);
+        if (notifications.isEmpty()) return false;
+        int terminalInset = Math.max(8, screenWidth / 20);
+        int width = Math.min(280, Math.max(170, screenWidth / 4));
+        width = Math.min(width, Math.max(120, screenWidth - terminalInset * 2));
+        int x = screenWidth - terminalInset - width;
+        int y = Math.max(28, screenHeight / 12);
+        FontRenderer font = Minecraft.getMinecraft().fontRenderer;
+        for (TerminalHudNotificationManager.NotificationView view : notifications) {
+            List lines = font.listFormattedStringToWidth(view.getNotification().getBody(), width - 18);
+            int height = 18 + Math.max(Math.min(4, lines.size()), 1) * 10;
+            if (mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height) {
+                return TerminalHudNotificationManager.click(view);
+            }
+            y += height + 5;
+        }
+        return false;
+    }
+
     private int drawNotification(FontRenderer fontRenderer, TerminalHudNotificationManager.NotificationView notificationView,
         int x, int y, int width) {
         TerminalNotification notification = notificationView.getNotification();

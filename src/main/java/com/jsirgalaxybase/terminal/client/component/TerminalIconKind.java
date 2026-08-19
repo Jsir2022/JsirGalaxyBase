@@ -7,6 +7,7 @@ enum TerminalIconKind {
     MARKET,
     WARP,
     BANK,
+    ORDER_ASSET,
     HELP,
     REFRESH,
     BACK,

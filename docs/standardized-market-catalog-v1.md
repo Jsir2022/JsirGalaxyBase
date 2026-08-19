@@ -89,4 +89,4 @@ scripts/market-audit.sh --strict
 scripts/market-audit.sh --strict --player <玩家 UUID>
 ```
 
-严格模式会在启用目录仍有技术展示名、玩家开放卖单没有 `ESCROW_SELL` 托管、开放买单没有冻结资金、陈旧 `CLAIMING`、`EXCEPTION` 托管，或有未收口市场操作时失败。历史 `demo-market-*` 演示流动性会单独报告而不使严格模式失败，但它不具备正式结算条件，不能继续充当可交易深度。需要本地灰度测试时，用 `scripts/market-demo-fixture.sh --apply` 将这些旧行隔离，并创建一组显式带托管、冻结资金和受管测试账户的钢锭双边流动性。脚本不执行玩家资产恢复；恢复仍由管理员命令 `/jsirgalaxybase market recover` 明确触发。
+严格模式会在启用目录仍有技术展示名、玩家开放卖单没有 `ESCROW_SELL` 托管、活动买单没有足额“剩余限价本金 + 最大买方手续费”预留、订单预留总额缺少银行冻结覆盖、陈旧 `CLAIMING`、`EXCEPTION` 托管，或有未收口市场操作时失败。历史 `demo-market-*` 演示流动性会单独报告而不使严格模式失败，但它不具备正式结算条件，不能继续充当可交易深度。需要本地灰度测试时，用 `scripts/market-demo-fixture.sh --apply` 将这些旧行隔离，并创建一组显式带托管、足额费用预留和受管测试账户的双边流动性。脚本不执行玩家资产恢复；恢复仍由管理员命令 `/jsirgalaxybase market recover` 明确触发。

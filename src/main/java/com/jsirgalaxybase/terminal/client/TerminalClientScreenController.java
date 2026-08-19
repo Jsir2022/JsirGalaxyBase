@@ -78,6 +78,8 @@ public final class TerminalClientScreenController {
                 continue;
             }
             TerminalNotificationSeverity severity = notification.getSeverity();
+            final String notificationTitle = notification.getTitle();
+            final String notificationBody = notification.getBody();
             long duration = severity == TerminalNotificationSeverity.ERROR ? 7000L
                 : severity == TerminalNotificationSeverity.WARNING ? 5500L : 4200L;
             TerminalHudNotificationManager.push(TerminalNotification.builder()
@@ -85,8 +87,45 @@ public final class TerminalClientScreenController {
                 .title(safeNotificationTitle(notification.getTitle(), notification.getBody()))
                 .body(safeNotificationBody(notification.getBody()))
                 .autoCloseMillis(duration)
+                .onClick(new Runnable() {
+                    @Override public void run() { focusMarketNotification(notificationTitle, notificationBody); }
+                })
                 .build());
         }
+    }
+
+    private void focusMarketNotification(String title, String body) {
+        Minecraft minecraft = Minecraft.getMinecraft();
+        if (!(minecraft.currentScreen instanceof TerminalHomeScreen)) return;
+        String text = (title == null ? "" : title) + " " + (body == null ? "" : body);
+        String lower = text.toLowerCase(java.util.Locale.ROOT);
+        com.jsirgalaxybase.terminal.client.component.TerminalMarketSectionState.AccountCenterTab tab;
+        String prefix = "";
+        if (lower.contains("vault") || lower.contains("custody") || text.contains("收货")
+            || text.contains("恢复") || text.contains("返还失败")) {
+            tab = com.jsirgalaxybase.terminal.client.component.TerminalMarketSectionState.AccountCenterTab.ASSETS_AND_DELIVERY;
+            prefix = text.contains("收货") || lower.contains("custody") ? "C" : "";
+        } else if (text.contains("撤单") || text.contains("已撤销")) {
+            tab = com.jsirgalaxybase.terminal.client.component.TerminalMarketSectionState.AccountCenterTab.HISTORY;
+        } else if (text.contains("成交")) {
+            tab = com.jsirgalaxybase.terminal.client.component.TerminalMarketSectionState.AccountCenterTab.FILLS;
+        } else {
+            tab = com.jsirgalaxybase.terminal.client.component.TerminalMarketSectionState.AccountCenterTab.OPEN_ORDERS;
+        }
+        ((TerminalHomeScreen) minecraft.currentScreen).openAccountCenterFocused(tab, prefix + extractRecordId(text));
+    }
+
+    private String extractRecordId(String text) {
+        String[] markers = { "orderId=", "custodyId=", "收货编号 " };
+        for (String marker : markers) {
+            int start = text.indexOf(marker);
+            if (start < 0) continue;
+            start += marker.length();
+            StringBuilder digits = new StringBuilder();
+            while (start < text.length() && Character.isDigit(text.charAt(start))) digits.append(text.charAt(start++));
+            if (digits.length() > 0) return digits.toString();
+        }
+        return "";
     }
 
     private String safeNotificationTitle(String title, String body) {

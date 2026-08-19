@@ -19,6 +19,13 @@ public class TerminalMarketVisualsTest {
     }
 
     @Test
+    public void structuredItemReferenceKeepsRegistryNamespaceSeparateFromMetadata() {
+        assertEquals("gregtech:gt.metaitem.01@11305",
+            TerminalMarketVisuals.itemRef("gregtech:gt.metaitem.01", 11305));
+        assertEquals("minecraft:iron_ingot@0", TerminalMarketVisuals.itemRef("minecraft:iron_ingot", 0));
+    }
+
+    @Test
     public void latestTradeColumnExcludesSyntheticChartPoints() {
         List<PricePointModel> points = Arrays.asList(
             new PricePointModel(63L, 2L, 100L),

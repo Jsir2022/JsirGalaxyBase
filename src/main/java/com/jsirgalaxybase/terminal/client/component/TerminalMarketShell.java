@@ -26,9 +26,9 @@ final class TerminalMarketShell {
         }
         if (snapshot.hasMarketSectionModel()) {
             TerminalMarketSectionModel market = snapshot.getMarketSectionModel();
-            return market != null && market.isOverviewRoute()
-                ? "市场 / 总入口"
-                : "市场 / 标准商品 / 交易台";
+            if (market != null && market.isOverviewRoute()) return "市场 / 总入口";
+            if (market != null && market.isAccountCenterRoute()) return "市场 / 订单与资产中心";
+            return "市场 / 标准商品 / 交易台";
         }
         String navLabel = model == null || model.getSelectedNavItem() == null ? "市场" : model.getSelectedNavItem().getLabel();
         String title = snapshot.getTitle() == null ? "" : snapshot.getTitle();
@@ -36,12 +36,14 @@ final class TerminalMarketShell {
     }
 
     static String buildSectionTitle(TerminalMarketSectionModel model) {
-        return model != null && model.isOverviewRoute() ? "市场总入口" : "标准商品市场";
+        if (model != null && model.isOverviewRoute()) return "市场总入口";
+        return model != null && model.isAccountCenterRoute() ? "订单与资产中心" : "标准商品市场";
     }
 
     static String buildSectionLead(TerminalMarketSectionModel model) {
-        return model != null && model.isOverviewRoute()
-            ? "标准入仓交易，定制玩家交付，汇率按规则报价。"
+        if (model != null && model.isOverviewRoute()) return "标准入仓交易，定制玩家交付，汇率按规则报价。";
+        return model != null && model.isAccountCenterRoute()
+            ? "当前委托、成交记录、交付异常与历史查询均由服务端分页。"
             : "选择商品后，在右侧完成行情查看、订单管理和交易动作。";
     }
 

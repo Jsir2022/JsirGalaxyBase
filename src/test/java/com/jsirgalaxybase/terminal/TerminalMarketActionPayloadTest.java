@@ -77,4 +77,20 @@ public class TerminalMarketActionPayloadTest {
         assertEquals(2, decoded.getHistoryPage());
         assertEquals(7, decoded.getHistoryPageSize());
     }
+
+    @Test
+    public void accountCenterAndCancelConcurrencyContextRoundTripTogether() {
+        TerminalMarketActionPayload payload = new TerminalMarketActionPayload(
+            "gregtech:steel_ingot:0", "", "", "", "42", "", "", "", "")
+                .withAccountCenter("ASSETS_AND_DELIVERY", "ALL", "ALL", "RECOVERY_REQUIRED", "WEEK",
+                    "42", 2, 4, "C42")
+                .withCancelContext("42", "cancel-uuid", 123456L);
+
+        TerminalMarketActionPayload decoded = TerminalMarketActionPayload.decode(payload.encodeHistory());
+
+        assertEquals("ASSETS_AND_DELIVERY", decoded.getCenterTab());
+        assertEquals("C42", decoded.getFocusedRecordId());
+        assertEquals("cancel-uuid", decoded.getCancelRequestId());
+        assertEquals(123456L, decoded.getExpectedOrderUpdatedAt());
+    }
 }

@@ -62,6 +62,24 @@ public class TerminalMarketSectionStateTest {
     }
 
     @Test
+    public void localizedBrowserTextCanSubmitStableProductKeyWithoutChangingVisibleText() {
+        TerminalMarketSectionState state = new TerminalMarketSectionState();
+        state.setBrowserQuery("钢锭");
+        state.submitBrowserQuery("gregtech:steel_ingot:0");
+
+        assertEquals("钢锭", state.getBrowserQuery());
+        assertEquals("gregtech:steel_ingot:0", state.toPayload().getBrowserQuery());
+
+        TerminalMarketSectionModel response = marketModelWithCatalog().withCatalogPage(
+            marketModelWithCatalog().getCatalogProducts(), "gregtech:steel_ingot:0", 0, 16, 1, false, false);
+        assertTrue(state.acceptsModel(response));
+        state.applyModel(response);
+
+        assertEquals("钢锭", state.getBrowserQuery());
+        assertEquals("gregtech:steel_ingot:0", state.getBrowserRequestQuery());
+    }
+
+    @Test
     public void chartRangeFlowsIntoBrowseAndOrderPayloads() {
         TerminalMarketSectionState state = new TerminalMarketSectionState();
         state.setSelectedChartRange("7d");

@@ -89,7 +89,8 @@ echo "database=$DB_NAME player=${PLAYER_REF:-all} strict=$STRICT"
 formal_count="$(psql_value "SELECT count(*) FROM standardized_market_catalog WHERE enabled = TRUE AND display_name = product_key;")"
 sell_custody_gap="$(psql_value "SELECT count(*) FROM market_order o WHERE o.order_status = 'OPEN' AND o.order_side = 'SELL' AND o.owner_player_ref NOT LIKE 'demo-market-%' AND NOT EXISTS (SELECT 1 FROM market_custody_inventory c WHERE c.related_order_id = o.order_id AND c.custody_status = 'ESCROW_SELL' AND c.quantity >= o.open_quantity);")"
 demo_sell_custody_gap="$(psql_value "SELECT count(*) FROM market_order o WHERE o.order_status = 'OPEN' AND o.order_side = 'SELL' AND o.owner_player_ref LIKE 'demo-market-%' AND NOT EXISTS (SELECT 1 FROM market_custody_inventory c WHERE c.related_order_id = o.order_id AND c.custody_status = 'ESCROW_SELL' AND c.quantity >= o.open_quantity);")"
-buy_funds_gap="$(psql_value "SELECT count(*) FROM market_order o WHERE o.order_status = 'OPEN' AND o.order_side = 'BUY' AND o.reserved_funds <= 0;")"
+buy_funds_gap="$(psql_value "SELECT count(*) FROM market_order o WHERE o.order_status IN ('OPEN', 'PARTIALLY_FILLED') AND o.order_side = 'BUY' AND o.open_quantity > 0 AND o.reserved_funds < (o.unit_price * o.open_quantity + (o.unit_price * o.open_quantity * 80 / 10000));")"
+bank_buy_funds_gap="$(psql_value "SELECT count(*) FROM (SELECT o.owner_player_ref, sum(o.reserved_funds) AS order_reserved FROM market_order o WHERE o.order_status IN ('OPEN', 'PARTIALLY_FILLED') AND o.order_side = 'BUY' AND o.open_quantity > 0 GROUP BY o.owner_player_ref) r LEFT JOIN bank_account a ON a.owner_type = 'PLAYER_UUID' AND a.owner_ref = r.owner_player_ref AND a.currency_code = 'STARCOIN' WHERE a.account_id IS NULL OR a.frozen_balance < r.order_reserved;")"
 stale_claiming="$(psql_value "SELECT count(*) FROM market_custody_inventory WHERE custody_status = 'CLAIMING' AND updated_at < now() - interval '10 minutes'$player_filter;")"
 exception_custody="$(psql_value "SELECT count(*) FROM market_custody_inventory WHERE custody_status = 'EXCEPTION'$player_filter;")"
 pending_operations="$(psql_value "SELECT count(*) FROM market_operation_log WHERE operation_status IN ('CREATED', 'PROCESSING', 'RECOVERY_REQUIRED')${PLAYER_REF:+ AND player_ref = '$escaped_player'};")"
@@ -98,7 +99,8 @@ failed_operations="$(psql_value "SELECT count(*) FROM market_operation_log WHERE
 printf 'enabled_catalog_technical_display_names=%s\n' "$formal_count"
 printf 'open_sell_orders_without_escrow=%s\n' "$sell_custody_gap"
 printf 'legacy_demo_sell_orders_without_escrow=%s\n' "$demo_sell_custody_gap"
-printf 'open_buy_orders_without_reserved_funds=%s\n' "$buy_funds_gap"
+printf 'active_buy_orders_under_reserved=%s\n' "$buy_funds_gap"
+printf 'buy_order_owners_without_bank_frozen_coverage=%s\n' "$bank_buy_funds_gap"
 printf 'stale_claiming_custody=%s\n' "$stale_claiming"
 printf 'exception_custody=%s\n' "$exception_custody"
 printf 'incomplete_market_operations=%s\n' "$pending_operations"
@@ -106,6 +108,19 @@ printf 'failed_market_operations_history=%s\n' "$failed_operations"
 
 echo
 echo "== actionable records =="
+psql_table "
+SELECT order_id, owner_player_ref, product_key, unit_price, open_quantity, reserved_funds,
+       unit_price * open_quantity + (unit_price * open_quantity * 80 / 10000) AS required_reserve,
+       source_server_id, updated_at
+FROM market_order o
+WHERE o.order_status IN ('OPEN', 'PARTIALLY_FILLED')
+  AND o.order_side = 'BUY'
+  AND o.open_quantity > 0
+  AND o.reserved_funds < (o.unit_price * o.open_quantity
+      + (o.unit_price * o.open_quantity * 80 / 10000))
+ORDER BY o.order_id
+LIMIT 30;
+"
 psql_table "
 SELECT order_id, owner_player_ref, product_key, open_quantity, source_server_id, created_at
 FROM market_order o
@@ -273,7 +288,7 @@ ORDER BY a.account_id, s.slot_index
 LIMIT 30;
 "
 
-anomalies=$((formal_count + sell_custody_gap + buy_funds_gap + stale_claiming + exception_custody + pending_operations + custom_snapshot_gap + custom_sold_trade_gap + custom_listing_state_gap + custom_trade_state_gap + custom_exception_deliveries + custom_delivery_processing + custom_delivery_unknown + exchange_metadata_gap + vault_incomplete_operations + vault_capacity_mismatches + vault_out_of_range_slots))
+anomalies=$((formal_count + sell_custody_gap + buy_funds_gap + bank_buy_funds_gap + stale_claiming + exception_custody + pending_operations + custom_snapshot_gap + custom_sold_trade_gap + custom_listing_state_gap + custom_trade_state_gap + custom_exception_deliveries + custom_delivery_processing + custom_delivery_unknown + exchange_metadata_gap + vault_incomplete_operations + vault_capacity_mismatches + vault_out_of_range_slots))
 if [[ "$STRICT" == true && "$anomalies" -gt 0 ]]; then
     echo "FAIL: market audit found $anomalies anomaly count(s)." >&2
     exit 3

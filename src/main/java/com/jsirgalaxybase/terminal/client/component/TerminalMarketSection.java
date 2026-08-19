@@ -23,8 +23,10 @@ import com.jsirgalaxybase.client.gui.framework.LabelPanel;
 import com.jsirgalaxybase.client.gui.framework.PanelContainer;
 import com.jsirgalaxybase.client.gui.framework.RoundedRectPainter;
 import com.jsirgalaxybase.client.gui.theme.ThemeColorKey;
+import com.jsirgalaxybase.terminal.client.TerminalNumberFormat;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel;
 import com.jsirgalaxybase.terminal.ui.TerminalNotificationSeverity;
+import com.jsirgalaxybase.terminal.TerminalMarketAccountCenterRow;
 
 public final class TerminalMarketSection extends PanelContainer {
 
@@ -285,7 +287,7 @@ public final class TerminalMarketSection extends PanelContainer {
     }
 
     private void layoutStandardized(GuiRect bounds) {
-        if (state.isStandardizedHistoryView()) {
+        if (model.isAccountCenterRoute() || state.isStandardizedHistoryView()) {
             browserPanel.setVisible(false);
             detailPanel.setVisible(false);
             historyPanel.setVisible(true);
@@ -305,6 +307,10 @@ public final class TerminalMarketSection extends PanelContainer {
         browserPanel.setBounds(bounds);
         detailPanel.setBounds(new GuiRect(bounds.getX(), bounds.getY(), 0, 0));
         historyPanel.setBounds(new GuiRect(bounds.getX(), bounds.getY(), 0, 0));
+    }
+
+    static int accountCenterTableHeaderOffset(int width) {
+        return width >= 600 ? 80 : 103;
     }
 
     private ButtonPanel button(final String text, Runnable action, Supplier<Boolean> enabled) {
@@ -382,7 +388,8 @@ public final class TerminalMarketSection extends PanelContainer {
     }
 
     private String compactVolumeSummary() {
-        return "24h量 " + model.getVolume24h() + " / 额 " + compactCurrency(model.getTurnover24h());
+        return "24h量 " + compactGroupedQuantity(model.getVolume24h())
+            + " / 额 " + compactGroupedQuantity(compactCurrency(model.getTurnover24h()));
     }
 
     private List<TerminalMarketSectionModel.PricePointModel> selectedPricePointsForSelectedProduct() {
@@ -414,15 +421,14 @@ public final class TerminalMarketSection extends PanelContainer {
         String key = model.getSelectedProductKey();
         for (TerminalMarketSectionModel.CatalogProductModel product : model.getCatalogProducts()) {
             if (product != null && product.getProductKey().equals(key)) {
-                return product.getRegistryName() + ":" + product.getMeta();
+                return TerminalMarketVisuals.itemRef(product.getRegistryName(), product.getMeta());
             }
         }
         return key;
     }
 
     private String selectedLocalizedProductName() {
-        return TerminalMarketVisuals.resolveLocalizedItemName(selectedProductIconRef(),
-            model.getSelectedProductName());
+        return TerminalMarketVisuals.resolveSelectedProductName(model);
     }
 
     private String localizedOrderDisplayName(TerminalMarketSectionContent.OrderEntry entry) {
@@ -431,7 +437,7 @@ public final class TerminalMarketSection extends PanelContainer {
         for (TerminalMarketSectionModel.CatalogProductModel product : model.getCatalogProducts()) {
             if (product != null && product.getProductKey().equals(productKey)) {
                 return TerminalMarketVisuals.resolveLocalizedItemName(
-                    product.getRegistryName() + ":" + product.getMeta(), entry.getDisplayName());
+                    TerminalMarketVisuals.itemRef(product.getRegistryName(), product.getMeta()), entry.getDisplayName());
             }
         }
         return TerminalMarketVisuals.resolveLocalizedItemName(productKey, entry.getDisplayName());
@@ -489,26 +495,40 @@ public final class TerminalMarketSection extends PanelContainer {
     }
 
     private String compactBookLine(String line) {
-        if (line == null) { return "--"; }
-        java.util.regex.Matcher matcher = java.util.regex.Pattern
-            .compile("[买卖]价\\s+([0-9,]+)\\s*\\|\\s*剩余\\s+([0-9,]+).*")
-            .matcher(line);
-        return matcher.matches() ? matcher.group(1) + " x" + matcher.group(2) : line;
+        return MarketCompactText.compactOrderBookLine(line);
     }
 
     private long[] parseBookLevel(String line) {
-        if (line == null) { return null; }
-        java.util.regex.Matcher matcher = java.util.regex.Pattern
-            .compile("([0-9,]+)\\s*[xX]\\s*([0-9,]+)")
-            .matcher(compactBookLine(line));
-        if (!matcher.find()) { return null; }
+        return MarketCompactText.exactOrderBookLevel(line);
+    }
+
+    private String compactGroupedQuantity(String value) {
+        if (value == null) { return "--"; }
         try {
-            long price = Long.parseLong(matcher.group(1).replace(",", ""));
-            long quantity = Long.parseLong(matcher.group(2).replace(",", ""));
-            return price > 0L && quantity > 0L ? new long[] { price, quantity } : null;
+            return TerminalNumberFormat.compactQuantity(Long.parseLong(value.replace(",", "").trim()));
         } catch (NumberFormatException ignored) {
-            return null;
+            return value;
         }
+    }
+
+    private String exactGroupedValue(String value) {
+        if (value == null) { return "--"; }
+        try {
+            return TerminalNumberFormat.exact(Long.parseLong(value.replace(",", "").trim()));
+        } catch (NumberFormatException ignored) {
+            return value;
+        }
+    }
+
+    private List<String> limitedRawBookLines(List<String> source, int max) {
+        List<String> results = new ArrayList<String>();
+        if (source == null) { return results; }
+        for (String line : source) {
+            if (line == null || line.trim().isEmpty()) { continue; }
+            results.add(line.trim());
+            if (results.size() >= max) { break; }
+        }
+        return results;
     }
 
     private static String compactCurrency(String value) {
@@ -525,7 +545,7 @@ public final class TerminalMarketSection extends PanelContainer {
         for (TerminalMarketSectionModel.CatalogProductModel product : model.getCatalogProducts()) {
             if (product == null || !product.isEnabled()) { continue; }
             TerminalMarketSectionModel.CatalogMarketSummaryModel summary = product.getMarketSummary();
-            String iconRef = product.getRegistryName() + ":" + product.getMeta();
+            String iconRef = TerminalMarketVisuals.itemRef(product.getRegistryName(), product.getMeta());
             String localizedName = TerminalMarketVisuals.resolveLocalizedItemName(iconRef, product.getDisplayName());
             MarketBrowseItemModel item = new MarketBrowseItemModel(product.getProductKey(), iconRef,
                 localizedName, String.valueOf(product.getReferencePrice()), product.getTradability(),
@@ -539,6 +559,36 @@ public final class TerminalMarketSection extends PanelContainer {
             items.add(item);
         }
         return items;
+    }
+
+    private String resolveBrowserRequestQuery(String visibleQuery) {
+        String query = visibleQuery == null ? "" : visibleQuery.trim();
+        if (query.isEmpty()) { return ""; }
+        String lowerQuery = query.toLowerCase(Locale.ROOT);
+        String singleMatch = "";
+        int matchCount = 0;
+        for (TerminalMarketSectionModel.CatalogProductModel product : model.getCatalogProducts()) {
+            if (product == null || !product.isEnabled()) { continue; }
+            String iconRef = TerminalMarketVisuals.itemRef(product.getRegistryName(), product.getMeta());
+            String localizedName = TerminalMarketVisuals.resolveLocalizedItemName(iconRef, product.getDisplayName());
+            if (localizedName.equalsIgnoreCase(query) || product.getProductKey().equalsIgnoreCase(query)) {
+                return product.getProductKey();
+            }
+            if (localizedName.toLowerCase(Locale.ROOT).contains(lowerQuery)) {
+                singleMatch = product.getProductKey();
+                matchCount++;
+            }
+        }
+        return matchCount == 1 ? singleMatch : query;
+    }
+
+    private String getBrowseEmptyMessage() {
+        if (state.isMarketSnapshotStale()) { return "行情数据已过期，请刷新"; }
+        if (!state.getBrowserQuery().trim().isEmpty()) { return "未找到匹配商品，可清空搜索后重试"; }
+        if (state.getBrowserFilter() != TerminalMarketSectionState.BrowserFilter.ALL) {
+            return "当前筛选条件下暂无商品";
+        }
+        return "正式目录暂无可用商品";
     }
 
     private void drawCardFrame(GuiRect bounds, int borderColor, int fillColor) {
@@ -716,6 +766,11 @@ public final class TerminalMarketSection extends PanelContainer {
                 public void scrollOffsetChanged(int offset) {
                     state.setBrowserGridScrollOffset(offset);
                 }
+            }, new Supplier<String>() {
+                @Override
+                public String get() {
+                    return getBrowseEmptyMessage();
+                }
             });
             this.pagerPanel = new BrowserPagerPanel();
             addChild(searchPanel);
@@ -763,6 +818,7 @@ public final class TerminalMarketSection extends PanelContainer {
                 @Override
                 public void run() {
                     state.focus(TerminalMarketSectionState.FocusField.NONE);
+                    state.submitBrowserQuery(resolveBrowserRequestQuery(state.getBrowserQuery()));
                     if (actionHandler != null) {
                         actionHandler.refreshProductBrowser();
                     }
@@ -813,6 +869,7 @@ public final class TerminalMarketSection extends PanelContainer {
         private final LabelPanel pageLabel;
         private final ButtonPanel previousButton;
         private final ButtonPanel nextButton;
+        private final List<ButtonPanel> tabButtons = new ArrayList<ButtonPanel>();
 
         private BrowserPagerPanel() {
             this.pageLabel = secondaryLabel(new Supplier<String>() {
@@ -916,10 +973,10 @@ public final class TerminalMarketSection extends PanelContainer {
                 }
             }, () -> Boolean.valueOf(TerminalMarketSectionContent.hasSelectedProduct(model)),
                 0xEE8B3437, 0xEEAA4447);
-            this.historyButton = new MarketActionButtonPanel("历史", new Runnable() {
+            this.historyButton = new MarketActionButtonPanel("撤单", new Runnable() {
                 @Override
                 public void run() {
-                    if (actionHandler != null) actionHandler.openStandardizedHistory();
+                    if (actionHandler != null) actionHandler.openCancelOrderConfirm("");
                 }
             }, () -> Boolean.TRUE, 0xEE355A79, 0xEE456F91);
             addChild(buyButton);
@@ -959,22 +1016,19 @@ public final class TerminalMarketSection extends PanelContainer {
                 drawCompact(font, compactPriceRange(points), x, y + 10, columnWidth, 0xFFBFCBDA);
                 drawCompact(font, "可用库存 " + compactCurrency(model.getSourceAvailable()), rightX, y + 10,
                     columnWidth, 0xFF62D478);
-                drawCompact(font, "成交量 " + model.getVolume24h(), x, y + 20,
+                drawCompact(font, "成交量 " + compactGroupedQuantity(model.getVolume24h()), x, y + 20,
                     columnWidth, 0xFFA9B8C8);
                 drawCompact(font, "冻结资金 " + compactCurrency(model.getFrozenFunds()), rightX, y + 20,
                     columnWidth, 0xFFA9B8C8);
-                drawCompact(font, "成交额 " + compactCurrency(model.getTurnover24h()), x, y + 30,
+                drawCompact(font, "成交额 " + compactGroupedQuantity(compactCurrency(model.getTurnover24h())), x, y + 30,
                     columnWidth, 0xFFA9B8C8);
                 drawCompact(font, "当前委托 " + compactOrderCount() + " / 可撤 " + countCancelableOrders(), rightX,
                     y + 30, columnWidth, 0xFFA9B8C8);
                 TerminalMarketSectionModel.ActionFeedbackModel feedback = model.getActionFeedback();
-                if (hasMeaningfulActionFeedback(feedback)) {
-                    drawCompact(font, feedback.getTitle() + ": " + feedback.getBody(), x, y + 40,
-                        innerWidth, feedbackColor(feedback.getSeverity()));
-                } else {
-                    drawCompact(font, "待入库 " + compactCurrency(model.getClaimableQuantity()), rightX, y + 40,
-                        columnWidth, 0xFFA9B8C8);
-                }
+                drawCompact(font, compactSyncStatus(feedback), x, y + 40, columnWidth,
+                    compactSyncColor(feedback));
+                drawCompact(font, "待入库 " + compactCurrency(model.getClaimableQuantity()), rightX, y + 40,
+                    columnWidth, parsePositiveLong(model.getClaimableQuantity()) > 0L ? 0xFFF0C75E : 0xFFA9B8C8);
                 int splitX = x + columnWidth + columnGap / 2;
                 Gui.drawRect(splitX, y, splitX + 1, Math.min(getBounds().getBottom() - 28, y + 50), 0x334C6277);
                 Gui.drawRect(x, y + 8, x + columnWidth, y + 9, 0x223B5268);
@@ -992,7 +1046,7 @@ public final class TerminalMarketSection extends PanelContainer {
                 high = Math.max(high, point.getPrice());
                 low = Math.min(low, point.getPrice());
             }
-            return "高/低 " + high + " / " + low;
+            return "高/低 " + TerminalNumberFormat.exact(high) + " / " + TerminalNumberFormat.exact(low);
         }
 
         private void drawCompact(FontRenderer font, String text, int x, int y, int width, int color) {
@@ -1005,6 +1059,20 @@ public final class TerminalMarketSection extends PanelContainer {
                 && feedback.getBody() != null
                 && !feedback.getBody().isEmpty()
                 && !"当前没有市场动作反馈。".equals(feedback.getBody());
+        }
+
+        private String compactSyncStatus(TerminalMarketSectionModel.ActionFeedbackModel feedback) {
+            if (hasMeaningfulActionFeedback(feedback)) {
+                if (feedback.getSeverity() == TerminalNotificationSeverity.ERROR) return "同步失败";
+                if (feedback.getSeverity() == TerminalNotificationSeverity.WARNING) return "需要处理";
+                if (feedback.getSeverity() == TerminalNotificationSeverity.SUCCESS) return "操作已完成";
+            }
+            return state.isMarketSnapshotStale() ? "行情已过期" : "行情已同步";
+        }
+
+        private int compactSyncColor(TerminalMarketSectionModel.ActionFeedbackModel feedback) {
+            if (hasMeaningfulActionFeedback(feedback)) return feedbackColor(feedback.getSeverity());
+            return state.isMarketSnapshotStale() ? 0xFFE56A64 : 0xFF8294A7;
         }
 
         private int feedbackColor(TerminalNotificationSeverity severity) {
@@ -1027,17 +1095,19 @@ public final class TerminalMarketSection extends PanelContainer {
         private final ButtonPanel timeButton;
         private final ButtonPanel previousButton;
         private final ButtonPanel nextButton;
+        private final List<ButtonPanel> tabButtons = new ArrayList<ButtonPanel>();
         private final List<MarketActionButtonPanel> cancelButtons = new ArrayList<MarketActionButtonPanel>();
 
         private HistoryWorkbenchPanel() {
-            entries = TerminalMarketSectionContent.buildOrderEntries(model);
+            entries = model.isAccountCenterRoute() ? TerminalMarketSectionContent.buildAccountCenterEntries(model)
+                : TerminalMarketSectionContent.buildOrderEntries(model);
             queryField = textField(() -> state.getHistoryQuery(), value -> state.setHistoryQuery(value),
                 TerminalMarketSectionState.FocusField.HISTORY_QUERY, "搜索商品名称或物品键...");
             searchButton = dynamicButton(() -> "搜索", () -> {
                 state.focus(TerminalMarketSectionState.FocusField.NONE);
                 refreshHistory();
             });
-            resetButton = dynamicButton(() -> "清空", () -> {
+            resetButton = dynamicButton(() -> "重置", () -> {
                 state.resetHistoryFilters();
                 refreshHistory();
             });
@@ -1069,6 +1139,14 @@ public final class TerminalMarketSection extends PanelContainer {
                     refreshHistory();
                 }
             });
+            for (final TerminalMarketSectionState.AccountCenterTab tab : TerminalMarketSectionState.AccountCenterTab.values()) {
+                ButtonPanel tabButton = dynamicButton(() -> centerTabLabel(tab), () -> {
+                    state.selectAccountCenterTab(tab);
+                    refreshHistory();
+                });
+                tabButtons.add(tabButton);
+                addChild(tabButton);
+            }
             addChild(queryField);
             addChild(searchButton);
             addChild(resetButton);
@@ -1081,7 +1159,7 @@ public final class TerminalMarketSection extends PanelContainer {
             for (final TerminalMarketSectionContent.OrderEntry entry : entries) {
                 MarketActionButtonPanel cancel = new MarketActionButtonPanel("撤单", () -> {
                     if (actionHandler != null && entry.isCancelable()) {
-                        state.setPendingCancelOrderId(entry.getOrderId());
+                        state.prepareCancelOrder(entry.getOrderId(), entry.getUpdatedAtEpochSeconds());
                         actionHandler.openCancelOrderConfirm(entry.getOrderId());
                     }
                 }, () -> Boolean.valueOf(entry.isCancelable()), 0xEE8A641F, 0xEEAA7B27);
@@ -1098,19 +1176,51 @@ public final class TerminalMarketSection extends PanelContainer {
         public void setBounds(GuiRect bounds) {
             super.setBounds(bounds);
             int x = bounds.getX() + 8;
-            int y = bounds.getY() + 8;
+            boolean center = model.isAccountCenterRoute();
+            boolean compactToolbar = center && bounds.getWidth() >= 600;
+            int y = bounds.getY() + (center ? 57 : 8);
             int right = bounds.getRight() - 8;
-            int actionWidth = 46;
-            queryField.setBounds(new GuiRect(x, y, Math.max(80, right - x - actionWidth * 2 - 8), 18));
-            searchButton.setBounds(new GuiRect(right - actionWidth * 2 - 4, y, actionWidth, 18));
-            resetButton.setBounds(new GuiRect(right - actionWidth, y, actionWidth, 18));
-            y += 23;
-            int filterWidth = Math.max(50, (bounds.getWidth() - 8 * 2 - 6 * 3) / 4);
-            scopeButton.setBounds(new GuiRect(x, y, filterWidth, 18));
-            sideButton.setBounds(new GuiRect(x + filterWidth + 6, y, filterWidth, 18));
-            statusButton.setBounds(new GuiRect(x + (filterWidth + 6) * 2, y, filterWidth, 18));
-            timeButton.setBounds(new GuiRect(x + (filterWidth + 6) * 3, y,
-                Math.max(0, bounds.getRight() - 8 - x - (filterWidth + 6) * 3), 18));
+            int tabY = bounds.getY() + 35;
+            int tabGap = 4;
+            int tabWidth = Math.max(52, (bounds.getWidth() - 16 - tabGap * 3) / 4);
+            for (int index = 0; index < tabButtons.size(); index++) {
+                tabButtons.get(index).setVisible(center);
+                tabButtons.get(index).setBounds(new GuiRect(x + index * (tabWidth + tabGap), tabY,
+                    index == tabButtons.size() - 1 ? Math.max(0, right - (x + index * (tabWidth + tabGap))) : tabWidth, 18));
+            }
+            int gap = 4;
+            int searchWidth = center ? 38 : 42;
+            int resetWidth = center ? 32 : 36;
+            int scopeWidth = center ? Math.min(78, Math.max(58, bounds.getWidth() / 10))
+                : Math.min(86, Math.max(64, bounds.getWidth() / 8));
+            int sideWidth = center ? Math.min(64, Math.max(50, bounds.getWidth() / 12))
+                : Math.min(72, Math.max(58, bounds.getWidth() / 10));
+            int statusWidth = center ? Math.min(70, Math.max(56, bounds.getWidth() / 11))
+                : Math.min(78, Math.max(62, bounds.getWidth() / 9));
+            int timeWidth = center ? Math.min(66, Math.max(52, bounds.getWidth() / 12))
+                : Math.min(72, Math.max(58, bounds.getWidth() / 10));
+            int filterWidth = scopeWidth + sideWidth + statusWidth + timeWidth + gap * 3;
+            int queryWidth = compactToolbar
+                ? Math.max(90, right - x - searchWidth - resetWidth - filterWidth - gap * 6)
+                : Math.max(80, right - x - searchWidth - resetWidth - gap * 2);
+            queryField.setBounds(new GuiRect(x, y, queryWidth, 18));
+            int cursor = x + queryWidth + gap;
+            searchButton.setBounds(new GuiRect(cursor, y, searchWidth, 18));
+            cursor += searchWidth + gap;
+            resetButton.setBounds(new GuiRect(cursor, y, resetWidth, 18));
+            if (compactToolbar) {
+                cursor += resetWidth + gap;
+            } else {
+                y += 22;
+                cursor = x;
+            }
+            scopeButton.setBounds(new GuiRect(cursor, y, scopeWidth, 18));
+            cursor += scopeWidth + gap;
+            sideButton.setBounds(new GuiRect(cursor, y, sideWidth, 18));
+            cursor += sideWidth + gap;
+            statusButton.setBounds(new GuiRect(cursor, y, statusWidth, 18));
+            cursor += statusWidth + gap;
+            timeButton.setBounds(new GuiRect(cursor, y, timeWidth, 18));
             previousButton.setBounds(new GuiRect(bounds.getRight() - 58, bounds.getBottom() - 22, 24, 16));
             nextButton.setBounds(new GuiRect(bounds.getRight() - 30, bounds.getBottom() - 22, 24, 16));
         }
@@ -1125,7 +1235,8 @@ public final class TerminalMarketSection extends PanelContainer {
             if (page != state.getHistoryPage()) state.setHistoryPage(page);
             int rowX = getBounds().getX() + 8;
             int rowWidth = Math.max(0, getBounds().getWidth() - 16);
-            int headerY = getBounds().getY() + 56;
+            int headerY = getBounds().getY() + (model.isAccountCenterRoute()
+                ? accountCenterTableHeaderOffset(getBounds().getWidth()) : 56);
             int rowY = headerY + 13;
             int footerY = getBounds().getBottom() - 25;
             int pageSize = Math.max(1, model.getHistoryPageSize());
@@ -1136,34 +1247,41 @@ public final class TerminalMarketSection extends PanelContainer {
             int remainingX = rowX + rowWidth * 58 / 100;
             int statusX = rowX + rowWidth * 68 / 100;
             int timeX = rowX + rowWidth * 80 / 100;
-            font.drawString("方向", rowX + 3, headerY, 0xFF71879B);
-            font.drawString("商品", productX, headerY, 0xFF71879B);
-            font.drawString("价格", priceX, headerY, 0xFF71879B);
-            font.drawString("成交/总量", filledX, headerY, 0xFF71879B);
-            font.drawString("剩余", remainingX, headerY, 0xFF71879B);
-            font.drawString("状态", statusX, headerY, 0xFF71879B);
-            font.drawString("创建时间", timeX, headerY, 0xFF71879B);
+            String filterSummary = activeHistoryFilterSummary();
+            if (!filterSummary.isEmpty() && !model.isAccountCenterRoute()) {
+                int summaryWidth = font.getStringWidth(filterSummary);
+                font.drawString(filterSummary, Math.max(rowX, rowX + rowWidth - summaryWidth),
+                    getBounds().getY() + 39, 0xFF71879B);
+            }
+            drawCenterSummary(font, rowX, rowWidth);
+            drawTableHeaders(font, rowX, productX, priceX, filledX, remainingX, statusX, timeX, headerY);
             for (MarketActionButtonPanel button : cancelButtons) button.setVisible(false);
             for (int index = 0; index < entries.size(); index++) {
                 TerminalMarketSectionContent.OrderEntry entry = entries.get(index);
                 int y = rowY + index * rowHeight;
                 if (y + rowHeight > footerY) break;
                 Gui.drawRect(rowX, y, rowX + rowWidth, y + rowHeight - 2,
-                    index % 2 == 0 ? 0xFF111922 : 0xFF151F29);
+                    isFocusedCenterRow(index) ? 0xFF203B52 : index % 2 == 0 ? 0xFF111922 : 0xFF151F29);
+                String rowKind = index < model.getCenterRowKinds().size() ? model.getCenterRowKinds().get(index) : "";
+                if (model.isAccountCenterRoute() && ("FILL".equals(rowKind) || "DELIVERY".equals(rowKind))) {
+                    drawSpecialCenterRow(font, model.getAccountCenterRows().get(index), index, rowX, rowWidth,
+                        y, rowHeight, productX, priceX, filledX, remainingX, statusX, timeX);
+                    continue;
+                }
                 String side = entry.getSideLabel();
                 int sideColor = "BUY".equals(entry.getSide()) ? 0xFF65D879 : 0xFFE16767;
                 int textY = y + Math.max(4, (rowHeight - font.FONT_HEIGHT) / 2);
                 font.drawString(side, rowX + 6, textY, sideColor);
+                int productTextX = drawCenterRowIcon(index, productX, y) ? productX + 20 : productX;
                 font.drawString(font.trimStringToWidth(localizedOrderDisplayName(entry),
-                    Math.max(40, priceX - productX - 8)),
-                    productX, textY, 0xFFE5EDF5);
+                    Math.max(20, priceX - productTextX - 8)), productTextX, textY, 0xFFE5EDF5);
                 font.drawString(font.trimStringToWidth(entry.getUnitPrice(), Math.max(24, filledX - priceX - 6)),
                     priceX, textY, 0xFFF0C75E);
-                font.drawString(font.trimStringToWidth(entry.getFilledQuantity() + "/" + entry.getOriginalQuantity(),
+                font.drawString(font.trimStringToWidth(entry.getFillProgressLabel(),
                     Math.max(30, remainingX - filledX - 6)), filledX, textY, 0xFFB8C6D4);
                 font.drawString(font.trimStringToWidth(entry.getRemainingQuantity(), Math.max(24, statusX - remainingX - 6)),
                     remainingX, textY, 0xFFB8C6D4);
-                font.drawString(font.trimStringToWidth(entry.getStatusLabel(), Math.max(36, timeX - statusX - 6)),
+                font.drawString(font.trimStringToWidth(entry.getStatusMarkerLabel(), Math.max(36, timeX - statusX - 6)),
                     statusX, textY, entry.isCancelable() ? 0xFFF0C75E : 0xFF9FB0BF);
                 int timeWidth = entry.isCancelable() ? rowX + rowWidth - 58 - timeX : rowX + rowWidth - timeX - 6;
                 font.drawString(font.trimStringToWidth(entry.getCreatedAt(), Math.max(36, timeWidth)),
@@ -1179,12 +1297,160 @@ public final class TerminalMarketSection extends PanelContainer {
                     ? "当前筛选条件下没有订单。" : "当前页没有订单，请返回上一页。";
                 font.drawString(empty, rowX + 8, rowY + 10, 0xFF9FB0BF);
             }
-            font.drawString("订单历史  " + model.getHistoryTotalEntries() + " 条  " + (page + 1) + "/" + pageCount,
+            String footerTitle = model.isAccountCenterRoute()
+                ? "订单与资产中心 / " + centerTabLabel(state.getAccountCenterTab()).replace("[", "").replace("]", "")
+                : "订单历史";
+            font.drawString(footerTitle + "  " + model.getHistoryTotalEntries() + " 条  " + (page + 1) + "/" + pageCount,
                 rowX, getBounds().getBottom() - 19, 0xFFC7D3DE);
+        }
+
+        private boolean isFocusedCenterRow(int index) {
+            return model.isAccountCenterRoute() && index >= 0 && index < model.getMyOrderIds().size()
+                && !state.getFocusedRecordId().isEmpty()
+                && state.getFocusedRecordId().equals(model.getMyOrderIds().get(index));
+        }
+
+        @Override
+        protected boolean onContainerScrolled(GuiScene scene, int mouseX, int mouseY, int wheelDelta) {
+            if (!model.isAccountCenterRoute() || wheelDelta == 0) return false;
+            GuiRect bounds = getBounds();
+            int tableTop = bounds.getY() + accountCenterTableHeaderOffset(bounds.getWidth());
+            GuiRect table = new GuiRect(bounds.getX() + 8, tableTop,
+                Math.max(0, bounds.getWidth() - 16), Math.max(0, bounds.getBottom() - 25 - tableTop));
+            if (!table.contains(mouseX, mouseY)) return false;
+            if (wheelDelta < 0 && model.hasHistoryNextPage()) {
+                state.setHistoryPage(model.getHistoryPageIndex() + 1); refreshHistory(); return true;
+            }
+            if (wheelDelta > 0 && model.hasHistoryPreviousPage()) {
+                state.setHistoryPage(model.getHistoryPageIndex() - 1); refreshHistory(); return true;
+            }
+            return true;
+        }
+
+        private void drawCenterSummary(FontRenderer font, int x, int width) {
+            if (!model.isAccountCenterRoute()) return;
+            String[] labels = { "银行可用", "冻结资金", "Base Vault", "当前委托", "待收货", "恢复事项" };
+            String[] values = { exactGroupedValue(model.getCenterBankAvailable()),
+                exactGroupedValue(model.getCenterFrozenFunds()),
+                TerminalNumberFormat.exact(model.getCenterVaultUsedSlots()) + "/"
+                    + TerminalNumberFormat.exact(model.getCenterVaultTotalSlots()),
+                TerminalNumberFormat.exact(model.getCenterActiveOrders()),
+                TerminalNumberFormat.exact(model.getCenterPendingDeliveries()),
+                TerminalNumberFormat.exact(model.getCenterRecoveryItems()) };
+            int gap = 4;
+            int boxWidth = Math.max(42, (width - gap * 5) / 6);
+            int y = getBounds().getY() + 4;
+            for (int index = 0; index < labels.length; index++) {
+                int boxX = x + index * (boxWidth + gap);
+                int actualWidth = index == labels.length - 1 ? Math.max(0, x + width - boxX) : boxWidth;
+                Gui.drawRect(boxX, y, boxX + actualWidth, y + 28, 0xFF111922);
+                font.drawString(font.trimStringToWidth(labels[index], Math.max(8, actualWidth - 8)), boxX + 4, y + 3,
+                    0xFF71879B);
+                font.drawString(font.trimStringToWidth(values[index], Math.max(8, actualWidth - 8)), boxX + 4, y + 15,
+                    index >= 4 && !"0".equals(values[index]) ? 0xFFF0C75E : 0xFFE5EDF5);
+            }
+        }
+
+        private void drawTableHeaders(FontRenderer font, int rowX, int productX, int priceX, int filledX,
+            int remainingX, int statusX, int timeX, int headerY) {
+            String tab = model.getAccountCenterTab();
+            if (model.isAccountCenterRoute() && "FILLS".equals(tab)) {
+                font.drawString("方向", rowX + 3, headerY, 0xFF71879B); font.drawString("商品", productX, headerY, 0xFF71879B);
+                font.drawString("成交价", priceX, headerY, 0xFF71879B); font.drawString("数量", filledX, headerY, 0xFF71879B);
+                font.drawString("金额", remainingX, headerY, 0xFF71879B); font.drawString("手续费/状态", statusX, headerY, 0xFF71879B);
+                font.drawString("成交时间", timeX, headerY, 0xFF71879B); return;
+            }
+            if (model.isAccountCenterRoute() && "ASSETS_AND_DELIVERY".equals(tab)) {
+                font.drawString("类型", rowX + 3, headerY, 0xFF71879B); font.drawString("商品/记录", productX, headerY, 0xFF71879B);
+                font.drawString("数量", priceX, headerY, 0xFF71879B); font.drawString("关联订单", filledX, headerY, 0xFF71879B);
+                font.drawString("状态", remainingX, headerY, 0xFF71879B); font.drawString("说明", statusX, headerY, 0xFF71879B);
+                font.drawString("更新时间", timeX, headerY, 0xFF71879B); return;
+            }
+            font.drawString("方向", rowX + 3, headerY, 0xFF71879B); font.drawString("商品", productX, headerY, 0xFF71879B);
+            font.drawString("价格", priceX, headerY, 0xFF71879B); font.drawString("成交/总量", filledX, headerY, 0xFF71879B);
+            font.drawString("剩余", remainingX, headerY, 0xFF71879B); font.drawString("状态", statusX, headerY, 0xFF71879B);
+            font.drawString("创建时间", timeX, headerY, 0xFF71879B);
+        }
+
+        private boolean drawCenterRowIcon(int index, int x, int y) {
+            if (!model.isAccountCenterRoute() || index >= model.getCenterRowIconRefs().size()) return false;
+            String iconRef = model.getCenterRowIconRefs().get(index);
+            if (iconRef == null || iconRef.trim().isEmpty()) return false;
+            return TerminalMarketClientIconRenderer.drawItemIcon(x, y + 3, 16,
+                TerminalMarketVisuals.resolveItemStack(iconRef));
+        }
+
+        private void drawSpecialCenterRow(FontRenderer font, TerminalMarketAccountCenterRow row, int index, int rowX,
+            int rowWidth, int y, int rowHeight, int productX, int priceX, int filledX, int remainingX,
+            int statusX, int timeX) {
+            int textY = y + Math.max(4, (rowHeight - font.FONT_HEIGHT) / 2);
+            if ("FILL".equals(row.getKind())) {
+                font.drawString("BUY".equalsIgnoreCase(row.getSide()) ? "买" : "卖", rowX + 6, textY,
+                    "BUY".equalsIgnoreCase(row.getSide()) ? 0xFF65D879 : 0xFFE16767);
+                int nameX = drawCenterRowIcon(index, productX, y) ? productX + 20 : productX;
+                font.drawString(font.trimStringToWidth(localizedNameForIcon(index, row.getRegistryName()),
+                    Math.max(20, priceX - nameX - 6)), nameX, textY, 0xFFE5EDF5);
+                drawCenterCell(font, TerminalNumberFormat.exact(row.getUnitPrice()), priceX, filledX, textY, 0xFFF0C75E);
+                drawCenterCell(font, TerminalNumberFormat.exact(row.getOriginalQuantity()), filledX, remainingX,
+                    textY, 0xFFB8C6D4);
+                drawCenterCell(font, TerminalNumberFormat.exact(row.getGrossAmount()), remainingX, statusX,
+                    textY, 0xFFB8C6D4);
+                drawCenterCell(font, TerminalNumberFormat.exact(row.getFeeAmount()) + " / " + row.getStatus(),
+                    statusX, timeX, textY, 0xFF9FB0BF);
+                drawCenterCell(font, row.getCreatedAt(), timeX, rowX + rowWidth, textY, 0xFF71879B);
+                return;
+            }
+            font.drawString(font.trimStringToWidth(row.getOrderType(), Math.max(20, productX - rowX - 8)),
+                rowX + 6, textY, 0xFFF0C75E);
+            int nameX = drawCenterRowIcon(index, productX, y) ? productX + 20 : productX;
+            font.drawString(font.trimStringToWidth(localizedNameForIcon(index, row.getRegistryName()),
+                Math.max(20, priceX - nameX - 6)), nameX, textY, 0xFFE5EDF5);
+            drawCenterCell(font, TerminalNumberFormat.exact(row.getOriginalQuantity()), priceX, filledX,
+                textY, 0xFFB8C6D4);
+            drawCenterCell(font, TerminalNumberFormat.exact(row.getRelatedOrderId()), filledX, remainingX,
+                textY, 0xFFB8C6D4);
+            drawCenterCell(font, row.getStatus(), remainingX, statusX, textY, 0xFFF0C75E);
+            drawCenterCell(font, row.getMessage(), statusX, timeX, textY, 0xFF9FB0BF);
+            drawCenterCell(font, row.getCreatedAt(), timeX, rowX + rowWidth, textY, 0xFF71879B);
+        }
+
+        private void drawCenterCell(FontRenderer font, String value, int x, int nextX, int y, int color) {
+            font.drawString(font.trimStringToWidth(value, Math.max(12, nextX - x - 5)), x, y, color);
+        }
+        private String localizedNameForIcon(int index, String fallback) {
+            if (index >= model.getCenterRowIconRefs().size()) return fallback;
+            String iconRef = model.getCenterRowIconRefs().get(index);
+            return TerminalMarketVisuals.resolveLocalizedItemName(iconRef, fallback);
         }
 
         private void refreshHistory() {
             if (actionHandler != null) actionHandler.refreshStandardizedHistory();
+        }
+
+        private String centerTabLabel(TerminalMarketSectionState.AccountCenterTab tab) {
+            String label;
+            switch (tab) {
+                case FILLS: label = "成交记录"; break;
+                case ASSETS_AND_DELIVERY: label = "资产与交付"; break;
+                case HISTORY: label = "历史查询"; break;
+                default: label = "当前委托"; break;
+            }
+            return model.isAccountCenterRoute() && state.getAccountCenterTab() == tab ? "[" + label + "]" : label;
+        }
+
+        private String activeHistoryFilterSummary() {
+            StringBuilder value = new StringBuilder();
+            appendActiveFilter(value, state.getHistoryProductScopeLabel(), "商品: 全部");
+            appendActiveFilter(value, state.getHistorySideLabel(), "方向: 全部");
+            appendActiveFilter(value, state.getHistoryStatusLabel(), "状态: 全部");
+            appendActiveFilter(value, state.getHistoryTimeLabel(), "时间: 全部");
+            return value.length() == 0 ? "" : "筛选中  " + value.toString();
+        }
+
+        private void appendActiveFilter(StringBuilder target, String value, String defaultValue) {
+            if (value == null || value.equals(defaultValue)) return;
+            if (target.length() > 0) target.append(" / ");
+            target.append(value);
         }
     }
 
@@ -1482,20 +1748,24 @@ public final class TerminalMarketSection extends PanelContainer {
                 drawTooltipLine(font, "该时段无价格数据", textX, textY + 13, textWidth, 0xFF8FA2B8);
             } else if (point.isReference()) {
                 drawTooltipLine(font, "无成交 / 目录参考基线", textX, textY + 9, textWidth, 0xFFD0B66A);
-                drawTooltipLine(font, "价格 " + point.getPrice(), textX, textY + 21, textWidth, 0xFFBFCBDA);
+                drawTooltipLine(font, "价格 " + TerminalNumberFormat.exact(point.getPrice()), textX, textY + 21,
+                    textWidth, 0xFFBFCBDA);
                 drawTooltipLine(font, "成交量 0", textX, textY + 33, textWidth, 0xFF8FA2B8);
             } else if (point.isCarryForward()) {
                 drawTooltipLine(font, "无成交 / 沿用前收", textX, textY + 9, textWidth, 0xFFA7B8C8);
-                drawTooltipLine(font, "价格 " + point.getPrice(), textX, textY + 21, textWidth, 0xFFBFCBDA);
+                drawTooltipLine(font, "价格 " + TerminalNumberFormat.exact(point.getPrice()), textX, textY + 21,
+                    textWidth, 0xFFBFCBDA);
                 drawTooltipLine(font, "成交量 0", textX, textY + 33, textWidth, 0xFF8FA2B8);
             } else {
-                drawTooltipLine(font, "开 " + point.getOpen() + "  高 " + point.getHigh(), textX, textY + 9,
+                drawTooltipLine(font, "开 " + TerminalNumberFormat.exact(point.getOpen()) + "  高 "
+                    + TerminalNumberFormat.exact(point.getHigh()), textX, textY + 9,
                     textWidth, 0xFFBFCBDA);
-                drawTooltipLine(font, "低 " + point.getLow() + "  收 " + point.getPrice(), textX, textY + 18,
+                drawTooltipLine(font, "低 " + TerminalNumberFormat.exact(point.getLow()) + "  收 "
+                    + TerminalNumberFormat.exact(point.getPrice()), textX, textY + 18,
                     textWidth, 0xFFBFCBDA);
-                drawTooltipLine(font, "成交量 " + compactAxisValue(point.getQuantity()), textX, textY + 27,
+                drawTooltipLine(font, "成交量 " + TerminalNumberFormat.exact(point.getQuantity()), textX, textY + 27,
                     textWidth, 0xFF9EB0C0);
-                drawTooltipLine(font, "成交额 " + compactAxisValue(point.getTurnover()), textX, textY + 36,
+                drawTooltipLine(font, "成交额 " + TerminalNumberFormat.exact(point.getTurnover()), textX, textY + 36,
                     textWidth, 0xFF9EB0C0);
             }
         }
@@ -1531,9 +1801,7 @@ public final class TerminalMarketSection extends PanelContainer {
         }
 
         private String compactAxisValue(long value) {
-            if (value >= 1000000L) { return (value / 1000000L) + "M"; }
-            if (value >= 1000L) { return (value / 1000L) + "K"; }
-            return String.valueOf(value);
+            return TerminalNumberFormat.compactQuantity(value);
         }
 
         private String buildPriceRange(List<TerminalMarketSectionModel.PricePointModel> points) {
@@ -1546,7 +1814,7 @@ public final class TerminalMarketSection extends PanelContainer {
                 low = Math.min(low, point.getLow());
             }
             if (high == Long.MIN_VALUE || low == Long.MAX_VALUE) { return "高/低 -- / --"; }
-            return "高/低 " + high + " / " + low;
+            return "高/低 " + TerminalNumberFormat.exact(high) + " / " + TerminalNumberFormat.exact(low);
         }
 
     }
@@ -1583,7 +1851,8 @@ public final class TerminalMarketSection extends PanelContainer {
                             selectedPricePointsForSelectedProduct(), 5);
                         if (row >= points.size()) { return "\u00A77--"; }
                         TerminalMarketSectionModel.PricePointModel point = points.get(row);
-                        return "\u00A77" + point.getPrice() + " x" + point.getQuantity();
+                        return "\u00A77" + TerminalNumberFormat.exact(point.getPrice()) + "x"
+                            + TerminalNumberFormat.compactQuantity(point.getQuantity());
                     }
                 });
                 LabelPanel ask = secondaryLabel(new Supplier<String>() {
@@ -1661,7 +1930,7 @@ public final class TerminalMarketSection extends PanelContainer {
 
         private boolean openBookLevel(List<String> source, int row,
             TerminalMarketSectionState.OrderSide side) {
-            List<String> levels = limitedBookLines(source, 5);
+            List<String> levels = limitedRawBookLines(source, 5);
             if (row < 0 || row >= levels.size()) { return false; }
             long[] level = parseBookLevel(levels.get(row));
             if (level == null) { return false; }

@@ -1,6 +1,7 @@
 package com.jsirgalaxybase.terminal.client.component;
 
 import java.util.List;
+import java.util.UUID;
 
 import com.jsirgalaxybase.terminal.TerminalMarketActionPayload;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel;
@@ -23,13 +24,16 @@ public final class TerminalMarketSectionState {
     public enum OrderSide { BUY, SELL }
     public enum OrderType { MARKET, LIMIT }
     public enum HistorySide { ALL, BUY, SELL }
-    public enum HistoryStatus { ALL, OPEN, FILLED, CLOSED }
+    public enum HistoryStatus { ALL, OPEN, FILLED, CLOSED, RECOVERY_REQUIRED }
     public enum HistoryTime { DAY, WEEK, MONTH, ALL }
+    public enum AccountCenterTab { OPEN_ORDERS, FILLS, ASSETS_AND_DELIVERY, HISTORY }
     public enum BrowserFilter { ALL, TRADED, BOOK }
     public enum BrowserSort { DIRECTORY, PRICE, GAIN, LOSS, VOLUME }
 
     private String selectedProductKey = "";
     private String browserQuery = "";
+    private String browserRequestQuery = "";
+    private boolean preserveBrowserQueryOnNextModel;
     private int browserPage;
     private int browserGridScrollOffset;
     private String limitBuyPriceText = "";
@@ -55,13 +59,21 @@ public final class TerminalMarketSectionState {
     private HistoryTime historyTime = HistoryTime.ALL;
     private int historyPage;
     private String historyQuery = "";
+    private AccountCenterTab accountCenterTab = AccountCenterTab.OPEN_ORDERS;
+    private String focusedRecordId = "";
+    private String cancelRequestId = "";
+    private long expectedOrderUpdatedAt;
     private final TerminalCustomMarketSectionState customState = new TerminalCustomMarketSectionState();
     private final TerminalExchangeMarketSectionState exchangeState = new TerminalExchangeMarketSectionState();
+    private String marketFreshnessLabel = "行情等待中";
+    private boolean marketSnapshotStale;
 
     public void applyModel(TerminalMarketSectionModel model) {
         if (model == null) {
             selectedProductKey = "";
             browserQuery = "";
+            browserRequestQuery = "";
+            preserveBrowserQueryOnNextModel = false;
             browserPage = 0;
             browserGridScrollOffset = 0;
             limitBuyPriceText = "";
@@ -83,7 +95,12 @@ public final class TerminalMarketSectionState {
             standardizedViewMode = StandardizedViewMode.DETAIL;
             pendingDetailProductKey = "";
         }
-        browserQuery = normalize(model.getCatalogQuery());
+        browserRequestQuery = normalize(model.getCatalogQuery());
+        if (preserveBrowserQueryOnNextModel) {
+            preserveBrowserQueryOnNextModel = false;
+        } else {
+            browserQuery = browserRequestQuery;
+        }
         browserPage = Math.max(0, model.getCatalogPageIndex());
         limitBuyPriceText = sanitizeNumber(model.getLimitBuyDraft().getPriceText());
         limitBuyQuantityText = sanitizeNumber(model.getLimitBuyDraft().getQuantityText());
@@ -93,6 +110,8 @@ public final class TerminalMarketSectionState {
         instantSellQuantityText = sanitizeNumber(model.getInstantSellDraft().getQuantityText());
         pendingClaimCustodyId = resolvePendingClaimId(model.getClaimIds(), pendingClaimCustodyId);
         pendingCancelOrderId = resolvePendingClaimId(model.getMyOrderIds(), pendingCancelOrderId);
+        try { accountCenterTab = AccountCenterTab.valueOf(model.getAccountCenterTab()); }
+        catch (IllegalArgumentException ignored) { accountCenterTab = AccountCenterTab.OPEN_ORDERS; }
     }
 
     /** Rejects snapshots produced for an older browse context or product selection. */
@@ -108,7 +127,7 @@ public final class TerminalMarketSectionState {
             || standardizedViewMode == StandardizedViewMode.HISTORY) {
             return selectedProductKey.equals(responseProductKey);
         }
-        return browserQuery.equals(normalize(model.getCatalogQuery()))
+        return browserRequestQuery.equals(normalize(model.getCatalogQuery()))
             && browserPage == Math.max(0, model.getCatalogPageIndex());
     }
 
@@ -120,8 +139,16 @@ public final class TerminalMarketSectionState {
         return exchangeState;
     }
 
+    public void setMarketFreshness(String label, boolean stale) {
+        marketFreshnessLabel = normalize(label);
+        marketSnapshotStale = stale;
+    }
+
+    public String getMarketFreshnessLabel() { return marketFreshnessLabel; }
+    public boolean isMarketSnapshotStale() { return marketSnapshotStale; }
+
     public TerminalMarketActionPayload toPayload() {
-        return new TerminalMarketActionPayload(
+        TerminalMarketActionPayload payload = new TerminalMarketActionPayload(
             selectedProductKey,
             limitBuyPriceText,
             limitBuyQuantityText,
@@ -131,10 +158,12 @@ public final class TerminalMarketSectionState {
             limitSellQuantityText,
             instantBuyQuantityText,
             instantSellQuantityText,
-            browserQuery,
+            browserRequestQuery,
             String.valueOf(browserPage),
             browserFilter.name(),
             vaultDepositQuantityText);
+        return pendingCancelOrderId.isEmpty() ? payload
+            : payload.withCancelContext(pendingCancelOrderId, cancelRequestId, expectedOrderUpdatedAt);
     }
 
     public TerminalMarketActionPayload toUnifiedOrderPayload() {
@@ -180,15 +209,26 @@ public final class TerminalMarketSectionState {
     }
 
     public TerminalMarketActionPayload toHistoryPayload() {
-        return toPayload().withHistory(
+        return toPayload().withAccountCenter(
+            accountCenterTab.name(),
             historyCurrentProductOnly ? "CURRENT" : "ALL",
             historySide.name(),
             historyStatus.name(),
             historyTime.name(),
             historyQuery,
             historyPage,
-            TerminalMarketActionPayload.DEFAULT_HISTORY_PAGE_SIZE);
+            TerminalMarketActionPayload.DEFAULT_HISTORY_PAGE_SIZE,
+            focusedRecordId);
     }
+
+    public AccountCenterTab getAccountCenterTab() { return accountCenterTab; }
+    public void selectAccountCenterTab(AccountCenterTab tab) {
+        accountCenterTab = tab == null ? AccountCenterTab.OPEN_ORDERS : tab;
+        historyPage = 0;
+        focusedField = FocusField.NONE;
+    }
+    public String getFocusedRecordId() { return focusedRecordId; }
+    public void setFocusedRecordId(String value) { focusedRecordId = normalize(value); }
 
     public void returnToStandardizedDetail() {
         standardizedViewMode = StandardizedViewMode.DETAIL;
@@ -234,7 +274,8 @@ public final class TerminalMarketSectionState {
     }
     public String getHistoryStatusLabel() {
         return historyStatus == HistoryStatus.OPEN ? "状态: 进行中" : historyStatus == HistoryStatus.FILLED ? "状态: 已成交"
-            : historyStatus == HistoryStatus.CLOSED ? "状态: 已结束" : "状态: 全部";
+            : historyStatus == HistoryStatus.CLOSED ? "状态: 已结束"
+                : historyStatus == HistoryStatus.RECOVERY_REQUIRED ? "状态: 待恢复" : "状态: 全部";
     }
     public String getHistoryTimeLabel() {
         return historyTime == HistoryTime.DAY ? "时间: 24小时" : historyTime == HistoryTime.WEEK ? "时间: 7天"
@@ -291,7 +332,21 @@ public final class TerminalMarketSectionState {
 
     public void setBrowserQuery(String browserQuery) {
         this.browserQuery = normalize(browserQuery);
+        this.browserRequestQuery = this.browserQuery;
+        this.preserveBrowserQueryOnNextModel = false;
         this.browserPage = 0;
+    }
+
+    /** Keeps the localized text visible while the server receives a stable product key/query. */
+    public void submitBrowserQuery(String requestQuery) {
+        this.browserRequestQuery = normalize(requestQuery);
+        this.preserveBrowserQueryOnNextModel = true;
+        this.browserPage = 0;
+        this.browserGridScrollOffset = 0;
+    }
+
+    String getBrowserRequestQuery() {
+        return browserRequestQuery;
     }
 
     public int getBrowserPage() {
@@ -391,6 +446,15 @@ public final class TerminalMarketSectionState {
 
     public void setPendingCancelOrderId(String pendingCancelOrderId) {
         this.pendingCancelOrderId = sanitizeNumber(pendingCancelOrderId);
+        if (!this.pendingCancelOrderId.isEmpty()) {
+            this.cancelRequestId = "ui-cancel-" + UUID.randomUUID().toString();
+        }
+        this.expectedOrderUpdatedAt = 0L;
+    }
+
+    public void prepareCancelOrder(String orderId, long updatedAtEpochSeconds) {
+        setPendingCancelOrderId(orderId);
+        expectedOrderUpdatedAt = Math.max(0L, updatedAtEpochSeconds);
     }
 
     public boolean hasPendingCancelOrderSelection() {

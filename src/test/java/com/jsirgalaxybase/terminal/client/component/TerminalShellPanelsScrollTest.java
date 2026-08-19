@@ -236,6 +236,35 @@ public class TerminalShellPanelsScrollTest {
     }
 
     @Test
+    public void marketAccountCenterHasAVisibleLabeledSelectedHeaderEntry() {
+        PanelContainer band = TerminalShellPanels.createStatusBand(
+            new TerminalPanelFactory(),
+            new GuiRect(0, 0, 840, 20),
+            createHomeModel(5, 1, 0).withSelectedPageId("market_account_center"),
+            null, null, null, null, new Runnable() {
+                @Override public void run() {}
+            });
+
+        TerminalIconButtonPanel center = null;
+        for (GuiPanel child : band.getChildren()) {
+            if (child instanceof TerminalIconButtonPanel && child.getBounds().getWidth() >= 54) {
+                center = (TerminalIconButtonPanel) child;
+                break;
+            }
+        }
+        assertTrue(center != null);
+        assertTrue(center.getBounds().getWidth() > center.getBounds().getHeight() * 2);
+        assertImmediateChildBoundsInside(band);
+    }
+
+    @Test
+    public void wideAccountCenterReturnsVerticalBudgetToTheOrderTable() {
+        assertEquals(80, TerminalMarketSection.accountCenterTableHeaderOffset(700));
+        assertEquals(103, TerminalMarketSection.accountCenterTableHeaderOffset(540));
+        assertTrue(360 - TerminalMarketSection.accountCenterTableHeaderOffset(700) - 25 >= 4 * 22);
+    }
+
+    @Test
     public void marketOverviewKeepsThreeEntryCardsInOneRowAtScaledGuiWidth() {
         TerminalMarketSection section = new TerminalMarketSection(
             new TerminalPanelFactory(),

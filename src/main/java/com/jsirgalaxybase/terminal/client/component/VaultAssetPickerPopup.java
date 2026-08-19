@@ -14,6 +14,7 @@ import com.jsirgalaxybase.client.gui.framework.GuiScene;
 import com.jsirgalaxybase.client.gui.framework.ModalPopupPanel;
 import com.jsirgalaxybase.client.gui.theme.ThemeColorKey;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel;
+import com.jsirgalaxybase.terminal.client.TerminalNumberFormat;
 
 /**
  * Read-only terminal picker for Base Vault assets. It never moves stacks: the selected slot and
@@ -97,15 +98,20 @@ public final class VaultAssetPickerPopup extends ModalPopupPanel {
                 if (!TerminalMarketClientIconRenderer.drawItemIcon(x + 6, y + 5, 18, stack)) {
                     TerminalMarketVisuals.drawFallbackItemBadge(x + 7, y + 6, 16, asset.getDisplayName());
                 }
-                minecraft.fontRenderer.drawStringWithShadow(String.valueOf(asset.getQuantity()), x + 18, y + 19,
-                    scene.getTheme().color(ThemeColorKey.TEXT_PRIMARY));
+                String compactQuantity = TerminalNumberFormat.compactQuantity(asset.getQuantity());
+                float quantityScale = 0.60F;
+                int quantityWidth = MarketCompactText.width(minecraft.fontRenderer, compactQuantity, quantityScale);
+                MarketCompactText.draw(minecraft.fontRenderer, compactQuantity,
+                    Math.max(x + 2, x + cell - 3 - quantityWidth), y + 21,
+                    scene.getTheme().color(ThemeColorKey.TEXT_PRIMARY), quantityScale);
             }
         }
         String selection = selected == null ? "未选择格位" : ("第 " + (selected.getSlotIndex() + 1) + " 格: "
             + selected.getDisplayName() + " | " + (selectable.test(selected) ? "可选择" : selected.getStandardizedReason()));
         minecraft.fontRenderer.drawStringWithShadow(selection, bounds.getX() + 14, bounds.getY() + 150,
             scene.getTheme().color(ThemeColorKey.TEXT_SECONDARY));
-        minecraft.fontRenderer.drawStringWithShadow("数量 " + quantity, bounds.getX() + 42, bounds.getBottom() - 20,
+        minecraft.fontRenderer.drawStringWithShadow("数量 " + TerminalNumberFormat.exact(quantity),
+            bounds.getX() + 42, bounds.getBottom() - 20,
             scene.getTheme().color(ThemeColorKey.TEXT_PRIMARY));
     }
 

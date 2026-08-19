@@ -5,6 +5,8 @@ import java.util.Collections;
 import java.util.List;
 
 import com.jsirgalaxybase.modules.core.market.domain.MarketTradeRecord;
+import com.jsirgalaxybase.modules.core.market.domain.MarketTradeHistoryPage;
+import com.jsirgalaxybase.modules.core.market.domain.MarketAccountCenterQuery;
 
 public interface MarketTradeRecordRepository {
 
@@ -32,5 +34,10 @@ public interface MarketTradeRecordRepository {
 
     default List<String> findDistinctProductKeys(int limit) {
         return Collections.emptyList();
+    }
+
+    default MarketTradeHistoryPage findPersonalTradeHistory(String playerRef, MarketAccountCenterQuery query) {
+        return new MarketTradeHistoryPage(Collections.<MarketTradeRecord>emptyList(), 0,
+            query.getPageIndex(), query.getPageSize());
     }
 }

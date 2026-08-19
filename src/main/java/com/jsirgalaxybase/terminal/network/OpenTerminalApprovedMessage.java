@@ -8,6 +8,7 @@ import com.jsirgalaxybase.terminal.TerminalCustomMarketSectionSnapshot;
 import com.jsirgalaxybase.terminal.TerminalExchangeMarketSectionSnapshot;
 import com.jsirgalaxybase.terminal.TerminalMarketSectionSnapshot;
 import com.jsirgalaxybase.terminal.TerminalMarketBrowseEntry;
+import com.jsirgalaxybase.terminal.TerminalMarketAccountCenterRow;
 import com.jsirgalaxybase.terminal.TerminalOpenApproval;
 import com.jsirgalaxybase.terminal.TerminalServerToolsSectionSnapshot;
 import com.jsirgalaxybase.terminal.client.TerminalClientScreenController;
@@ -436,6 +437,17 @@ public class OpenTerminalApprovedMessage implements IMessage {
         buf.writeInt(marketSectionModel.getHistoryTotalEntries());
         buf.writeInt(marketSectionModel.getHistoryPageIndex());
         buf.writeInt(marketSectionModel.getHistoryPageSize());
+        ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getAccountCenterTab()));
+        ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getCenterBankAvailable()));
+        ByteBufUtils.writeUTF8String(buf, safe(marketSectionModel.getCenterFrozenFunds()));
+        buf.writeInt(marketSectionModel.getCenterVaultUsedSlots());
+        buf.writeInt(marketSectionModel.getCenterVaultTotalSlots());
+        buf.writeInt(marketSectionModel.getCenterActiveOrders());
+        buf.writeInt(marketSectionModel.getCenterPendingDeliveries());
+        buf.writeInt(marketSectionModel.getCenterRecoveryItems());
+        writeStringList(buf, marketSectionModel.getCenterRowKinds());
+        writeStringList(buf, marketSectionModel.getCenterRowIconRefs());
+        writeAccountCenterRows(buf, marketSectionModel.getAccountCenterRows());
     }
 
     static TerminalMarketSectionModel readMarketSection(ByteBuf buf) {
@@ -508,13 +520,51 @@ public class OpenTerminalApprovedMessage implements IMessage {
                     buf.readBoolean(),
                     buf.readBoolean())
                 .withVaultAssets(readVaultAssets(buf));
-        return model.withHistoryPage(
+        model.withHistoryPage(
             model.getMyOrderLines(),
             model.getMyOrderIds(),
             model.getMyOrderCancelableFlags(),
             buf.readInt(),
             buf.readInt(),
             buf.readInt());
+        model.withAccountCenter(ByteBufUtils.readUTF8String(buf), ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf), buf.readInt(), buf.readInt(), buf.readInt(), buf.readInt(),
+            buf.readInt(), readStringList(buf), readStringList(buf));
+        return model.withAccountCenterRows(readAccountCenterRows(buf));
+    }
+
+    private static void writeAccountCenterRows(ByteBuf buf, List<TerminalMarketAccountCenterRow> rows) {
+        int count = rows == null ? 0 : Math.min(50, rows.size());
+        buf.writeInt(count);
+        for (int index = 0; index < count; index++) {
+            TerminalMarketAccountCenterRow row = rows.get(index);
+            ByteBufUtils.writeUTF8String(buf, safe(row.getRecordId()));
+            ByteBufUtils.writeUTF8String(buf, safe(row.getKind()));
+            ByteBufUtils.writeUTF8String(buf, safe(row.getRegistryName())); buf.writeInt(row.getMeta());
+            ByteBufUtils.writeUTF8String(buf, safe(row.getSide()));
+            ByteBufUtils.writeUTF8String(buf, safe(row.getOrderType()));
+            buf.writeLong(row.getUnitPrice()); buf.writeLong(row.getOriginalQuantity());
+            buf.writeLong(row.getFilledQuantity()); buf.writeLong(row.getRemainingQuantity());
+            ByteBufUtils.writeUTF8String(buf, safe(row.getStatus()));
+            ByteBufUtils.writeUTF8String(buf, safe(row.getCreatedAt()));
+            buf.writeLong(row.getRelatedOrderId()); buf.writeLong(row.getGrossAmount()); buf.writeLong(row.getFeeAmount());
+            ByteBufUtils.writeUTF8String(buf, safe(row.getMessage())); buf.writeBoolean(row.isCancelable());
+            buf.writeLong(row.getUpdatedAtEpochSeconds()); buf.writeLong(row.getReservedFunds());
+        }
+    }
+
+    private static List<TerminalMarketAccountCenterRow> readAccountCenterRows(ByteBuf buf) {
+        int count = Math.max(0, Math.min(50, buf.readInt()));
+        List<TerminalMarketAccountCenterRow> rows = new ArrayList<TerminalMarketAccountCenterRow>(count);
+        for (int index = 0; index < count; index++) {
+            rows.add(new TerminalMarketAccountCenterRow(ByteBufUtils.readUTF8String(buf),
+                ByteBufUtils.readUTF8String(buf), ByteBufUtils.readUTF8String(buf), buf.readInt(),
+                ByteBufUtils.readUTF8String(buf), ByteBufUtils.readUTF8String(buf), buf.readLong(), buf.readLong(),
+                buf.readLong(), buf.readLong(), ByteBufUtils.readUTF8String(buf), ByteBufUtils.readUTF8String(buf),
+                buf.readLong(), buf.readLong(), buf.readLong(), ByteBufUtils.readUTF8String(buf), buf.readBoolean(),
+                buf.readLong(), buf.readLong()));
+        }
+        return rows;
     }
 
     private static void writeCatalogProducts(ByteBuf buf,
@@ -1106,7 +1156,13 @@ public class OpenTerminalApprovedMessage implements IMessage {
                     snapshot.getMyOrderCancelableFlags(),
                     snapshot.getHistoryTotalEntries(),
                     snapshot.getHistoryPageIndex(),
-                    snapshot.getHistoryPageSize());
+                    snapshot.getHistoryPageSize())
+                .withAccountCenter(snapshot.getAccountCenterTab(), snapshot.getCenterBankAvailable(),
+                    snapshot.getCenterFrozenFunds(), snapshot.getCenterVaultUsedSlots(),
+                    snapshot.getCenterVaultTotalSlots(), snapshot.getCenterActiveOrders(),
+                    snapshot.getCenterPendingDeliveries(), snapshot.getCenterRecoveryItems(),
+                    snapshot.getCenterRowKinds(), snapshot.getCenterRowIconRefs())
+                .withAccountCenterRows(snapshot.getAccountCenterRows());
     }
 
     private static List<TerminalMarketSectionModel.CatalogProductModel> toCatalogProducts(

@@ -6,6 +6,7 @@ import java.util.List;
 
 import com.jsirgalaxybase.terminal.TerminalMarketActionPayload;
 import com.jsirgalaxybase.terminal.ui.TerminalNotificationSeverity;
+import com.jsirgalaxybase.terminal.TerminalMarketAccountCenterRow;
 import com.jsirgalaxybase.terminal.ui.TerminalPage;
 
 public final class TerminalMarketSectionModel {
@@ -61,6 +62,12 @@ public final class TerminalMarketSectionModel {
     private int historyTotalEntries;
     private int historyPageIndex;
     private int historyPageSize;
+    private String accountCenterTab;
+    private String centerBankAvailable;
+    private String centerFrozenFunds;
+    private int centerVaultUsedSlots, centerVaultTotalSlots, centerActiveOrders, centerPendingDeliveries, centerRecoveryItems;
+    private List<String> centerRowKinds, centerRowIconRefs;
+    private List<TerminalMarketAccountCenterRow> accountCenterRows;
 
     public TerminalMarketSectionModel(String routePageId, String serviceState, String browserHint,
         List<String> productKeys, List<String> productLabels, String selectedProductKey, String selectedProductName,
@@ -124,6 +131,9 @@ public final class TerminalMarketSectionModel {
         this.historyTotalEntries = 0;
         this.historyPageIndex = 0;
         this.historyPageSize = TerminalMarketActionPayload.DEFAULT_HISTORY_PAGE_SIZE;
+        this.accountCenterTab = "OPEN_ORDERS"; this.centerBankAvailable = "0"; this.centerFrozenFunds = "0";
+        this.centerRowKinds = Collections.emptyList(); this.centerRowIconRefs = Collections.emptyList();
+        this.accountCenterRows = Collections.emptyList();
     }
 
     public static TerminalMarketSectionModel placeholder(String routePageId) {
@@ -285,6 +295,28 @@ public final class TerminalMarketSectionModel {
     public boolean hasHistoryPreviousPage() { return historyPageIndex > 0; }
     public boolean hasHistoryNextPage() { return historyPageIndex + 1 < getHistoryTotalPages(); }
 
+    public TerminalMarketSectionModel withAccountCenter(String tab, String bankAvailable, String frozenFunds,
+        int vaultUsedSlots, int vaultTotalSlots, int activeOrders, int pendingDeliveries, int recoveryItems,
+        List<String> rowKinds, List<String> rowIconRefs) {
+        accountCenterTab = normalize(tab, "OPEN_ORDERS"); centerBankAvailable = normalize(bankAvailable, "0");
+        centerFrozenFunds = normalize(frozenFunds, "0"); centerVaultUsedSlots = Math.max(0, vaultUsedSlots);
+        centerVaultTotalSlots = Math.max(0, vaultTotalSlots); centerActiveOrders = Math.max(0, activeOrders);
+        centerPendingDeliveries = Math.max(0, pendingDeliveries); centerRecoveryItems = Math.max(0, recoveryItems);
+        centerRowKinds = freezeAllowEmpty(rowKinds); centerRowIconRefs = freezeAllowEmpty(rowIconRefs); return this;
+    }
+    public String getAccountCenterTab() { return accountCenterTab; }
+    public String getCenterBankAvailable() { return centerBankAvailable; }
+    public String getCenterFrozenFunds() { return centerFrozenFunds; }
+    public int getCenterVaultUsedSlots() { return centerVaultUsedSlots; } public int getCenterVaultTotalSlots() { return centerVaultTotalSlots; }
+    public int getCenterActiveOrders() { return centerActiveOrders; } public int getCenterPendingDeliveries() { return centerPendingDeliveries; }
+    public int getCenterRecoveryItems() { return centerRecoveryItems; }
+    public List<String> getCenterRowKinds() { return centerRowKinds; } public List<String> getCenterRowIconRefs() { return centerRowIconRefs; }
+    public TerminalMarketSectionModel withAccountCenterRows(List<TerminalMarketAccountCenterRow> rows) {
+        accountCenterRows = Collections.unmodifiableList(new ArrayList<TerminalMarketAccountCenterRow>(
+            rows == null ? Collections.<TerminalMarketAccountCenterRow>emptyList() : rows)); return this;
+    }
+    public List<TerminalMarketAccountCenterRow> getAccountCenterRows() { return accountCenterRows; }
+
     public String getLimitBuyPreview() {
         return limitBuyPreview;
     }
@@ -383,6 +415,10 @@ public final class TerminalMarketSectionModel {
 
     public boolean isOverviewRoute() {
         return TerminalPage.MARKET.getId().equalsIgnoreCase(routePageId);
+    }
+
+    public boolean isAccountCenterRoute() {
+        return TerminalPage.MARKET_ACCOUNT_CENTER.getId().equalsIgnoreCase(routePageId);
     }
 
     public boolean isStandardizedRoute() {

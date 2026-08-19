@@ -9,6 +9,7 @@ import java.util.Arrays;
 import org.junit.Test;
 
 import com.jsirgalaxybase.terminal.TerminalMarketBrowseEntry;
+import com.jsirgalaxybase.terminal.TerminalMarketAccountCenterRow;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalCustomMarketSectionModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalExchangeMarketSectionModel;
@@ -51,7 +52,13 @@ public class TerminalMarketCatalogPacketTest {
                             8L, 792L, 100L, "CARRY_FORWARD"),
                         new TerminalMarketSectionModel.PricePointModel(102L, 4L, 101L))))), "steel", 1, 8, 17, true, true)
             .withHistoryPage(Arrays.asList("#42 | Steel Ingot | SELL | OPEN"), Arrays.asList("42"),
-                Arrays.asList("1"), 19, 2, 7);
+                Arrays.asList("1"), 19, 2, 7)
+            .withAccountCenter("OPEN_ORDERS", "11638", "2158", 1248, 4096, 8, 3, 1,
+                Arrays.asList("OPEN_ORDER"), Arrays.asList("minecraft:iron_ingot@0"))
+            .withAccountCenterRows(Arrays.asList(new TerminalMarketAccountCenterRow("42", "OPEN_ORDER",
+                "minecraft:iron_ingot", 0, "BUY", "LIMIT", 1232L, 4500L, 1500L, 3000L,
+                "PARTIALLY_FILLED", "2026-08-16T07:28:41Z", 42L, 1848000L, 0L, "", true,
+                1776497321L, 3696000L)));
 
         ByteBuf buffer = Unpooled.buffer();
         OpenTerminalApprovedMessage.writeMarketSection(buffer, source);
@@ -85,6 +92,12 @@ public class TerminalMarketCatalogPacketTest {
         assertEquals(7, decoded.getHistoryPageSize());
         assertEquals("42", decoded.getMyOrderIds().get(0));
         assertEquals("1", decoded.getMyOrderCancelableFlags().get(0));
+        assertEquals("OPEN_ORDERS", decoded.getAccountCenterTab());
+        assertEquals("11638", decoded.getCenterBankAvailable());
+        assertEquals(1248, decoded.getCenterVaultUsedSlots());
+        assertEquals("OPEN_ORDER", decoded.getCenterRowKinds().get(0));
+        assertEquals("minecraft:iron_ingot", decoded.getAccountCenterRows().get(0).getRegistryName());
+        assertEquals(3000L, decoded.getAccountCenterRows().get(0).getRemainingQuantity());
     }
 
     @Test

@@ -18,6 +18,7 @@ import com.jsirgalaxybase.modules.core.vault.application.VaultItemStackCodec;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultAccount;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultAccountType;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultOperation;
+import com.jsirgalaxybase.modules.core.vault.domain.VaultOperationHistoryPage;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultOperationSlotChange;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultOperationStatus;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultSlot;
@@ -266,6 +267,64 @@ public final class JdbcBaseVaultRepository extends AbstractJdbcRepository implem
                 }
             }
         });
+    }
+
+    @Override
+    public VaultOperationHistoryPage findExceptionalOperations(final long accountId, final String searchText,
+        final VaultOperationStatus status, final Instant createdAfter, final int pageIndex, final int pageSize) {
+        return connectionManager.withConnection(new JdbcConnectionCallback<VaultOperationHistoryPage>() {
+            @Override
+            public VaultOperationHistoryPage doInConnection(Connection connection) throws SQLException {
+                StringBuilder where = new StringBuilder(
+                    " WHERE account_id = ? AND operation_status IN ('FAILED', 'RECOVERY_REQUIRED')");
+                List<Object> values = new ArrayList<Object>();
+                values.add(Long.valueOf(accountId));
+                if (status == VaultOperationStatus.FAILED || status == VaultOperationStatus.RECOVERY_REQUIRED) {
+                    where.append(" AND operation_status = ?"); values.add(status.name());
+                }
+                String search = searchText == null ? "" : searchText.trim().toLowerCase(java.util.Locale.ROOT);
+                if (!search.isEmpty()) {
+                    where.append(" AND (LOWER(operation_type) LIKE ? OR LOWER(message) LIKE ? OR LOWER(request_id) LIKE ?"
+                        + " OR CAST(operation_id AS TEXT) LIKE ?)");
+                    String pattern = "%" + search + "%";
+                    values.add(pattern); values.add(pattern); values.add(pattern); values.add(pattern);
+                }
+                if (createdAfter != null) { where.append(" AND created_at >= ?"); values.add(Timestamp.from(createdAfter)); }
+                int size = Math.max(1, Math.min(50, pageSize));
+                PreparedStatement count = connection.prepareStatement(
+                    "SELECT COUNT(*) FROM warehouse_operation_log" + where.toString());
+                int total;
+                try {
+                    bindValues(count, values);
+                    ResultSet row = count.executeQuery();
+                    try { row.next(); total = row.getInt(1); } finally { row.close(); }
+                } finally { count.close(); }
+                int page = total <= 0 ? 0 : Math.min(Math.max(0, pageIndex), (total - 1) / size);
+                PreparedStatement select = connection.prepareStatement(
+                    "SELECT * FROM warehouse_operation_log" + where.toString()
+                        + " ORDER BY updated_at DESC, operation_id DESC LIMIT ? OFFSET ?");
+                try {
+                    bindValues(select, values);
+                    select.setInt(values.size() + 1, size);
+                    select.setInt(values.size() + 2, page * size);
+                    ResultSet rows = select.executeQuery();
+                    try {
+                        List<VaultOperation> operations = new ArrayList<VaultOperation>();
+                        while (rows.next()) operations.add(mapOperation(rows));
+                        return new VaultOperationHistoryPage(operations, total, page, size);
+                    } finally { rows.close(); }
+                } finally { select.close(); }
+            }
+        });
+    }
+
+    private static void bindValues(PreparedStatement statement, List<Object> values) throws SQLException {
+        for (int index = 0; index < values.size(); index++) {
+            Object value = values.get(index);
+            if (value instanceof Long) statement.setLong(index + 1, ((Long) value).longValue());
+            else if (value instanceof Timestamp) statement.setTimestamp(index + 1, (Timestamp) value);
+            else statement.setString(index + 1, String.valueOf(value));
+        }
     }
 
     private static void bindSnapshot(PreparedStatement statement, int parameter, ItemStack stack) throws SQLException {

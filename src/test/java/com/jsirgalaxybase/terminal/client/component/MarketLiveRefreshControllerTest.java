@@ -2,6 +2,7 @@ package com.jsirgalaxybase.terminal.client.component;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertEquals;
 
 import org.junit.Test;
 
@@ -51,5 +52,25 @@ public class MarketLiveRefreshControllerTest {
         assertFalse(controller.isPending());
         assertFalse(controller.tick(true));
         assertTrue(controller.tick(true));
+    }
+
+    @Test
+    public void reportsFreshRefreshingAndStaleWithoutForgettingPausedSnapshotAge() {
+        MarketLiveRefreshController controller = new MarketLiveRefreshController(2, 4);
+        assertEquals(MarketLiveRefreshController.Freshness.WAITING, controller.getFreshness());
+        controller.onSnapshotReceived();
+        assertEquals(MarketLiveRefreshController.Freshness.FRESH, controller.getFreshness());
+        assertFalse(controller.tick(false));
+        assertEquals(MarketLiveRefreshController.Freshness.FRESH, controller.getFreshness());
+        assertFalse(controller.tick(true));
+        assertTrue(controller.tick(true));
+        assertEquals(MarketLiveRefreshController.Freshness.REFRESHING, controller.getFreshness());
+        assertFalse(controller.tick(true));
+        assertEquals(MarketLiveRefreshController.Freshness.REFRESHING, controller.getFreshness());
+        assertFalse(controller.tick(true));
+        assertEquals(MarketLiveRefreshController.Freshness.DELAYED, controller.getFreshness());
+        assertFalse(controller.tick(true));
+        assertFalse(controller.tick(true));
+        assertEquals(MarketLiveRefreshController.Freshness.STALE, controller.getFreshness());
     }
 }
