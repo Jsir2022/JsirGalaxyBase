@@ -35,6 +35,8 @@ public class TerminalOpenCutoverTest {
         assertEquals("home", model.getPageSnapshots().get(0).getPageId());
         assertNotNull(model.getPageSnapshot("bank").getBankSectionModel());
         assertNotNull(model.getPageSnapshot("market").getMarketSectionModel());
+        assertNotNull(model.getPageSnapshot("warehouse"));
+        assertFalse(model.getPageSnapshot("warehouse").getSections().isEmpty());
     }
 
     @Test
@@ -52,6 +54,11 @@ public class TerminalOpenCutoverTest {
         assertNotNull(custom.getSelectedPageSnapshot().getCustomMarketSectionModel());
         assertEquals("market_exchange", exchange.getSelectedPageId());
         assertNotNull(exchange.getSelectedPageSnapshot().getExchangeMarketSectionModel());
+
+        TerminalHomeScreenModel warehouse = buildModel("warehouse");
+        assertEquals("warehouse", warehouse.getSelectedPageId());
+        assertEquals("warehouse", warehouse.getSelectedPageSnapshot().getPageId());
+        assertFalse(warehouse.getSelectedPageSnapshot().getSections().isEmpty());
     }
 
     @Test

@@ -35,7 +35,7 @@ public class BackCommand extends AbstractServerToolsCommand {
             TeleportDispatchPlan dispatchPlan = service.prepareBackTeleport(module.captureActor(player),
                 PlayerTeleportService.newRequestId("back"));
             GatewayDispatchResult result = module.dispatchTeleport(resolveLiveSubject(dispatchPlan), dispatchPlan);
-            sendDispatchResult(sender, result, "Teleported to your last valid origin.");
+            sendDispatchResult(sender, result, "jsirgalaxybase.servertools.back.teleported");
         } catch (RuntimeException exception) {
             handleServiceError(sender, exception);
         }

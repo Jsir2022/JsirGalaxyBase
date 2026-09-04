@@ -18,6 +18,7 @@ import com.jsirgalaxybase.modules.core.market.domain.ExchangeMarketPairDefinitio
 import com.jsirgalaxybase.modules.core.market.domain.ExchangeMarketQuoteRequest;
 import com.jsirgalaxybase.modules.core.market.domain.ExchangeMarketQuoteResult;
 import com.jsirgalaxybase.modules.core.market.domain.ExchangeMarketRuleVersion;
+import com.jsirgalaxybase.modules.core.market.domain.ExchangeMarketRuleSet;
 import com.jsirgalaxybase.modules.core.market.domain.TaskCoinDescriptor;
 import com.jsirgalaxybase.modules.core.market.domain.TaskCoinExchangeQuote;
 
@@ -32,21 +33,38 @@ public class ExchangeMarketService {
     private final BankingInfrastructure bankingInfrastructure;
     private final BankingApplicationService bankingService;
     private final TaskCoinExchangePlanner taskCoinPlanner;
+    private final String sourceServerId;
+    private final ExchangeMarketRuleSet ruleSet;
 
     public ExchangeMarketService(BankingInfrastructure bankingInfrastructure, String sourceServerId) {
-        this(bankingInfrastructure, new TaskCoinExchangePlanner(), sourceServerId);
+        this(bankingInfrastructure, new TaskCoinExchangePlanner(), sourceServerId,
+            ExchangeMarketRuleSet.taskCoinToStarcoinV1());
     }
 
     public ExchangeMarketService(BankingInfrastructure bankingInfrastructure, TaskCoinExchangePlanner taskCoinPlanner,
         String sourceServerId) {
+        this(bankingInfrastructure, taskCoinPlanner, sourceServerId, ExchangeMarketRuleSet.taskCoinToStarcoinV1());
+    }
+
+    public ExchangeMarketService(BankingInfrastructure bankingInfrastructure, TaskCoinExchangePlanner taskCoinPlanner,
+        String sourceServerId, ExchangeMarketRuleSet ruleSet) {
+        if (bankingInfrastructure == null) {
+            throw new MarketExchangeException("bankingInfrastructure must not be null");
+        }
         this.bankingInfrastructure = bankingInfrastructure;
         this.bankingService = bankingInfrastructure.getBankingApplicationService();
-        this.taskCoinPlanner = taskCoinPlanner;
+        this.taskCoinPlanner = taskCoinPlanner == null ? new TaskCoinExchangePlanner() : taskCoinPlanner;
+        this.sourceServerId = requireText(sourceServerId, "sourceServerId");
+        this.ruleSet = ruleSet == null ? ExchangeMarketRuleSet.taskCoinToStarcoinV1() : ruleSet;
     }
 
     public Optional<ExchangeMarketQuoteResult> quoteTaskCoinToStarcoin(ExchangeMarketQuoteRequest request) {
         if (request == null || request.getInputQuantity() <= 0L) {
             return Optional.empty();
+        }
+        if (!ruleSet.permitsInputQuantity(request.getInputQuantity())) {
+            return Optional.of(buildDisallowedQuote(request, "EXCHANGE_INPUT_QUANTITY_LIMIT",
+                "当前汇率市场单次最多兑换 " + ruleSet.getMaxInputQuantity() + " 枚任务书硬币。"));
         }
 
         Optional<TaskCoinExchangeQuote> legacyQuote = taskCoinPlanner.quote(request.getInputRegistryName(),
@@ -71,9 +89,12 @@ public class ExchangeMarketService {
         if (request == null || request.getInputQuantity() <= 0L) {
             throw new MarketExchangeException("兑换数量必须大于 0");
         }
+        if (!sourceServerId.equals(request.getSourceServerId().trim())) {
+            throw new MarketExchangeException("兑换请求来源服与当前服务端不一致");
+        }
 
         ExchangeMarketQuoteResult quote = quoteTaskCoinToStarcoin(new ExchangeMarketQuoteRequest(
-            request.getRequestId(), request.getPlayerRef(), request.getSourceServerId(), request.getInputRegistryName(),
+            request.getRequestId(), request.getPlayerRef(), sourceServerId, request.getInputRegistryName(),
             request.getInputQuantity())).orElseThrow(new java.util.function.Supplier<MarketExchangeException>() {
 
                 @Override
@@ -117,10 +138,10 @@ public class ExchangeMarketService {
             ? ExchangeMarketLimitStatus.ALLOWED
             : ExchangeMarketLimitStatus.DISCOUNTED;
         ExchangeMarketLimitPolicy limitPolicy = new ExchangeMarketLimitPolicy(limitStatus, "TASK_COIN_RULE_APPLIED",
-            DEFAULT_NOTES);
+            DEFAULT_NOTES, ruleSet.getMaxInputQuantity());
         return new ExchangeMarketQuoteResult(TASK_COIN_TO_STARCOIN,
-            new ExchangeMarketRuleVersion(legacyQuote.getExchangeRuleVersion(), "汇率市场任务书硬币固定规则 v1"),
-            limitPolicy, request.getRequestId(), request.getPlayerRef(), request.getSourceServerId(),
+            new ExchangeMarketRuleVersion(ruleSet.getRuleVersion(), "汇率市场任务书硬币固定规则 v1"),
+            limitPolicy, request.getRequestId(), request.getPlayerRef(), sourceServerId,
             descriptor.getRegistryName(), descriptor.getFamily(), descriptor.getTier(), descriptor.getFaceValue(),
             legacyQuote.getQuantity(), legacyQuote.getInputTotalFaceValue(), legacyQuote.getEffectiveExchangeValue(),
             legacyQuote.getContributionValue(), legacyQuote.getEffectiveExchangeValue(), legacyQuote.getInputQuantity(),
@@ -130,9 +151,10 @@ public class ExchangeMarketService {
     private ExchangeMarketQuoteResult buildDisallowedQuote(ExchangeMarketQuoteRequest request, String reasonCode,
         String note) {
         return new ExchangeMarketQuoteResult(TASK_COIN_TO_STARCOIN,
-            new ExchangeMarketRuleVersion(TaskCoinExchangePlanner.RULE_VERSION, "汇率市场任务书硬币固定规则 v1"),
-            new ExchangeMarketLimitPolicy(ExchangeMarketLimitStatus.DISALLOWED, reasonCode, note),
-            request.getRequestId(), request.getPlayerRef(), request.getSourceServerId(), request.getInputRegistryName(),
+            new ExchangeMarketRuleVersion(ruleSet.getRuleVersion(), "汇率市场任务书硬币固定规则 v1"),
+            new ExchangeMarketLimitPolicy(ExchangeMarketLimitStatus.DISALLOWED, reasonCode, note,
+                ruleSet.getMaxInputQuantity()),
+            request.getRequestId(), request.getPlayerRef(), sourceServerId, request.getInputRegistryName(),
             "UNRESOLVED", "UNRESOLVED", 0L, request.getInputQuantity(), 0L, 0L, 0L, 0L, 1L, 10000, note);
     }
 
@@ -162,6 +184,7 @@ public class ExchangeMarketService {
             + jsonField("notes", quote.getNotes()) + ","
             + jsonField("inputRegistryName", quote.getInputRegistryName()) + ","
             + jsonField("limitStatus", quote.getLimitPolicy().getStatus().name()) + ","
+            + "\"maximumInputQuantity\":" + quote.getLimitPolicy().getMaximumInputQuantity() + ","
             + "\"discountBasisPoints\":" + quote.getDiscountBasisPoints() + ","
             + "\"effectiveExchangeValue\":" + quote.getEffectiveExchangeValue() + ","
             + "\"contributionValue\":" + quote.getContributionValue()

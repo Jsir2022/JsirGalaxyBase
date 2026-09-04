@@ -16,6 +16,7 @@ import com.jsirgalaxybase.terminal.client.viewmodel.TerminalExchangeMarketSectio
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalHomeScreenModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalServerToolsSectionModel;
+import com.jsirgalaxybase.terminal.client.viewmodel.TerminalLandSectionModel;
 
 import cpw.mods.fml.common.network.ByteBufUtils;
 import cpw.mods.fml.common.network.simpleimpl.IMessage;
@@ -148,7 +149,8 @@ public class TerminalSnapshotMessage implements IMessage {
                 toMarketSectionModel(snapshot.getMarketSectionSnapshot()),
                 toCustomMarketSectionModel(snapshot.getCustomMarketSectionSnapshot()),
                 toExchangeMarketSectionModel(snapshot.getExchangeMarketSectionSnapshot()),
-                toServerToolsSectionModel(snapshot.getServerToolsSectionSnapshot())));
+                toServerToolsSectionModel(snapshot.getServerToolsSectionSnapshot()),
+                toLandSectionModel(snapshot.getLandSectionSnapshot())));
         }
         return models;
     }
@@ -167,6 +169,13 @@ public class TerminalSnapshotMessage implements IMessage {
             snapshot.getWarpSubtitles(),
             snapshot.getWarpStateLabels(),
             snapshot.getRecentTransferLines(),
+            snapshot.getHomeLines(),
+            snapshot.getHomeNames(),
+            snapshot.getHomeSubtitles(),
+            snapshot.getTpaDirections(),
+            snapshot.getTpaCounterpartyNames(),
+            snapshot.getTpaTargetServerIds(),
+            snapshot.getTpaStatusLabels(),
             snapshot.getSelectedWarpName(),
             snapshot.getSelectedWarpTitle(),
             snapshot.getSelectedWarpDetail(),
@@ -174,6 +183,10 @@ public class TerminalSnapshotMessage implements IMessage {
             snapshot.getSelectedTargetLocation(),
             snapshot.getSelectedWarpDescription(),
             snapshot.isSelectedWarpEnabled(),
+            snapshot.getSelectedHomeName(),
+            snapshot.getSelectedHomeTargetServerId(),
+            snapshot.getSelectedHomeTargetLocation(),
+            snapshot.getSelectedHomeDescription(),
             snapshot.getRecentSourceServerId(),
             snapshot.getRecentTargetServerId(),
             snapshot.getRecentTransferStatus(),
@@ -183,6 +196,25 @@ public class TerminalSnapshotMessage implements IMessage {
                 snapshot.getActionFeedback().getTitle(),
                 snapshot.getActionFeedback().getBody(),
                 snapshot.getActionFeedback().getSeverityName()));
+    }
+
+    private static TerminalLandSectionModel toLandSectionModel(com.jsirgalaxybase.terminal.TerminalLandSectionSnapshot snapshot) {
+        if (snapshot == null) return null;
+        List<TerminalLandSectionModel.MapCellModel> mapCells =
+            new ArrayList<TerminalLandSectionModel.MapCellModel>();
+        for (com.jsirgalaxybase.terminal.TerminalLandMapCellSnapshot cell : snapshot.getMapCells()) {
+            mapCells.add(new TerminalLandSectionModel.MapCellModel(cell.getChunkX(), cell.getChunkZ(),
+                cell.getState(), cell.getTitleId(), cell.getVersion()));
+        }
+        return new TerminalLandSectionModel(snapshot.getServiceState(), snapshot.getServerId(),
+            snapshot.getProtectionMode(), snapshot.getDimensionId(), snapshot.getCenterChunkX(),
+            snapshot.getCenterChunkZ(), snapshot.getSelectedChunkX(), snapshot.getSelectedChunkZ(),
+            snapshot.getUsedClaims(), snapshot.getMaxClaims(), snapshot.getTab(), snapshot.getViewportChunkX(),
+            snapshot.getViewportChunkZ(), snapshot.getZoom(), mapCells,
+            snapshot.getOwnedTitleIds(), snapshot.getOwnedChunkXs(), snapshot.getOwnedChunkZs(),
+            snapshot.getOwnedVersions(), snapshot.getPageIndex(), snapshot.getTotalPages(), snapshot.getTotalEntries(),
+            snapshot.getSelectedTitleId(), snapshot.getSelectedVersion(), snapshot.getSelectedState(),
+            snapshot.isCanClaim(), snapshot.isCanUnclaim(), snapshot.getFeedbackCode());
     }
 
     private static TerminalCustomMarketSectionModel toCustomMarketSectionModel(

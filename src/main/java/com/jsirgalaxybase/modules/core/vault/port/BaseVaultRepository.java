@@ -29,6 +29,10 @@ public interface BaseVaultRepository {
 
     void saveOperationSlotChanges(long operationId, List<VaultOperationSlotChange> changes);
 
+    default List<VaultOperation> findRecentOperations(long accountId, int limit) {
+        return java.util.Collections.emptyList();
+    }
+
     default VaultOperationHistoryPage findExceptionalOperations(long accountId, String searchText,
         VaultOperationStatus status, java.time.Instant createdAfter, int pageIndex, int pageSize) {
         return new VaultOperationHistoryPage(java.util.Collections.<VaultOperation>emptyList(), 0, pageIndex, pageSize);

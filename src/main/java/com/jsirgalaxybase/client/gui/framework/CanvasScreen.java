@@ -1,23 +1,16 @@
 package com.jsirgalaxybase.client.gui.framework;
 
-import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiScreen;
 
 import org.lwjgl.input.Keyboard;
 import org.lwjgl.input.Mouse;
-import org.lwjgl.opengl.GL11;
-
 import com.jsirgalaxybase.client.gui.theme.GuiTheme;
 import com.jsirgalaxybase.client.gui.theme.TerminalThemeRegistry;
-import com.jsirgalaxybase.client.gui.theme.ThemeColorKey;
 
 public abstract class CanvasScreen extends GuiScreen implements GuiScene {
 
     private final GuiScreen parentScreen;
-    private final GuiTheme theme;
-    private PanelContainer rootPanel;
-    private GuiPanel popupPanel;
-    private GuiPanel hoverOverlay;
+    private final CanvasSceneRuntime sceneRuntime;
 
     protected CanvasScreen(GuiScreen parentScreen) {
         this(parentScreen, TerminalThemeRegistry.getDefaultTheme());
@@ -25,12 +18,12 @@ public abstract class CanvasScreen extends GuiScreen implements GuiScene {
 
     protected CanvasScreen(GuiScreen parentScreen, GuiTheme theme) {
         this.parentScreen = parentScreen;
-        this.theme = theme;
+        this.sceneRuntime = new CanvasSceneRuntime(theme);
     }
 
     @Override
     public GuiTheme getTheme() {
-        return theme;
+        return sceneRuntime.getTheme();
     }
 
     @Override
@@ -39,19 +32,14 @@ public abstract class CanvasScreen extends GuiScreen implements GuiScene {
         Keyboard.enableRepeatEvents(true);
         // A rebuilt root can represent a different terminal route. Hover panels belong
         // to the old pointer target and must never survive that route transition.
-        closeHoverOverlay();
-        rootPanel = buildRootPanel();
-        if (rootPanel != null) {
-            rootPanel.init(this);
-        }
+        sceneRuntime.initialize(this, buildRootPanel());
     }
 
     @Override
     public void onGuiClosed() {
         super.onGuiClosed();
         Keyboard.enableRepeatEvents(false);
-        closeHoverOverlay();
-        closePopup();
+        sceneRuntime.close();
     }
 
     @Override
@@ -59,46 +47,18 @@ public abstract class CanvasScreen extends GuiScreen implements GuiScene {
         if (shouldDrawDefaultBackground()) {
             drawDefaultBackground();
         }
-        if (rootPanel != null) {
-            rootPanel.draw(this, mouseX, mouseY, partialTicks);
-        }
-        if (hoverOverlay != null && hoverOverlay.isVisible() && popupPanel == null) {
-            GL11.glDisable(GL11.GL_DEPTH_TEST);
-            GL11.glDepthMask(false);
-            hoverOverlay.draw(this, mouseX, mouseY, partialTicks);
-        }
-        if (popupPanel != null && popupPanel.isVisible()) {
-            // RenderItem writes depth while drawing real ItemStacks. A modal must always be
-            // composited above that layer, otherwise icons from the underlying page bleed through.
-            GL11.glDisable(GL11.GL_DEPTH_TEST);
-            GL11.glDepthMask(false);
-            Gui.drawRect(0, 0, width, height, theme.color(ThemeColorKey.SCREEN_OVERLAY));
-            popupPanel.draw(this, mouseX, mouseY, partialTicks);
-            GL11.glDepthMask(true);
-        }
+        sceneRuntime.drawBase(this, mouseX, mouseY, partialTicks);
+        sceneRuntime.drawOverlays(this, mouseX, mouseY, partialTicks, width, height);
     }
 
     @Override
     protected void mouseClicked(int mouseX, int mouseY, int mouseButton) {
-        closeHoverOverlay();
-        if (popupPanel != null && popupPanel.isVisible()) {
-            popupPanel.mouseClicked(this, mouseX, mouseY, mouseButton);
-            return;
-        }
-        if (rootPanel != null) {
-            rootPanel.mouseClicked(this, mouseX, mouseY, mouseButton);
-        }
+        sceneRuntime.mouseClicked(this, mouseX, mouseY, mouseButton);
     }
 
     @Override
     protected void mouseMovedOrUp(int mouseX, int mouseY, int mouseButton) {
-        if (popupPanel != null && popupPanel.isVisible()) {
-            popupPanel.mouseReleased(this, mouseX, mouseY, mouseButton);
-            return;
-        }
-        if (rootPanel != null) {
-            rootPanel.mouseReleased(this, mouseX, mouseY, mouseButton);
-        }
+        sceneRuntime.mouseReleased(this, mouseX, mouseY, mouseButton);
     }
 
     @Override
@@ -108,72 +68,50 @@ public abstract class CanvasScreen extends GuiScreen implements GuiScene {
         if (wheelDelta == 0) {
             return;
         }
-        closeHoverOverlay();
-
         int mouseX = Mouse.getEventX() * width / mc.displayWidth;
         int mouseY = height - Mouse.getEventY() * height / mc.displayHeight - 1;
-        if (popupPanel != null && popupPanel.isVisible()) {
-            popupPanel.mouseScrolled(this, mouseX, mouseY, wheelDelta);
-            return;
-        }
-        if (rootPanel != null) {
-            rootPanel.mouseScrolled(this, mouseX, mouseY, wheelDelta);
-        }
+        sceneRuntime.mouseScrolled(this, mouseX, mouseY, wheelDelta);
     }
 
     @Override
     protected void keyTyped(char typedChar, int keyCode) {
-        if (popupPanel != null && popupPanel.isVisible()) {
+        if (sceneRuntime.hasOpenPopup()) {
             if (keyCode == Keyboard.KEY_ESCAPE) {
                 closePopup();
                 return;
             }
-            popupPanel.keyTyped(this, typedChar, keyCode);
+            sceneRuntime.keyTyped(this, typedChar, keyCode);
             return;
         }
+        if (sceneRuntime.keyTyped(this, typedChar, keyCode)) return;
 
         if (keyCode == Keyboard.KEY_ESCAPE) {
             closeScreen();
-            return;
-        }
-
-        if (rootPanel != null) {
-            rootPanel.keyTyped(this, typedChar, keyCode);
         }
     }
 
     @Override
     public void openPopup(GuiPanel panel) {
-        closeHoverOverlay();
-        this.popupPanel = panel;
-        if (this.popupPanel != null) {
-            this.popupPanel.init(this);
-        }
+        sceneRuntime.openPopup(this, panel);
     }
 
     @Override
     public void closePopup() {
-        this.popupPanel = null;
+        sceneRuntime.closePopup();
     }
 
     protected final boolean hasOpenPopup() {
-        return popupPanel != null && popupPanel.isVisible();
+        return sceneRuntime.hasOpenPopup();
     }
 
     @Override
     public void openHoverOverlay(GuiPanel panel) {
-        if (popupPanel != null && popupPanel.isVisible()) {
-            return;
-        }
-        this.hoverOverlay = panel;
-        if (hoverOverlay != null) {
-            hoverOverlay.init(this);
-        }
+        sceneRuntime.openHoverOverlay(this, panel);
     }
 
     @Override
     public void closeHoverOverlay() {
-        this.hoverOverlay = null;
+        sceneRuntime.closeHoverOverlay();
     }
 
     protected void closeScreen() {

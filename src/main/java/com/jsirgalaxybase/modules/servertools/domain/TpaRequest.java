@@ -13,6 +13,7 @@ public class TpaRequest {
     private final TeleportTarget requesterOrigin;
     private final String targetPlayerName;
     private final String targetServerId;
+    private final TeleportTarget acceptedTarget;
     private final TpaRequestStatus status;
     private final Instant createdAt;
     private final Instant expiresAt;
@@ -21,6 +22,14 @@ public class TpaRequest {
     public TpaRequest(String requestId, String requesterPlayerUuid, String requesterPlayerName,
         String requesterServerId, TeleportTarget requesterOrigin, String targetPlayerName, String targetServerId,
         TpaRequestStatus status, Instant createdAt, Instant expiresAt, Instant updatedAt) {
+        this(requestId, requesterPlayerUuid, requesterPlayerName, requesterServerId, requesterOrigin,
+            targetPlayerName, targetServerId, null, status, createdAt, expiresAt, updatedAt);
+    }
+
+    public TpaRequest(String requestId, String requesterPlayerUuid, String requesterPlayerName,
+        String requesterServerId, TeleportTarget requesterOrigin, String targetPlayerName, String targetServerId,
+        TeleportTarget acceptedTarget, TpaRequestStatus status, Instant createdAt, Instant expiresAt,
+        Instant updatedAt) {
         this.requestId = requestId;
         this.requesterPlayerUuid = requesterPlayerUuid;
         this.requesterPlayerName = requesterPlayerName;
@@ -28,6 +37,7 @@ public class TpaRequest {
         this.requesterOrigin = requesterOrigin;
         this.targetPlayerName = targetPlayerName;
         this.targetServerId = targetServerId;
+        this.acceptedTarget = acceptedTarget;
         this.status = status;
         this.createdAt = createdAt;
         this.expiresAt = expiresAt;
@@ -62,6 +72,10 @@ public class TpaRequest {
         return targetServerId;
     }
 
+    public TeleportTarget getAcceptedTarget() {
+        return acceptedTarget;
+    }
+
     public TpaRequestStatus getStatus() {
         return status;
     }
@@ -80,6 +94,12 @@ public class TpaRequest {
 
     public TpaRequest withStatus(TpaRequestStatus nextStatus, Instant now) {
         return new TpaRequest(requestId, requesterPlayerUuid, requesterPlayerName, requesterServerId, requesterOrigin,
-            targetPlayerName, targetServerId, nextStatus, createdAt, expiresAt, now);
+            targetPlayerName, targetServerId, acceptedTarget, nextStatus, createdAt, expiresAt, now);
+    }
+
+    public TpaRequest withAcceptedTarget(TeleportTarget nextAcceptedTarget, Instant now) {
+        return new TpaRequest(requestId, requesterPlayerUuid, requesterPlayerName, requesterServerId, requesterOrigin,
+            targetPlayerName, targetServerId, nextAcceptedTarget, TpaRequestStatus.ACCEPTED, createdAt, expiresAt,
+            now);
     }
 }

@@ -10,7 +10,9 @@ import com.jsirgalaxybase.terminal.TerminalMarketSectionSnapshot;
 import com.jsirgalaxybase.terminal.TerminalMarketBrowseEntry;
 import com.jsirgalaxybase.terminal.TerminalMarketAccountCenterRow;
 import com.jsirgalaxybase.terminal.TerminalOpenApproval;
+import com.jsirgalaxybase.terminal.TerminalNotificationFeed;
 import com.jsirgalaxybase.terminal.TerminalServerToolsSectionSnapshot;
+import com.jsirgalaxybase.terminal.TerminalLandSectionSnapshot;
 import com.jsirgalaxybase.terminal.client.TerminalClientScreenController;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalBankSectionModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalCustomMarketSectionModel;
@@ -18,6 +20,8 @@ import com.jsirgalaxybase.terminal.client.viewmodel.TerminalExchangeMarketSectio
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalHomeScreenModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalServerToolsSectionModel;
+import com.jsirgalaxybase.terminal.client.viewmodel.TerminalLandSectionModel;
+import com.jsirgalaxybase.terminal.client.viewmodel.TerminalNotificationCenterModel;
 
 import cpw.mods.fml.common.network.ByteBufUtils;
 import cpw.mods.fml.common.network.simpleimpl.IMessage;
@@ -140,6 +144,8 @@ public class OpenTerminalApprovedMessage implements IMessage {
             writeCustomMarketSection(buf, snapshot.getCustomMarketSectionModel());
             writeExchangeMarketSection(buf, snapshot.getExchangeMarketSectionModel());
             writeServerToolsSection(buf, snapshot.getServerToolsSectionModel());
+            writeLandSection(buf, snapshot.getLandSectionModel());
+            writeNotificationCenter(buf, snapshot.getNotificationCenterModel());
         }
     }
 
@@ -156,7 +162,9 @@ public class OpenTerminalApprovedMessage implements IMessage {
                 readMarketSection(buf),
                 readCustomMarketSection(buf),
                 readExchangeMarketSection(buf),
-                readServerToolsSection(buf)));
+                readServerToolsSection(buf),
+                readLandSection(buf),
+                readNotificationCenter(buf)));
         }
         return items;
     }
@@ -175,6 +183,13 @@ public class OpenTerminalApprovedMessage implements IMessage {
         writeStringList(buf, model.getWarpSubtitles());
         writeStringList(buf, model.getWarpStateLabels());
         writeStringList(buf, model.getRecentTransferLines());
+        writeStringList(buf, model.getHomeLines());
+        writeStringList(buf, model.getHomeNames());
+        writeStringList(buf, model.getHomeSubtitles());
+        writeStringList(buf, model.getTpaDirections());
+        writeStringList(buf, model.getTpaCounterpartyNames());
+        writeStringList(buf, model.getTpaTargetServerIds());
+        writeStringList(buf, model.getTpaStatusLabels());
         ByteBufUtils.writeUTF8String(buf, safe(model.getSelectedWarpName()));
         ByteBufUtils.writeUTF8String(buf, safe(model.getSelectedWarpTitle()));
         ByteBufUtils.writeUTF8String(buf, safe(model.getSelectedWarpDetail()));
@@ -182,6 +197,10 @@ public class OpenTerminalApprovedMessage implements IMessage {
         ByteBufUtils.writeUTF8String(buf, safe(model.getSelectedTargetLocation()));
         ByteBufUtils.writeUTF8String(buf, safe(model.getSelectedWarpDescription()));
         buf.writeBoolean(model.isSelectedWarpEnabled());
+        ByteBufUtils.writeUTF8String(buf, safe(model.getSelectedHomeName()));
+        ByteBufUtils.writeUTF8String(buf, safe(model.getSelectedHomeTargetServerId()));
+        ByteBufUtils.writeUTF8String(buf, safe(model.getSelectedHomeTargetLocation()));
+        ByteBufUtils.writeUTF8String(buf, safe(model.getSelectedHomeDescription()));
         ByteBufUtils.writeUTF8String(buf, safe(model.getRecentSourceServerId()));
         ByteBufUtils.writeUTF8String(buf, safe(model.getRecentTargetServerId()));
         ByteBufUtils.writeUTF8String(buf, safe(model.getRecentTransferStatus()));
@@ -190,6 +209,112 @@ public class OpenTerminalApprovedMessage implements IMessage {
         ByteBufUtils.writeUTF8String(buf, safe(model.getActionFeedback().getTitle()));
         ByteBufUtils.writeUTF8String(buf, safe(model.getActionFeedback().getBody()));
         ByteBufUtils.writeUTF8String(buf, safe(model.getActionFeedback().getSeverityName()));
+    }
+
+    static void writeLandSection(ByteBuf buf, TerminalLandSectionModel model) {
+        buf.writeBoolean(model != null);
+        if (model == null) return;
+        ByteBufUtils.writeUTF8String(buf, safe(model.getServiceState()));
+        ByteBufUtils.writeUTF8String(buf, safe(model.getServerId()));
+        ByteBufUtils.writeUTF8String(buf, safe(model.getProtectionMode()));
+        buf.writeInt(model.getDimensionId());
+        buf.writeInt(model.getCenterChunkX());
+        buf.writeInt(model.getCenterChunkZ());
+        buf.writeInt(model.getSelectedChunkX());
+        buf.writeInt(model.getSelectedChunkZ());
+        buf.writeInt(model.getUsedClaims());
+        buf.writeInt(model.getMaxClaims());
+        ByteBufUtils.writeUTF8String(buf, safe(model.getTab()));
+        buf.writeInt(model.getViewportChunkX());
+        buf.writeInt(model.getViewportChunkZ());
+        ByteBufUtils.writeUTF8String(buf, safe(model.getZoom()));
+        int mapCellCount = Math.min(961, model.getMapCells().size());
+        buf.writeInt(mapCellCount);
+        for (int index = 0; index < mapCellCount; index++) {
+            TerminalLandSectionModel.MapCellModel cell = model.getMapCells().get(index);
+            buf.writeInt(cell.getChunkX());
+            buf.writeInt(cell.getChunkZ());
+            ByteBufUtils.writeUTF8String(buf, safe(cell.getState()));
+            buf.writeLong(cell.getTitleId());
+            buf.writeLong(cell.getVersion());
+        }
+        writeLongList(buf, model.getOwnedTitleIds());
+        writeIntList(buf, model.getOwnedChunkXs());
+        writeIntList(buf, model.getOwnedChunkZs());
+        writeLongList(buf, model.getOwnedVersions());
+        buf.writeInt(model.getPageIndex());
+        buf.writeInt(model.getTotalPages());
+        buf.writeInt(model.getTotalEntries());
+        buf.writeLong(model.getSelectedTitleId());
+        buf.writeLong(model.getSelectedVersion());
+        ByteBufUtils.writeUTF8String(buf, safe(model.getSelectedState()));
+        buf.writeBoolean(model.isCanClaim());
+        buf.writeBoolean(model.isCanUnclaim());
+        ByteBufUtils.writeUTF8String(buf, safe(model.getFeedbackCode()));
+    }
+
+    static TerminalLandSectionModel readLandSection(ByteBuf buf) {
+        if (!buf.readBoolean()) return null;
+        String serviceState = ByteBufUtils.readUTF8String(buf);
+        String serverId = ByteBufUtils.readUTF8String(buf);
+        String protectionMode = ByteBufUtils.readUTF8String(buf);
+        int dimensionId = buf.readInt();
+        int centerX = buf.readInt();
+        int centerZ = buf.readInt();
+        int selectedX = buf.readInt();
+        int selectedZ = buf.readInt();
+        int usedClaims = buf.readInt();
+        int maxClaims = buf.readInt();
+        String tab = ByteBufUtils.readUTF8String(buf);
+        int viewportX = buf.readInt();
+        int viewportZ = buf.readInt();
+        String zoom = ByteBufUtils.readUTF8String(buf);
+        int cellCount = Math.max(0, Math.min(961, buf.readInt()));
+        List<TerminalLandSectionModel.MapCellModel> cells =
+            new ArrayList<TerminalLandSectionModel.MapCellModel>(cellCount);
+        for (int index = 0; index < cellCount; index++) {
+            cells.add(new TerminalLandSectionModel.MapCellModel(buf.readInt(), buf.readInt(),
+                ByteBufUtils.readUTF8String(buf), buf.readLong(), buf.readLong()));
+        }
+        return new TerminalLandSectionModel(serviceState, serverId, protectionMode, dimensionId, centerX, centerZ,
+            selectedX, selectedZ, usedClaims, maxClaims, tab, viewportX, viewportZ, zoom, cells,
+            readLongList(buf), readIntList(buf), readIntList(buf), readLongList(buf), buf.readInt(), buf.readInt(),
+            buf.readInt(), buf.readLong(), buf.readLong(), ByteBufUtils.readUTF8String(buf), buf.readBoolean(),
+            buf.readBoolean(), ByteBufUtils.readUTF8String(buf));
+    }
+
+    static void writeNotificationCenter(ByteBuf buf, TerminalNotificationCenterModel model) {
+        buf.writeBoolean(model != null);
+        if (model == null) return;
+        ByteBufUtils.writeUTF8String(buf, safe(model.getServiceState()));
+        buf.writeInt(Math.max(0, model.getRetainedEntries()));
+        int count = Math.min(TerminalNotificationFeed.MAX_ENTRIES, model.getEntries().size());
+        buf.writeInt(count);
+        for (int i = 0; i < count; i++) {
+            TerminalNotificationCenterModel.EntryModel entry = model.getEntries().get(i);
+            ByteBufUtils.writeUTF8String(buf, safe(entry.getSourceId()));
+            ByteBufUtils.writeUTF8String(buf, safe(entry.getTargetPageId()));
+            ByteBufUtils.writeUTF8String(buf, safe(entry.getTargetRecordId()));
+            ByteBufUtils.writeUTF8String(buf, safe(entry.getTitle()));
+            ByteBufUtils.writeUTF8String(buf, safe(entry.getBody()));
+            ByteBufUtils.writeUTF8String(buf, safe(entry.getSeverityName()));
+            buf.writeInt(Math.max(1, entry.getOccurrences()));
+        }
+    }
+
+    static TerminalNotificationCenterModel readNotificationCenter(ByteBuf buf) {
+        if (!buf.readBoolean()) return null;
+        String state = ByteBufUtils.readUTF8String(buf);
+        int retained = Math.max(0, buf.readInt());
+        int count = Math.max(0, Math.min(TerminalNotificationFeed.MAX_ENTRIES, buf.readInt()));
+        List<TerminalNotificationCenterModel.EntryModel> entries =
+            new ArrayList<TerminalNotificationCenterModel.EntryModel>(count);
+        for (int i = 0; i < count; i++) {
+            entries.add(new TerminalNotificationCenterModel.EntryModel(ByteBufUtils.readUTF8String(buf),
+                ByteBufUtils.readUTF8String(buf), ByteBufUtils.readUTF8String(buf), ByteBufUtils.readUTF8String(buf),
+                ByteBufUtils.readUTF8String(buf), ByteBufUtils.readUTF8String(buf), Math.max(1, buf.readInt())));
+        }
+        return new TerminalNotificationCenterModel(state, entries, retained);
     }
 
     static TerminalServerToolsSectionModel readServerToolsSection(ByteBuf buf) {
@@ -206,6 +331,13 @@ public class OpenTerminalApprovedMessage implements IMessage {
             readStringList(buf),
             readStringList(buf),
             readStringList(buf),
+            readStringList(buf),
+            readStringList(buf),
+            readStringList(buf),
+            readStringList(buf),
+            readStringList(buf),
+            readStringList(buf),
+            readStringList(buf),
             ByteBufUtils.readUTF8String(buf),
             ByteBufUtils.readUTF8String(buf),
             ByteBufUtils.readUTF8String(buf),
@@ -213,6 +345,10 @@ public class OpenTerminalApprovedMessage implements IMessage {
             ByteBufUtils.readUTF8String(buf),
             ByteBufUtils.readUTF8String(buf),
             buf.readBoolean(),
+            ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
+            ByteBufUtils.readUTF8String(buf),
             ByteBufUtils.readUTF8String(buf),
             ByteBufUtils.readUTF8String(buf),
             ByteBufUtils.readUTF8String(buf),
@@ -741,6 +877,32 @@ public class OpenTerminalApprovedMessage implements IMessage {
         return values;
     }
 
+    static void writeLongList(ByteBuf buf, List<Long> values) {
+        List<Long> safeValues = values == null ? new ArrayList<Long>() : values;
+        buf.writeInt(safeValues.size());
+        for (Long value : safeValues) buf.writeLong(value == null ? 0L : value.longValue());
+    }
+
+    static List<Long> readLongList(ByteBuf buf) {
+        int size = buf.readInt();
+        List<Long> values = new ArrayList<Long>(size);
+        for (int i = 0; i < size; i++) values.add(Long.valueOf(buf.readLong()));
+        return values;
+    }
+
+    static void writeIntList(ByteBuf buf, List<Integer> values) {
+        List<Integer> safeValues = values == null ? new ArrayList<Integer>() : values;
+        buf.writeInt(safeValues.size());
+        for (Integer value : safeValues) buf.writeInt(value == null ? 0 : value.intValue());
+    }
+
+    static List<Integer> readIntList(ByteBuf buf) {
+        int size = buf.readInt();
+        List<Integer> values = new ArrayList<Integer>(size);
+        for (int i = 0; i < size; i++) values.add(Integer.valueOf(buf.readInt()));
+        return values;
+    }
+
     private static void writeBrowsePage(ByteBuf buf, List<TerminalMarketBrowseEntry> entries, String query,
         int pageIndex, int pageSize, int totalEntries, boolean previous, boolean next) {
         List<TerminalMarketBrowseEntry> safeEntries = entries == null
@@ -883,6 +1045,9 @@ public class OpenTerminalApprovedMessage implements IMessage {
             ByteBufUtils.writeUTF8String(buf, safe(item.getTitle()));
             ByteBufUtils.writeUTF8String(buf, safe(item.getBody()));
             ByteBufUtils.writeUTF8String(buf, safe(item.getSeverityName()));
+            ByteBufUtils.writeUTF8String(buf, safe(item.getSourceId()));
+            ByteBufUtils.writeUTF8String(buf, safe(item.getTargetPageId()));
+            ByteBufUtils.writeUTF8String(buf, safe(item.getTargetRecordId()));
         }
     }
 
@@ -891,6 +1056,9 @@ public class OpenTerminalApprovedMessage implements IMessage {
         List<TerminalHomeScreenModel.NotificationModel> items = new ArrayList<TerminalHomeScreenModel.NotificationModel>(size);
         for (int i = 0; i < size; i++) {
             items.add(new TerminalHomeScreenModel.NotificationModel(
+                ByteBufUtils.readUTF8String(buf),
+                ByteBufUtils.readUTF8String(buf),
+                ByteBufUtils.readUTF8String(buf),
                 ByteBufUtils.readUTF8String(buf),
                 ByteBufUtils.readUTF8String(buf),
                 ByteBufUtils.readUTF8String(buf)));
@@ -934,7 +1102,9 @@ public class OpenTerminalApprovedMessage implements IMessage {
                 toMarketSectionModel(snapshot.getMarketSectionSnapshot()),
                 toCustomMarketSectionModel(snapshot.getCustomMarketSectionSnapshot()),
                 toExchangeMarketSectionModel(snapshot.getExchangeMarketSectionSnapshot()),
-                toServerToolsSectionModel(snapshot.getServerToolsSectionSnapshot())));
+                toServerToolsSectionModel(snapshot.getServerToolsSectionSnapshot()),
+                toLandSectionModel(snapshot.getLandSectionSnapshot()),
+                toNotificationCenterModel(snapshot.getNotificationCenterSnapshot())));
         }
         return models;
     }
@@ -953,6 +1123,13 @@ public class OpenTerminalApprovedMessage implements IMessage {
             snapshot.getWarpSubtitles(),
             snapshot.getWarpStateLabels(),
             snapshot.getRecentTransferLines(),
+            snapshot.getHomeLines(),
+            snapshot.getHomeNames(),
+            snapshot.getHomeSubtitles(),
+            snapshot.getTpaDirections(),
+            snapshot.getTpaCounterpartyNames(),
+            snapshot.getTpaTargetServerIds(),
+            snapshot.getTpaStatusLabels(),
             snapshot.getSelectedWarpName(),
             snapshot.getSelectedWarpTitle(),
             snapshot.getSelectedWarpDetail(),
@@ -960,6 +1137,10 @@ public class OpenTerminalApprovedMessage implements IMessage {
             snapshot.getSelectedTargetLocation(),
             snapshot.getSelectedWarpDescription(),
             snapshot.isSelectedWarpEnabled(),
+            snapshot.getSelectedHomeName(),
+            snapshot.getSelectedHomeTargetServerId(),
+            snapshot.getSelectedHomeTargetLocation(),
+            snapshot.getSelectedHomeDescription(),
             snapshot.getRecentSourceServerId(),
             snapshot.getRecentTargetServerId(),
             snapshot.getRecentTransferStatus(),
@@ -969,6 +1150,37 @@ public class OpenTerminalApprovedMessage implements IMessage {
                 snapshot.getActionFeedback().getTitle(),
                 snapshot.getActionFeedback().getBody(),
                 snapshot.getActionFeedback().getSeverityName()));
+    }
+
+    private static TerminalLandSectionModel toLandSectionModel(TerminalLandSectionSnapshot snapshot) {
+        if (snapshot == null) return null;
+        List<TerminalLandSectionModel.MapCellModel> mapCells =
+            new ArrayList<TerminalLandSectionModel.MapCellModel>();
+        for (com.jsirgalaxybase.terminal.TerminalLandMapCellSnapshot cell : snapshot.getMapCells()) {
+            mapCells.add(new TerminalLandSectionModel.MapCellModel(cell.getChunkX(), cell.getChunkZ(),
+                cell.getState(), cell.getTitleId(), cell.getVersion()));
+        }
+        return new TerminalLandSectionModel(snapshot.getServiceState(), snapshot.getServerId(),
+            snapshot.getProtectionMode(), snapshot.getDimensionId(), snapshot.getCenterChunkX(),
+            snapshot.getCenterChunkZ(), snapshot.getSelectedChunkX(), snapshot.getSelectedChunkZ(),
+            snapshot.getUsedClaims(), snapshot.getMaxClaims(), snapshot.getTab(), snapshot.getViewportChunkX(),
+            snapshot.getViewportChunkZ(), snapshot.getZoom(), mapCells,
+            snapshot.getOwnedTitleIds(), snapshot.getOwnedChunkXs(), snapshot.getOwnedChunkZs(),
+            snapshot.getOwnedVersions(), snapshot.getPageIndex(), snapshot.getTotalPages(), snapshot.getTotalEntries(),
+            snapshot.getSelectedTitleId(), snapshot.getSelectedVersion(), snapshot.getSelectedState(),
+            snapshot.isCanClaim(), snapshot.isCanUnclaim(), snapshot.getFeedbackCode());
+    }
+
+    private static TerminalNotificationCenterModel toNotificationCenterModel(
+        com.jsirgalaxybase.terminal.TerminalNotificationCenterSnapshot snapshot) {
+        if (snapshot == null) return null;
+        List<TerminalNotificationCenterModel.EntryModel> entries =
+            new ArrayList<TerminalNotificationCenterModel.EntryModel>();
+        for (com.jsirgalaxybase.terminal.TerminalNotificationCenterSnapshot.Entry entry : snapshot.getEntries()) {
+            entries.add(new TerminalNotificationCenterModel.EntryModel(entry.getSourceId(), entry.getTargetPageId(),
+                entry.getTargetRecordId(), entry.getTitle(), entry.getBody(), entry.getSeverityName(), entry.getOccurrences()));
+        }
+        return new TerminalNotificationCenterModel(snapshot.getServiceState(), entries, snapshot.getRetainedEntries());
     }
 
     private static TerminalCustomMarketSectionModel toCustomMarketSectionModel(
@@ -1231,7 +1443,10 @@ public class OpenTerminalApprovedMessage implements IMessage {
             models.add(new TerminalHomeScreenModel.NotificationModel(
                 item.getTitle(),
                 item.getBody(),
-                item.getSeverityName()));
+                item.getSeverityName(),
+                item.getSourceId(),
+                item.getTargetPageId(),
+                item.getTargetRecordId()));
         }
         return models;
     }

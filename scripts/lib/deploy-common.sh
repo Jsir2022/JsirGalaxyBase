@@ -150,13 +150,16 @@ wait_for_log_done() {
     local target="$1"
     local attempts="${2:-90}"
     local delay_seconds="${3:-2}"
+    local restart_marker="${4:-}"
     local log_path alt_log_path
     local i
     log_path="$(target_log_path "$target")"
     alt_log_path="$(target_alt_log_path "$target")"
     for ((i = 1; i <= attempts; i++)); do
-        if { [[ -f "$log_path" ]] && grep -q 'Done (' "$log_path"; } \
-            || { [[ -f "$alt_log_path" ]] && grep -q 'Done (' "$alt_log_path"; }; then
+        if { [[ -f "$log_path" ]] && { [[ -z "$restart_marker" ]] || [[ "$log_path" -nt "$restart_marker" ]]; } \
+                && grep -q 'Done (' "$log_path"; } \
+            || { [[ -f "$alt_log_path" ]] && { [[ -z "$restart_marker" ]] || [[ "$alt_log_path" -nt "$restart_marker" ]]; } \
+                && grep -q 'Done (' "$alt_log_path"; }; then
             return 0
         fi
         sleep "$delay_seconds"

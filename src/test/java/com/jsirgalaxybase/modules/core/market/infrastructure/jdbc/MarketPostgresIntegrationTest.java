@@ -69,7 +69,7 @@ import com.jsirgalaxybase.modules.core.market.infrastructure.MarketInfrastructur
 import com.jsirgalaxybase.modules.core.market.port.MarketClaimDeliveryPort;
 import com.jsirgalaxybase.modules.core.market.repository.MarketTransactionRunner;
 
-import net.minecraft.init.Blocks;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 
@@ -408,6 +408,12 @@ public class MarketPostgresIntegrationTest {
         assertEquals(1, settlementFacade.settleCommands.size());
         assertTrue(marketInfrastructure.getCustomMarketTradeRecordRepository().findByListingId(
             publishResult.getListing().getListingId()).isPresent());
+        assertEquals(1, marketInfrastructure.getCustomMarketTradeRecordRepository()
+            .findRecentByPlayer("buyer-b", 20).size());
+        assertEquals(1, marketInfrastructure.getCustomMarketTradeRecordRepository()
+            .findRecentByPlayer("seller-a", 20).size());
+        assertEquals(0, marketInfrastructure.getCustomMarketTradeRecordRepository()
+            .findRecentByPlayer("unrelated-player", 20).size());
         assertEquals(1, purchasingService.listBuyerPendingClaims("buyer-b").size());
         assertEquals(1, purchasingService.listSellerPendingDeliveries("seller-a").size());
     }
@@ -623,7 +629,10 @@ public class MarketPostgresIntegrationTest {
     }
 
     private ItemStack namedCustomStack(String displayName, int stackSize, String owner) {
-        ItemStack stack = new ItemStack(Blocks.stone, stackSize, 0);
+        // PostgreSQL integration tests run without the Forge vanilla block bootstrap. A lightweight
+        // Item fixture exercises the persisted custom-market snapshot path without depending on
+        // Blocks.stone having a registered ItemBlock in this isolated JVM.
+        ItemStack stack = new ItemStack(new Item().setUnlocalizedName("custom_market_pg_test_item"), stackSize, 0);
         NBTTagCompound tag = new NBTTagCompound();
         NBTTagCompound display = new NBTTagCompound();
         display.setString("Name", displayName);

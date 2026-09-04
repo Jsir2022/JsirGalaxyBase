@@ -1,6 +1,7 @@
 package com.jsirgalaxybase.modules.core.vault.infrastructure.minecraft;
 
 import com.jsirgalaxybase.GalaxyBase;
+import com.jsirgalaxybase.modules.warehouse.infrastructure.minecraft.TerminalAssetCenterContainer;
 
 import cpw.mods.fml.common.network.simpleimpl.IMessage;
 import cpw.mods.fml.common.network.simpleimpl.IMessageHandler;
@@ -26,6 +27,12 @@ public final class BaseVaultSortRequestMessage implements IMessage {
                     ((BaseVaultContainer) player.openContainer).sortVault();
                 } catch (RuntimeException exception) {
                     GalaxyBase.LOG.warn("Base Vault sort rejected for {}", player.getUniqueID(), exception);
+                }
+            } else if (player != null && player.openContainer instanceof TerminalAssetCenterContainer) {
+                try {
+                    ((TerminalAssetCenterContainer) player.openContainer).sortVault();
+                } catch (RuntimeException exception) {
+                    GalaxyBase.LOG.warn("Asset center Vault sort rejected for {}", player.getUniqueID(), exception);
                 }
             }
             return null;

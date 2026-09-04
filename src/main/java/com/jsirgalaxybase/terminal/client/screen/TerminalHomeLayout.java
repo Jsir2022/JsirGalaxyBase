@@ -7,7 +7,7 @@ import com.jsirgalaxybase.client.gui.framework.GuiRect;
 import com.jsirgalaxybase.config.ModConfiguration;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalHomeScreenModel;
 
-final class TerminalHomeLayout {
+public final class TerminalHomeLayout {
 
     private static final float FALLBACK_PANEL_WIDTH_RATIO = 0.72F;
     private static final float FALLBACK_PANEL_HEIGHT_RATIO = 0.44F;
@@ -32,11 +32,11 @@ final class TerminalHomeLayout {
         this.navigationGap = navigationGap;
     }
 
-    static TerminalHomeLayout compute(int screenWidth, int screenHeight) {
+    public static TerminalHomeLayout compute(int screenWidth, int screenHeight) {
         return compute(screenWidth, screenHeight, null);
     }
 
-    static TerminalHomeLayout compute(int screenWidth, int screenHeight, TerminalHomeScreenModel model) {
+    public static TerminalHomeLayout compute(int screenWidth, int screenHeight, TerminalHomeScreenModel model) {
         int safeWidth = Math.max(1, screenWidth);
         int safeHeight = Math.max(1, screenHeight);
         int marginX = safeWidth < 520 ? 6 : 8;
@@ -88,6 +88,13 @@ final class TerminalHomeLayout {
             true,
             navGap);
     }
+
+    public GuiRect getPanelBounds() { return panelBounds; }
+    public GuiRect getStatusBandBounds() { return statusBandBounds; }
+    public GuiRect getNavigationBounds() { return navigationBounds; }
+    public GuiRect getBodyBounds() { return bodyBounds; }
+    public boolean isNavigationVisible() { return navigationVisible; }
+    public int getNavigationGap() { return navigationGap; }
 
     private static float computeAutomaticPanelScale(int screenWidth, int screenHeight) {
         float scale = screenWidth >= 1100 || screenHeight >= 700 ? 0.90F

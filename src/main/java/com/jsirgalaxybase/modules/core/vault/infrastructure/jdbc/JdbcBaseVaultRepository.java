@@ -270,6 +270,25 @@ public final class JdbcBaseVaultRepository extends AbstractJdbcRepository implem
     }
 
     @Override
+    public List<VaultOperation> findRecentOperations(final long accountId, final int limit) {
+        return connectionManager.withConnection(new JdbcConnectionCallback<List<VaultOperation>>() {
+            @Override public List<VaultOperation> doInConnection(Connection connection) throws SQLException {
+                PreparedStatement statement = connection.prepareStatement(
+                    "SELECT * FROM warehouse_operation_log WHERE account_id = ? ORDER BY updated_at DESC, operation_id DESC LIMIT ?");
+                try {
+                    statement.setLong(1, accountId); statement.setInt(2, Math.max(1, Math.min(12, limit)));
+                    ResultSet rows = statement.executeQuery();
+                    try {
+                        List<VaultOperation> operations = new ArrayList<VaultOperation>();
+                        while (rows.next()) operations.add(mapOperation(rows));
+                        return operations;
+                    } finally { rows.close(); }
+                } finally { statement.close(); }
+            }
+        });
+    }
+
+    @Override
     public VaultOperationHistoryPage findExceptionalOperations(final long accountId, final String searchText,
         final VaultOperationStatus status, final Instant createdAfter, final int pageIndex, final int pageSize) {
         return connectionManager.withConnection(new JdbcConnectionCallback<VaultOperationHistoryPage>() {

@@ -21,6 +21,7 @@ public final class TerminalClientScreenController {
 
     private TerminalHomeScreenModel pendingHomeScreen;
     private long pendingRequestSequence;
+    private TerminalHomeScreenModel lastHomeScreen = TerminalHomeScreenModel.placeholder();
 
     private TerminalClientScreenController() {}
 
@@ -35,7 +36,13 @@ public final class TerminalClientScreenController {
             }
             pendingHomeScreen = model;
             pendingRequestSequence = Math.max(0L, requestSequence);
+            lastHomeScreen = model;
         }
+    }
+
+    public synchronized TerminalHomeScreenModel getLastHomeScreen(String selectedPageId) {
+        TerminalHomeScreenModel snapshot = lastHomeScreen == null ? TerminalHomeScreenModel.placeholder() : lastHomeScreen;
+        return snapshot.withSelectedPageId(selectedPageId);
     }
 
     @SubscribeEvent
@@ -80,6 +87,8 @@ public final class TerminalClientScreenController {
             TerminalNotificationSeverity severity = notification.getSeverity();
             final String notificationTitle = notification.getTitle();
             final String notificationBody = notification.getBody();
+            final String notificationTargetPage = notification.getTargetPageId();
+            final String notificationTargetRecord = notification.getTargetRecordId();
             long duration = severity == TerminalNotificationSeverity.ERROR ? 7000L
                 : severity == TerminalNotificationSeverity.WARNING ? 5500L : 4200L;
             TerminalHudNotificationManager.push(TerminalNotification.builder()
@@ -88,10 +97,22 @@ public final class TerminalClientScreenController {
                 .body(safeNotificationBody(notification.getBody()))
                 .autoCloseMillis(duration)
                 .onClick(new Runnable() {
-                    @Override public void run() { focusMarketNotification(notificationTitle, notificationBody); }
+                    @Override public void run() {
+                        focusNotification(notificationTargetPage, notificationTargetRecord, notificationTitle, notificationBody);
+                    }
                 })
                 .build());
         }
+    }
+
+    private void focusNotification(String targetPageId, String targetRecordId, String title, String body) {
+        Minecraft minecraft = Minecraft.getMinecraft();
+        if (!(minecraft.currentScreen instanceof TerminalHomeScreen)) return;
+        if (targetPageId != null && !targetPageId.trim().isEmpty()) {
+            ((TerminalHomeScreen) minecraft.currentScreen).openNotificationTarget(targetPageId, targetRecordId);
+            return;
+        }
+        focusMarketNotification(title, body);
     }
 
     private void focusMarketNotification(String title, String body) {

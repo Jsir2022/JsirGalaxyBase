@@ -121,6 +121,21 @@ public class MarketOrderEntryPopupTest {
         assertEquals(1, submissions.get());
     }
 
+    @Test
+    public void explainsMissingCounterpartyLiquidityInsteadOfReportingInsufficientAssets() {
+        TerminalMarketSectionState buyState = new TerminalMarketSectionState();
+        MarketOrderEntryPopup buyPopup = new MarketOrderEntryPopup(420, 260, buyState,
+            TerminalMarketSectionState.OrderSide.BUY, TerminalMarketSectionState.OrderType.MARKET,
+            "Iron Ingot", "61", "69", "--", "余额 891385", "银行 -> 市场交割", 891385L, null, null);
+        assertEquals("卖盘为空，无法市价买入；可改用限价挂单", buyPopup.disabledReason());
+
+        TerminalMarketSectionState sellState = new TerminalMarketSectionState();
+        MarketOrderEntryPopup sellPopup = new MarketOrderEntryPopup(420, 260, sellState,
+            TerminalMarketSectionState.OrderSide.SELL, TerminalMarketSectionState.OrderType.MARKET,
+            "Iron Ingot", "--", "69", "90", "可卖 64", "个人 Base Vault -> 市场交割", 64L, null, null);
+        assertEquals("买盘为空，无法市价卖出；可改用限价挂单", sellPopup.disabledReason());
+    }
+
     private static void assertInside(GuiRect parent, GuiRect child) {
         assertTrue(child.getX() >= parent.getX());
         assertTrue(child.getY() >= parent.getY());

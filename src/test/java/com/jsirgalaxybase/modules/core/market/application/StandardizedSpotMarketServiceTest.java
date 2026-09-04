@@ -662,6 +662,29 @@ public class StandardizedSpotMarketServiceTest {
     }
 
     @Test
+    public void recoveryServiceCompletesLegacyBuyFailureWithoutPersistedOrderOrFreeze() {
+        FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
+        FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();
+        FakeMarketOperationLogRepository operationLogRepository = new FakeMarketOperationLogRepository();
+        FakeMarketSettlementFacade settlementFacade = new FakeMarketSettlementFacade();
+        settlementFacade.registerPlayer("buyer");
+        operationLogRepository.save(new MarketOperationLog(0L, "req-legacy-buy", MarketOperationType.BUY_ORDER_CREATE,
+            MarketOperationStatus.RECOVERY_REQUIRED, "test-server", "buyer", "legacy", MarketRecoveryMetadata.builder()
+                .put("mode", "buy-freeze-recovery").put("releaseRequestId", "req-legacy-buy:recovery-release")
+                .putLong("reservedFunds", 64L).putBoolean("fundsFrozen", true).build().toKey(), 999L, 0L, 0L,
+            "legacy same-account release rejected", Instant.now(), Instant.now()));
+
+        MarketRecoveryService recoveryService = new MarketRecoveryService(orderRepository, custodyRepository,
+            operationLogRepository, new DirectMarketTransactionRunner(), settlementFacade);
+        List<MarketOperationLog> recovered = recoveryService.scanAndEscalateIncompleteOperations(10);
+
+        assertEquals(1, recovered.size());
+        assertEquals(MarketOperationStatus.COMPLETED, recovered.get(0).getStatus());
+        assertTrue(recovered.get(0).getMessage().contains("no persisted order or freeze ledger entry"));
+        assertTrue(settlementFacade.releaseCommands.isEmpty());
+    }
+
+    @Test
     public void depositPostCommitFailureLeavesAvailableCustodyRecoverableAndCompletesOnScan() {
         FakeMarketOrderBookRepository orderRepository = new FakeMarketOrderBookRepository();
         FakeMarketCustodyInventoryRepository custodyRepository = new FakeMarketCustodyInventoryRepository();

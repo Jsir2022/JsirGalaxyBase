@@ -67,6 +67,12 @@ public final class BaseVaultService {
             Math.max(0, pageIndex), Math.max(1, Math.min(50, pageSize)));
     }
 
+    /** Recent actor-scoped audit rows for the unified personal asset center. */
+    public List<VaultOperation> findPersonalRecentOperations(String playerRef, int limit) {
+        VaultAccount account = repository.ensureAccount(VaultAccountType.PERSONAL, requireText(playerRef, "playerRef"));
+        return repository.findRecentOperations(account.getAccountId(), Math.max(1, Math.min(12, limit)));
+    }
+
     /**
      * Trusted storage read. Player-facing callers must authorize through
      * {@link VaultAccessService}, especially for enterprise and public accounts.
@@ -225,6 +231,19 @@ public final class BaseVaultService {
             }
         }
         return total > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
+    }
+
+    /** Read-only snapshot for a server-side admission check before an internal transfer. */
+    public ItemStack getPersonalSlotStack(String playerRef, int slotIndex) {
+        VaultView view = viewPersonalVault(playerRef);
+        if (slotIndex < 0 || slotIndex >= view.getSlots().size()) {
+            throw new VaultException("Base Vault slot index is out of range: " + slotIndex);
+        }
+        ItemStack stack = view.getSlots().get(slotIndex).getStack();
+        if (stack == null || stack.stackSize <= 0) {
+            throw new VaultException("Base Vault slot is empty: " + slotIndex);
+        }
+        return stack.copy();
     }
 
     /** Preflight only. The mutating delivery path repeats this check while locked. */

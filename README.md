@@ -126,6 +126,8 @@ GTNH 1.7.10 自定义制度模组工作区。
 
 - `InstitutionCoreModule`
 - `ClientItemDumpModule`
+- `LandModule`
+  - 已具备个人地皮 PostgreSQL 真源、幂等认领/放弃服务与 SHADOW/ENFORCE Forge 保护层；终端页面和地产交易尚未接入
 
 后续内置模块允许继续增加：
 
@@ -180,6 +182,13 @@ GTNH 1.7.10 自定义制度模组工作区。
 ## ServerUtilities 整合边界
 
 后续如果参考 `Reference/ServerUtilities` 吸收服务器工具能力，默认遵守下面这些约束。
+
+2026-08-22 状态说明：当前只完成第一批传送能力与终端传送页，不代表
+ServerUtilities 已整体集成。现服暂时仍由独立 ServerUtilities 2.2.2 执行 claim / chunk
+loading，S1/S2 还有必须迁移保留的历史领地；最终目标是把需要的能力重写进 JGB，完成
+灰度验证和数据迁移后从服务端及客户端删除独立 ServerUtilities。JGB 正式运行态不得
+依赖其 JAR、API 或数据文件。地皮、Team、职业、银行与市场关系详见
+[`docs/serverutilities-land-property-integration-v1.md`](docs/serverutilities-land-property-integration-v1.md)。
 
 ### 基本判断
 
@@ -268,6 +277,10 @@ GTNH 1.7.10 自定义制度模组工作区。
   - 开发工作记录
 - [docs/servertools-phase1-command-reference.md](docs/servertools-phase1-command-reference.md)
   - server tools / cluster 第一期命令格式、当前跨服执行边界与数据库落点说明
+- [docs/serverutilities-land-property-integration-v1.md](docs/serverutilities-land-property-integration-v1.md)
+  - JGB 原生个人领地保护、个人地产交易、一次性旧数据 staging 与独立 ServerUtilities 卸载方案
+- [docs/serverutilities-personal-land-code-reuse-evaluation-v1.md](docs/serverutilities-personal-land-code-reuse-evaluation-v1.md)
+  - ServerUtilities claim 源码逐类复用、许可证、个人交易、终端 UI 接入和实施批次评估
 - [docs/terminal-plan.md](docs/terminal-plan.md)
   - 终端入口、服务端打开链与后续终端壳的实施方案
 - [Reference/ServerUtilities/README.md](Reference/ServerUtilities/README.md)
@@ -285,7 +298,8 @@ GTNH 1.7.10 自定义制度模组工作区。
 - [docs/postgresql-local-setup-and-migration.md](docs/postgresql-local-setup-and-migration.md)
   - Ubuntu 本地 PostgreSQL 安装、初始化与迁移说明
 
-当前开发默认还会参考工作区中的制度文档：
+历史记录曾引用下面这些仓库外制度文档，但 2026-08-22 实际检查时对应路径不存在。
+在文件恢复或重新确认前，不得把它们当作当前权威需求：
 
 - `../Docs/设定.md`
 - `../Docs/技术边界文档.md`

@@ -2,11 +2,8 @@ package com.jsirgalaxybase.terminal.client.screen;
 
 import java.util.Arrays;
 
-import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiScreen;
 
-import com.jsirgalaxybase.client.gui.framework.CanvasScreen;
-import com.jsirgalaxybase.client.gui.framework.GuiScene;
 import com.jsirgalaxybase.client.gui.framework.GuiRect;
 import com.jsirgalaxybase.client.gui.framework.ModalPopupPanel;
 import com.jsirgalaxybase.client.gui.framework.PanelContainer;
@@ -16,6 +13,7 @@ import com.jsirgalaxybase.terminal.TerminalBankActionMessageFactory;
 import com.jsirgalaxybase.terminal.TerminalMarketActionMessageFactory;
 import com.jsirgalaxybase.terminal.TerminalMarketActionPayload;
 import com.jsirgalaxybase.terminal.TerminalServerToolsActionPayload;
+import com.jsirgalaxybase.terminal.TerminalLandActionPayload;
 import com.jsirgalaxybase.terminal.client.component.TerminalBankSectionState;
 import com.jsirgalaxybase.terminal.client.component.CustomListingPricePopup;
 import com.jsirgalaxybase.terminal.client.component.TerminalMarketSectionState;
@@ -25,6 +23,8 @@ import com.jsirgalaxybase.terminal.client.component.MarketCancelableOrdersPopup;
 import com.jsirgalaxybase.terminal.client.component.TerminalPanelFactory;
 import com.jsirgalaxybase.terminal.client.component.TerminalPopupFactory;
 import com.jsirgalaxybase.terminal.client.component.TerminalServerToolsSectionState;
+import com.jsirgalaxybase.terminal.client.component.TerminalLandSectionState;
+import com.jsirgalaxybase.terminal.client.component.TerminalNotificationCenterState;
 import com.jsirgalaxybase.terminal.client.component.TerminalShellPanels;
 import com.jsirgalaxybase.terminal.client.component.VaultAssetPickerPopup;
 import com.jsirgalaxybase.terminal.client.TerminalResponseSequenceGate;
@@ -34,16 +34,19 @@ import com.jsirgalaxybase.terminal.client.viewmodel.TerminalExchangeMarketSectio
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalHomeScreenModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalServerToolsSectionModel;
+import com.jsirgalaxybase.terminal.client.viewmodel.TerminalLandSectionModel;
 import com.jsirgalaxybase.terminal.network.TerminalActionMessage;
 import com.jsirgalaxybase.terminal.network.TerminalNetwork;
 import com.jsirgalaxybase.terminal.ui.TerminalPage;
 
-public class TerminalHomeScreen extends CanvasScreen {
+public class TerminalHomeScreen extends TerminalScreenBase {
 
     private TerminalHomeScreenModel model;
     private final TerminalBankSectionState bankSectionState = new TerminalBankSectionState();
     private final TerminalMarketSectionState marketSectionState = new TerminalMarketSectionState();
     private final TerminalServerToolsSectionState serverToolsSectionState = new TerminalServerToolsSectionState();
+    private final TerminalLandSectionState landSectionState = new TerminalLandSectionState();
+    private final TerminalNotificationCenterState notificationCenterState = new TerminalNotificationCenterState();
     private final MarketLiveRefreshController marketLiveRefreshController = new MarketLiveRefreshController();
     private TerminalHomeScreenModel deferredLiveMarketModel;
     private long deferredLiveMarketSequence;
@@ -55,6 +58,7 @@ public class TerminalHomeScreen extends CanvasScreen {
         syncBankSectionStateFromModel(this.model);
         syncMarketSectionStateFromModel(this.model);
         syncServerToolsSectionStateFromModel(this.model);
+        syncLandSectionStateFromModel(this.model);
     }
 
     public void applyModel(TerminalHomeScreenModel model) {
@@ -91,6 +95,7 @@ public class TerminalHomeScreen extends CanvasScreen {
         syncBankSectionStateFromModel(this.model);
         syncMarketSectionStateFromModel(this.model);
         syncServerToolsSectionStateFromModel(this.model);
+        syncLandSectionStateFromModel(this.model);
         marketLiveRefreshController.onSnapshotReceived();
         closePopup();
         initGui();
@@ -143,23 +148,14 @@ public class TerminalHomeScreen extends CanvasScreen {
     }
 
     @Override
-    protected boolean shouldDrawDefaultBackground() {
-        return false;
-    }
-
-    @Override
     protected PanelContainer buildRootPanel() {
         PanelContainer root = new PanelContainer();
         root.setBounds(new GuiRect(0, 0, width, height));
-        TerminalHomeLayout layout = TerminalHomeLayout.compute(width, height, model);
+        TerminalHomeLayout layout = terminalLayout(model);
 
         final TerminalPanelFactory panels = new TerminalPanelFactory();
-        root.addChild(new BackdropPanel(width, height, layout.panelBounds));
-        root.addChild(panels.createSurface(layout.panelBounds,
-            com.jsirgalaxybase.client.gui.theme.ThemeColorKey.PANEL_FILL));
-        root.addChild(TerminalShellPanels.createStatusBand(
-            panels,
-            layout.statusBandBounds,
+        TerminalShellFrame.addBackdrop(root, panels, width, height, layout);
+        TerminalShellFrame.addStatusBand(root, panels, layout,
             model,
             new Runnable() {
                 @Override
@@ -192,7 +188,7 @@ public class TerminalHomeScreen extends CanvasScreen {
                         ? TerminalMarketSectionState.AccountCenterTab.ASSETS_AND_DELIVERY
                         : TerminalMarketSectionState.AccountCenterTab.OPEN_ORDERS);
                 }
-            }));
+            });
         root.addChild(TerminalShellPanels.createSectionBody(
             panels,
             layout.bodyBounds,
@@ -409,17 +405,82 @@ public class TerminalHomeScreen extends CanvasScreen {
                 public void confirmWarp(String warpName) {
                     openServerToolsWarpConfirmPopup(warpName);
                 }
+
+                @Override
+                public void confirmQuickAction(String quickAction) {
+                    openServerToolsQuickConfirmPopup(quickAction);
+                }
+
+                @Override
+                public void selectHome(String homeName) {
+                    selectServerToolsHome(homeName);
+                }
+
+                @Override
+                public void confirmHome(String homeName) {
+                    openServerToolsHomeConfirmPopup(homeName, TerminalActionType.SERVER_TOOLS_CONFIRM_HOME);
+                }
+
+                @Override
+                public void setHome(String homeName) {
+                    openServerToolsHomeConfirmPopup(homeName, TerminalActionType.SERVER_TOOLS_SET_HOME);
+                }
+
+                @Override
+                public void deleteHome(String homeName) {
+                    openServerToolsHomeConfirmPopup(homeName, TerminalActionType.SERVER_TOOLS_DELETE_HOME);
+                }
+
+                @Override
+                public void requestTpa(String playerName, String targetServerId) {
+                    openServerToolsTpaConfirmPopup("request", playerName, targetServerId);
+                }
+
+                @Override
+                public void respondTpa(String direction, String playerName, String targetServerId, String action) {
+                    openServerToolsTpaConfirmPopup("INCOMING".equals(direction) ? action : "cancel", playerName,
+                        targetServerId);
+                }
+            },
+            landSectionState,
+            new TerminalShellPanels.LandActionHandler() {
+                @Override public void selectChunk(int chunkX, int chunkZ, long version) {
+                    landSectionState.select(chunkX, chunkZ, version);
+                    sendLandAction(TerminalActionType.LAND_SELECT, landSectionState.toPayload());
+                }
+                @Override public void selectTab(TerminalLandActionPayload.Tab tab) {
+                    landSectionState.selectTab(tab);
+                    sendLandAction(TerminalActionType.LAND_SELECT_TAB, landSectionState.toPayload());
+                }
+                @Override public void changePage(int pageIndex) {
+                    landSectionState.setPageIndex(pageIndex);
+                    sendLandAction(TerminalActionType.LAND_CHANGE_PAGE, landSectionState.toPayload());
+                }
+                @Override public void changeViewport(int chunkX, int chunkZ,
+                    TerminalLandActionPayload.Zoom zoom) {
+                    landSectionState.setViewport(chunkX, chunkZ, zoom);
+                    sendLandAction(TerminalActionType.LAND_VIEWPORT, landSectionState.toPayload());
+                }
+                @Override public void refreshMap() {
+                    sendLandAction(TerminalActionType.REFRESH_PAGE, landSectionState.toPayload());
+                }
+                @Override public void openClaimConfirm() { openLandConfirm(false); }
+                @Override public void openUnclaimConfirm() { openLandConfirm(true); }
+            },
+            notificationCenterState,
+            new TerminalShellPanels.NotificationCenterRebuildHandler() {
+                @Override public void openNotificationTarget(String pageId, String recordId) {
+                    TerminalHomeScreen.this.openNotificationTarget(pageId, recordId);
+                }
+                @Override public void rebuildNotificationCenter() { initGui(); }
             }));
-        root.addChild(TerminalShellPanels.createNavigationRail(
-            panels,
-            layout.navigationBounds,
-            model,
+        TerminalShellFrame.addNavigation(root, panels, layout, model,
             new TerminalShellPanels.NavigationHandler() {
                 @Override
                 public void open(TerminalHomeScreenModel.NavItemModel navItem) {
                     handleNavSelection(navItem);
                 }
-            }));
+            });
         return root;
     }
 
@@ -427,7 +488,8 @@ public class TerminalHomeScreen extends CanvasScreen {
         if (navItem == null || navItem.isSelected() || !navItem.isEnabled()) {
             return;
         }
-        if (TerminalPage.fromId(navItem.getPageId()) == TerminalPage.VAULT) {
+        TerminalPage targetPage = TerminalPage.fromId(navItem.getPageId());
+        if (targetPage == TerminalPage.VAULT || targetPage == TerminalPage.WAREHOUSE) {
             sendActionToServer(new TerminalActionMessage(
                 model.getSessionToken(), navItem.getPageId(), TerminalActionType.VAULT_OPEN.getId(), "nav_click"));
             return;
@@ -478,6 +540,10 @@ public class TerminalHomeScreen extends CanvasScreen {
     }
 
     private void requestRefresh() {
+        if (TerminalPage.fromId(model.getSelectedPageId()) == TerminalPage.PROPERTY) {
+            sendLandAction(TerminalActionType.REFRESH_PAGE, landSectionState.toPayload());
+            return;
+        }
         if (isBankSectionSelected()) {
             sendActionToServer(new TerminalActionMessage(
                 model.getSessionToken(),
@@ -526,6 +592,41 @@ public class TerminalHomeScreen extends CanvasScreen {
             model.getSelectedPageId(),
             TerminalActionType.REFRESH_PAGE.getId(),
             "manual_refresh"));
+    }
+
+    private void sendLandAction(TerminalActionType actionType, TerminalLandActionPayload payload) {
+        sendActionToServer(new TerminalActionMessage(model.getSessionToken(), TerminalPage.PROPERTY.getId(),
+            actionType.getId(), (payload == null ? TerminalLandActionPayload.empty() : payload).encode()));
+    }
+
+    @Override
+    public void onGuiClosed() {
+        com.jsirgalaxybase.terminal.client.component.ClientLandTerrainCache.INSTANCE.clearAll();
+        super.onGuiClosed();
+    }
+
+    private void openLandConfirm(final boolean unclaim) {
+        TerminalLandSectionModel land = getSelectedLandModel();
+        if (land == null || (unclaim ? !land.isCanUnclaim() : !land.isCanClaim())) return;
+        final int chunkX = land.getSelectedChunkX();
+        final int chunkZ = land.getSelectedChunkZ();
+        ModalPopupPanel popup = TerminalPopupFactory.createConfirmationPopup(width, height,
+            unclaim ? "确认放弃个人地皮" : "确认认领个人地皮",
+            unclaim ? "放弃后 JGB 将立即停止保护该区块，产权审计记录仍会保留。"
+                : "认领后该区块将登记为当前玩家的个人产权。",
+            Arrays.asList("服务器: " + land.getServerId(), "维度: " + land.getDimensionId(),
+                "区块: [" + chunkX + ", " + chunkZ + "]",
+                "方块范围: X " + ((long) chunkX * 16L) + ".." + ((long) chunkX * 16L + 15L)
+                    + " / Z " + ((long) chunkZ * 16L) + ".." + ((long) chunkZ * 16L + 15L),
+                "产权版本: " + (land.getSelectedVersion() <= 0L ? "新产权" : land.getSelectedVersion())),
+            unclaim ? "确认放弃" : "确认认领", "取消", new Runnable() {
+                @Override public void run() {
+                    closePopup();
+                    sendLandAction(unclaim ? TerminalActionType.LAND_UNCLAIM : TerminalActionType.LAND_CLAIM,
+                        landSectionState.toActionPayload(unclaim ? "ui-land-unclaim" : "ui-land-claim"));
+                }
+            }, new Runnable() { @Override public void run() { closePopup(); } });
+        openPopup(popup);
     }
 
     private void requestServerToolsRefresh() {
@@ -617,6 +718,24 @@ public class TerminalHomeScreen extends CanvasScreen {
         marketSectionState.setFocusedRecordId(recordId);
         marketSectionState.setHistoryQuery(recordId == null ? "" : recordId.replaceFirst("^[COV]", ""));
         switchMarketRoute(TerminalPage.MARKET_ACCOUNT_CENTER.getId());
+    }
+
+    public void openNotificationTarget(String pageId, String recordId) {
+        TerminalPage target = TerminalPage.fromId(pageId);
+        if (target == TerminalPage.MARKET_ACCOUNT_CENTER) {
+            openAccountCenterFocused(TerminalMarketSectionState.AccountCenterTab.ASSETS_AND_DELIVERY, recordId);
+            return;
+        }
+        if (target == TerminalPage.MARKET_STANDARDIZED || target == TerminalPage.MARKET_CUSTOM
+            || target == TerminalPage.MARKET_EXCHANGE || target == TerminalPage.MARKET) {
+            switchMarketRoute(target.getId());
+            return;
+        }
+        TerminalHomeScreenModel.NavItemModel navItem = null;
+        for (TerminalHomeScreenModel.NavItemModel item : model.getNavItems()) {
+            if (item != null && target.getId().equals(item.getPageId())) { navItem = item; break; }
+        }
+        if (navItem != null) handleNavSelection(navItem);
     }
 
     @Override
@@ -1273,6 +1392,89 @@ public class TerminalHomeScreen extends CanvasScreen {
             serverToolsSectionState.toPayload().encode()));
     }
 
+    private void selectServerToolsHome(String homeName) {
+        if (homeName == null || homeName.trim().isEmpty()) return;
+        serverToolsSectionState.setSelectedHomeName(homeName);
+        serverToolsSectionState.setHomeNameDraft(homeName);
+        sendActionToServer(new TerminalActionMessage(model.getSessionToken(), TerminalPage.SERVER_TOOLS.getId(),
+            TerminalActionType.SERVER_TOOLS_SELECT_HOME.getId(), serverToolsSectionState.toHomePayload().encode()));
+    }
+
+    private void openServerToolsHomeConfirmPopup(String homeName, TerminalActionType actionType) {
+        final TerminalServerToolsSectionModel serverToolsModel = getSelectedServerToolsModel();
+        final String selectedHome = homeName == null ? "" : homeName.trim();
+        if (selectedHome.isEmpty()) return;
+        final boolean set = actionType == TerminalActionType.SERVER_TOOLS_SET_HOME;
+        final boolean delete = actionType == TerminalActionType.SERVER_TOOLS_DELETE_HOME;
+        final String title = set ? "确认设定个人 Home" : delete ? "确认删除个人 Home" : "确认前往个人 Home";
+        final String detail = set ? "将把你当前位置保存为该名称的跨服 Home。服务端会重新校验 Home 配额。"
+            : delete ? "删除后无法通过终端或 /home 使用该名称传送。" : "将通过现有 Home 与 transfer ticket 主链传送。";
+        ModalPopupPanel popup = TerminalPopupFactory.createConfirmationPopup(width, height, title, detail,
+            Arrays.asList("Home: " + selectedHome,
+                "当前服务器: " + (serverToolsModel == null ? "--" : serverToolsModel.getCurrentServerId()),
+                "目标服务器: " + (serverToolsModel == null ? "--" : serverToolsModel.getSelectedHomeTargetServerId()),
+                "目标位置: " + (serverToolsModel == null ? "--" : serverToolsModel.getSelectedHomeTargetLocation())),
+            set ? "确认设定" : delete ? "确认删除" : "确认传送", "取消", new Runnable() {
+                @Override public void run() {
+                    closePopup();
+                    serverToolsSectionState.setSelectedHomeName(selectedHome);
+                    serverToolsSectionState.setHomeNameDraft(selectedHome);
+                    sendActionToServer(new TerminalActionMessage(model.getSessionToken(), TerminalPage.SERVER_TOOLS.getId(),
+                        actionType.getId(), TerminalServerToolsActionPayload.forHome(selectedHome).encode()));
+                }
+            }, new Runnable() { @Override public void run() { closePopup(); } });
+        openPopup(popup);
+    }
+
+    private void openServerToolsTpaConfirmPopup(String operation, String playerName, String targetServerId) {
+        final TerminalServerToolsSectionModel serverToolsModel = getSelectedServerToolsModel();
+        final String otherPlayer = playerName == null ? "" : playerName.trim();
+        final String targetServer = targetServerId == null ? "" : targetServerId.trim();
+        if (otherPlayer.isEmpty()) return;
+        final String action = operation == null ? "" : operation.trim().toLowerCase(java.util.Locale.ROOT);
+        final TerminalActionType actionType;
+        final String title;
+        final String detail;
+        final String confirm;
+        if ("request".equals(action)) {
+            if (targetServer.isEmpty()) return;
+            actionType = TerminalActionType.SERVER_TOOLS_TPA_REQUEST;
+            title = "确认发送跨服 TPA 请求";
+            detail = "请求会交给目标服上的对方确认；接受后才会由你当前所在服务器派发既有跨服 ticket。";
+            confirm = "发送请求";
+        } else if ("accept".equals(action)) {
+            actionType = TerminalActionType.SERVER_TOOLS_TPA_ACCEPT;
+            title = "确认接受 TPA 请求";
+            detail = "接受只记录你当前位置；请求者是否在线及最终跨服传送仍由服务端重新校验。";
+            confirm = "确认接受";
+        } else if ("deny".equals(action)) {
+            actionType = TerminalActionType.SERVER_TOOLS_TPA_DENY;
+            title = "确认拒绝 TPA 请求";
+            detail = "这会关闭当前待确认请求，无法撤销。";
+            confirm = "确认拒绝";
+        } else if ("cancel".equals(action)) {
+            if (targetServer.isEmpty()) return;
+            actionType = TerminalActionType.SERVER_TOOLS_TPA_CANCEL;
+            title = "确认取消 TPA 请求";
+            detail = "仅仍处于待确认状态的、由你发出的请求会被取消。";
+            confirm = "确认取消";
+        } else {
+            return;
+        }
+        ModalPopupPanel popup = TerminalPopupFactory.createConfirmationPopup(width, height, title, detail,
+            Arrays.asList("另一位玩家: " + otherPlayer,
+                "当前服务器: " + (serverToolsModel == null ? "--" : serverToolsModel.getCurrentServerId()),
+                "目标服务器: " + (targetServer.isEmpty() ? "当前服" : targetServer),
+                "操作: " + confirm), confirm, "取消", new Runnable() {
+                @Override public void run() {
+                    closePopup();
+                    sendActionToServer(new TerminalActionMessage(model.getSessionToken(), TerminalPage.SERVER_TOOLS.getId(),
+                        actionType.getId(), TerminalServerToolsActionPayload.forTpa(otherPlayer, targetServer).encode()));
+                }
+            }, new Runnable() { @Override public void run() { closePopup(); } });
+        openPopup(popup);
+    }
+
     private void openServerToolsWarpConfirmPopup(String warpName) {
         final TerminalServerToolsSectionModel serverToolsModel = getSelectedServerToolsModel();
         final String selectedWarp = warpName == null || warpName.trim().isEmpty()
@@ -1310,6 +1512,50 @@ public class TerminalHomeScreen extends CanvasScreen {
                 public void run() {
                     closePopup();
                 }
+            });
+        openPopup(popup);
+    }
+
+    private void openServerToolsQuickConfirmPopup(String quickAction) {
+        final TerminalServerToolsSectionModel serverToolsModel = getSelectedServerToolsModel();
+        final String action = quickAction == null ? "" : quickAction.trim().toLowerCase(java.util.Locale.ROOT);
+        final String title;
+        final String detail;
+        if ("home".equals(action)) {
+            title = "确认回到默认家园";
+            detail = "将使用已有 /home 默认家园记录；若未设置，服务端会拒绝并返回原因。";
+        } else if ("back".equals(action)) {
+            title = "确认返回上一位置";
+            detail = "将使用已有 /back 记录；若没有有效记录，服务端会拒绝并返回原因。";
+        } else if ("spawn".equals(action)) {
+            title = "确认前往当前服出生点";
+            detail = "将使用当前世界出生点并由服务端执行传送。";
+        } else {
+            return;
+        }
+        ModalPopupPanel popup = TerminalPopupFactory.createConfirmationPopup(
+            width,
+            height,
+            title,
+            detail,
+            Arrays.asList(
+                "当前服务器: " + (serverToolsModel == null ? "--" : serverToolsModel.getCurrentServerId()),
+                "动作: " + action),
+            "确认传送",
+            "取消",
+            new Runnable() {
+                @Override
+                public void run() {
+                    closePopup();
+                    sendActionToServer(new TerminalActionMessage(
+                        model.getSessionToken(),
+                        TerminalPage.SERVER_TOOLS.getId(),
+                        TerminalActionType.SERVER_TOOLS_CONFIRM_QUICK.getId(),
+                        TerminalServerToolsActionPayload.forQuickAction(action).encode()));
+                }
+            },
+            new Runnable() {
+                @Override public void run() { closePopup(); }
             });
         openPopup(popup);
     }
@@ -1430,6 +1676,17 @@ public class TerminalHomeScreen extends CanvasScreen {
         serverToolsSectionState.applyModel(serverToolsSnapshot == null ? null : serverToolsSnapshot.getServerToolsSectionModel());
     }
 
+    private void syncLandSectionStateFromModel(TerminalHomeScreenModel model) {
+        if (model == null) return;
+        TerminalHomeScreenModel.PageSnapshotModel snapshot = model.getPageSnapshot(TerminalPage.PROPERTY.getId());
+        landSectionState.applyModel(snapshot == null ? null : snapshot.getLandSectionModel());
+    }
+
+    private TerminalLandSectionModel getSelectedLandModel() {
+        TerminalHomeScreenModel.PageSnapshotModel snapshot = model.getPageSnapshot(TerminalPage.PROPERTY.getId());
+        return snapshot == null ? null : snapshot.getLandSectionModel();
+    }
+
     private String findClaimLine(TerminalMarketSectionModel marketModel, String custodyId) {
         if (marketModel == null || custodyId == null) {
             return "当前没有 claim 明细。";
@@ -1484,35 +1741,4 @@ public class TerminalHomeScreen extends CanvasScreen {
         return normalized.length() <= 8 ? normalized : normalized.substring(normalized.length() - 8);
     }
 
-    private static final class BackdropPanel extends PanelContainer {
-
-        private final GuiRect panelBounds;
-
-        private BackdropPanel(int width, int height, GuiRect panelBounds) {
-            setBounds(new GuiRect(0, 0, width, height));
-            this.panelBounds = panelBounds == null ? new GuiRect(0, 0, 0, 0) : panelBounds;
-        }
-
-        @Override
-        protected void drawSelf(GuiScene scene, int mouseX, int mouseY, float partialTicks) {
-            GuiRect bounds = getBounds();
-            int overlay = 0x99000000;
-            if (panelBounds.getWidth() <= 0 || panelBounds.getHeight() <= 0) {
-                Gui.drawRect(bounds.getX(), bounds.getY(), bounds.getRight(), bounds.getBottom(), overlay);
-                return;
-            }
-            if (panelBounds.getY() > bounds.getY()) {
-                Gui.drawRect(bounds.getX(), bounds.getY(), bounds.getRight(), panelBounds.getY(), overlay);
-            }
-            if (panelBounds.getBottom() < bounds.getBottom()) {
-                Gui.drawRect(bounds.getX(), panelBounds.getBottom(), bounds.getRight(), bounds.getBottom(), overlay);
-            }
-            if (panelBounds.getX() > bounds.getX()) {
-                Gui.drawRect(bounds.getX(), panelBounds.getY(), panelBounds.getX(), panelBounds.getBottom(), overlay);
-            }
-            if (panelBounds.getRight() < bounds.getRight()) {
-                Gui.drawRect(panelBounds.getRight(), panelBounds.getY(), bounds.getRight(), panelBounds.getBottom(), overlay);
-            }
-        }
-    }
 }

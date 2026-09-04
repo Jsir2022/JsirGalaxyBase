@@ -197,8 +197,27 @@ public class MarketRecoveryService {
                 long releasableFunds = existingOrder.isPresent() ? existingOrder.get().getReservedFunds()
                     : metadata.getLong("reservedFunds", 0L);
                 String releaseRequestId = metadata.get("releaseRequestId");
+                boolean freezeRecorded = settlementFacade.hasBankTransactionForRequest(
+                    buildBankRequestId(candidate.getRequestId(), "freeze"));
+                boolean releaseRecorded = settlementFacade.hasBankTransactionForRequest(releaseRequestId);
 
-                if (releaseRequestId != null && releasableFunds > 0L) {
+                // A market operation can outlive a transaction rollback from an older server build.
+                // Do not release an aggregate account frozen balance merely because the operation metadata
+                // says that a freeze was attempted: without either the order or the formal freeze posting,
+                // there is no authoritative hold left to release. This also lets the startup scan repair
+                // the historical same-account-transfer bug without touching unrelated current holds.
+                if (!existingOrder.isPresent() && !freezeRecorded && !releaseRecorded) {
+                    metadata = metadata.toBuilder()
+                        .putBoolean("fundsReleased", true)
+                        .put("recoveryDisposition", "NO_PERSISTED_FREEZE_OR_ORDER")
+                        .build();
+                    return operationLogRepository.update(candidate.withState(MarketOperationStatus.COMPLETED,
+                        candidate.getRelatedOrderId(), candidate.getRelatedCustodyId(), candidate.getRelatedTradeId(),
+                        "buy-side recovery confirmed no persisted order or freeze ledger entry; rollback was already safe",
+                        metadata.toKey(), Instant.now()));
+                }
+
+                if (releaseRequestId != null && releasableFunds > 0L && !releaseRecorded) {
                     BankAccount buyerAccount = settlementFacade.requirePlayerAccount(candidate.getPlayerRef());
                     settlementFacade.releaseBuyerFunds(new FrozenBalanceCommand(releaseRequestId,
                         BankTransactionType.MARKET_FUNDS_RELEASE, BankBusinessType.MARKET_ORDER_CANCEL_RELEASE,
@@ -208,6 +227,11 @@ public class MarketRecoveryService {
                         buildOrderBusinessRef("buy-recovery-release", existingOrder.isPresent()
                             ? String.valueOf(existingOrder.get().getOrderId()) : candidate.getRequestId()),
                         "{\"marketRequestId\":\"" + candidate.getRequestId() + "\"}"));
+                    metadata = metadata.toBuilder()
+                        .putBoolean("fundsReleased", true)
+                        .putLong("releasedFunds", releasableFunds)
+                        .build();
+                } else if (releaseRecorded) {
                     metadata = metadata.toBuilder()
                         .putBoolean("fundsReleased", true)
                         .putLong("releasedFunds", releasableFunds)
@@ -300,6 +324,10 @@ public class MarketRecoveryService {
 
     private String buildOrderBusinessRef(String action, Object ref) {
         return "market:" + action + ":" + String.valueOf(ref);
+    }
+
+    private String buildBankRequestId(String marketRequestId, String suffix) {
+        return marketRequestId + ":" + suffix;
     }
 
     private static final class DirectTransactionRunner implements MarketTransactionRunner {

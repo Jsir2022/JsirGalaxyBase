@@ -15,6 +15,7 @@ import com.jsirgalaxybase.modules.servertools.domain.ServerWarp;
 import com.jsirgalaxybase.modules.servertools.domain.TeleportActor;
 import com.jsirgalaxybase.modules.servertools.domain.TeleportDispatchPlan;
 import com.jsirgalaxybase.modules.servertools.domain.TeleportKind;
+import com.jsirgalaxybase.modules.servertools.domain.TargetServerRtpProfile;
 import com.jsirgalaxybase.modules.servertools.domain.TpaRequest;
 import com.jsirgalaxybase.modules.servertools.domain.TpaRequestStatus;
 import com.jsirgalaxybase.modules.servertools.port.PlayerPermissionPolicy;
@@ -129,28 +130,111 @@ public class PlayerTeleportService {
         return repository.saveTpaRequest(request);
     }
 
-    public TeleportDispatchPlan acceptTpa(TeleportActor acceptor, String requestId, String requesterPlayerName,
-        Instant now) {
+    public TpaRequest acceptTpa(TeleportActor acceptor, String requesterPlayerName, Instant now) {
         repository.expirePendingTpaRequests(now);
-        TpaRequest request = repository.findPendingTpaRequest(requesterPlayerName, acceptor.getPlayerName(),
-            acceptor.getSourceServerId(), now).orElse(null);
+        TpaRequest request = repository.acceptPendingTpaRequest(normalizePlayerName(requesterPlayerName),
+            acceptor.getPlayerName(), acceptor.getSourceServerId(), acceptor.getCurrentLocation(), now).orElse(null);
         if (request == null) {
             throw newNotFound("No pending TPA request from " + requesterPlayerName + " is available on this server");
         }
-        saveBackRecord(request.getRequesterPlayerUuid(), TeleportKind.TPA, request.getRequesterOrigin(), now);
-        repository.updateTpaRequest(request.withStatus(TpaRequestStatus.ACCEPTED, now));
-        return buildPlan(requestId, request.getRequesterPlayerUuid(), request.getRequesterPlayerName(),
-            request.getRequesterServerId(), TeleportKind.TPA, acceptor.getCurrentLocation());
+        return request;
+    }
+
+    public TpaRequest declineTpa(TeleportActor decliner, String requesterPlayerName, Instant now) {
+        repository.expirePendingTpaRequests(now);
+        TpaRequest request = repository.declinePendingTpaRequest(normalizePlayerName(requesterPlayerName),
+            decliner.getPlayerName(), decliner.getSourceServerId(), now).orElse(null);
+        if (request == null) {
+            throw newNotFound("No pending TPA request from " + requesterPlayerName + " is available on this server");
+        }
+        return request;
+    }
+
+    public TpaRequest cancelTpa(TeleportActor requester, String targetPlayerName, String targetServerId, Instant now) {
+        repository.expirePendingTpaRequests(now);
+        TpaRequest request = repository.cancelPendingTpaRequest(requester.getPlayerUuid(),
+            normalizePlayerName(targetPlayerName), requireText(targetServerId, "targetServerId").trim(), now)
+            .orElse(null);
+        if (request == null) {
+            throw newNotFound("No pending TPA request for " + targetPlayerName + " is available");
+        }
+        return request;
+    }
+
+    public List<TpaRequest> listPendingTpaRequestsForTarget(String targetServerId, String targetPlayerName,
+        Instant now) {
+        return repository.listPendingTpaRequestsForTarget(requireText(targetServerId, "targetServerId"),
+            normalizePlayerName(targetPlayerName), now);
+    }
+
+    public List<TpaRequest> listRecentTpaRequestsForRequester(String requesterServerId, String requesterPlayerUuid,
+        int limit) {
+        return repository.listRecentTpaRequestsForRequester(requireText(requesterServerId, "requesterServerId"),
+            requireText(requesterPlayerUuid, "requesterPlayerUuid"), limit);
+    }
+
+    public List<TpaRequest> listRecentTpaRequestsForTarget(String targetServerId, String targetPlayerName, int limit) {
+        return repository.listRecentTpaRequestsForTarget(requireText(targetServerId, "targetServerId"),
+            normalizePlayerName(targetPlayerName), limit);
+    }
+
+    public TeleportDispatchPlan prepareAcceptedTpaTeleport(TeleportActor requester, TpaRequest request, Instant now) {
+        if (request == null || request.getStatus() != TpaRequestStatus.ACCEPTED
+            || request.getAcceptedTarget() == null || !request.getExpiresAt().isAfter(now)
+            || !requester.getPlayerUuid().equals(request.getRequesterPlayerUuid())
+            || !requester.getSourceServerId().equals(request.getRequesterServerId())) {
+            throw new ServerToolsException("Accepted TPA request is no longer dispatchable");
+        }
+        saveBackRecord(requester, TeleportKind.TPA, requester.getCurrentLocation(), now);
+        return buildPlan(tpaDispatchRequestId(request), requester.getPlayerUuid(), requester.getPlayerName(),
+            requester.getSourceServerId(), TeleportKind.TPA, request.getAcceptedTarget());
+    }
+
+    public List<TpaRequest> listAcceptedTpaRequestsForRequester(String requesterServerId, String requesterPlayerUuid,
+        Instant now) {
+        return repository.listAcceptedTpaRequestsForRequester(requireText(requesterServerId, "requesterServerId"),
+            requireText(requesterPlayerUuid, "requesterPlayerUuid"), now);
+    }
+
+    public int expirePendingTpaRequests(Instant now) {
+        return repository.expirePendingTpaRequests(now);
+    }
+
+    public static String tpaDispatchRequestId(TpaRequest request) {
+        return "tpa-dispatch-" + request.getRequestId();
     }
 
     public TeleportDispatchPlan prepareRandomTeleport(TeleportActor actor, String requestId, TeleportTarget target,
         Instant now) {
         permissionPolicy.validateTeleport(actor, TeleportKind.RTP, target);
         saveBackRecord(actor, TeleportKind.RTP, actor.getCurrentLocation(), now);
-        repository.saveRandomTeleportRecord(new RandomTeleportRecord(0L, actor.getPlayerUuid(),
+        repository.saveRandomTeleportRecord(new RandomTeleportRecord(0L, requestId, actor.getPlayerUuid(),
             actor.getSourceServerId(), target, now));
         return buildPlan(requestId, actor.getPlayerUuid(), actor.getPlayerName(), actor.getSourceServerId(),
             TeleportKind.RTP, target);
+    }
+
+    /**
+     * Creates only the cross-server ticket plan. The target server selects and
+     * audits the actual safe block after the player arrives; source servers
+     * never read or load a remote world to fake that decision.
+     */
+    public TeleportDispatchPlan prepareTargetServerRandomTeleport(TeleportActor actor, String requestId,
+        TargetServerRtpProfile profile, Instant now) {
+        if (profile == null) throw new IllegalArgumentException("target RTP profile must not be null");
+        validateTargetServer(profile.getServerId());
+        TeleportTarget target = profile.getFallbackTarget();
+        permissionPolicy.validateTeleport(actor, TeleportKind.RTP, target);
+        saveBackRecord(actor, TeleportKind.RTP, actor.getCurrentLocation(), now);
+        return buildPlan(requestId, actor.getPlayerUuid(), actor.getPlayerName(), actor.getSourceServerId(),
+            TeleportKind.RTP, target);
+    }
+
+    public RandomTeleportRecord recordResolvedTargetServerRandomTeleport(String requestId, String playerUuid,
+        String sourceServerId, TeleportTarget resolvedTarget, Instant now) {
+        if (resolvedTarget == null) throw new IllegalArgumentException("resolved target must not be null");
+        return repository.saveRandomTeleportRecord(new RandomTeleportRecord(0L, requireText(requestId, "requestId"),
+            requireText(playerUuid, "playerUuid"), requireText(sourceServerId, "sourceServerId"), resolvedTarget, now));
     }
 
     private void saveBackRecord(TeleportActor actor, TeleportKind teleportKind, TeleportTarget target, Instant now) {

@@ -71,7 +71,12 @@ public final class TerminalPanelFactory {
     }
 
     public PanelContainer createNotificationCard(GuiRect bounds, TerminalHomeScreenModel.NotificationModel model) {
-        NotificationCardPanel panel = new NotificationCardPanel(model);
+        return createNotificationCard(bounds, model, null);
+    }
+
+    public PanelContainer createNotificationCard(GuiRect bounds, TerminalHomeScreenModel.NotificationModel model,
+        Runnable onClick) {
+        NotificationCardPanel panel = new NotificationCardPanel(model, onClick);
         panel.setBounds(bounds);
         return panel;
     }
@@ -165,13 +170,18 @@ public final class TerminalPanelFactory {
 
     private static final class NotificationCardPanel extends PanelContainer {
 
+        private static final ResourceLocation CLICK_SOUND = new ResourceLocation("gui.button.press");
+
         private final TerminalHomeScreenModel.NotificationModel model;
         private final LabelPanel titleLabel;
         private final LabelPanel bodyLabel;
+        private final Runnable onClick;
+        private boolean pressed;
 
-        private NotificationCardPanel(TerminalHomeScreenModel.NotificationModel model) {
+        private NotificationCardPanel(TerminalHomeScreenModel.NotificationModel model, Runnable onClick) {
             this.model = model == null ? TerminalHomeScreenModel.NotificationModel.placeholder("终端通知", "当前没有通知内容。", "INFO")
                 : model;
+            this.onClick = onClick;
             this.titleLabel = new LabelPanel(new Supplier<String>() {
                 @Override
                 public String get() {
@@ -207,6 +217,21 @@ public final class TerminalPanelFactory {
                 severity.getBackgroundColor());
             Gui.drawRect(bounds.getX() + 1, bounds.getY() + 1, bounds.getX() + 5, bounds.getBottom() - 1,
                 severity.getAccentColor());
+        }
+
+        @Override public boolean mouseClicked(GuiScene scene, int mouseX, int mouseY, int mouseButton) {
+            pressed = onClick != null && mouseButton == 0 && contains(mouseX, mouseY);
+            return pressed;
+        }
+
+        @Override public boolean mouseReleased(GuiScene scene, int mouseX, int mouseY, int mouseButton) {
+            boolean clicked = pressed && mouseButton == 0 && contains(mouseX, mouseY);
+            pressed = false;
+            if (!clicked) return false;
+            Minecraft minecraft = Minecraft.getMinecraft();
+            if (minecraft != null) minecraft.getSoundHandler().playSound(PositionedSoundRecord.func_147674_a(CLICK_SOUND, 1.0F));
+            onClick.run();
+            return true;
         }
     }
 }

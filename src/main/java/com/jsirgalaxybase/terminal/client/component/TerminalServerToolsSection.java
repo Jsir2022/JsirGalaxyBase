@@ -28,6 +28,9 @@ public final class TerminalServerToolsSection extends PanelContainer {
     private static final int HEADER_HEIGHT = 12;
     private static final int ENTRY_HEIGHT = 48;
     private static final int NARROW_STACK_THRESHOLD = 300;
+    private static final int QUICK_ACTION_BLOCK_HEIGHT = 42;
+    private static final int HOME_MANAGEMENT_BLOCK_HEIGHT = 88;
+    private static final int TPA_BLOCK_HEIGHT = 154;
     private static final int DETAIL_BLOCK_HEIGHT = 82;
     private static final int RECENT_BLOCK_HEIGHT = 94;
     private static final int FEEDBACK_HEIGHT = 32;
@@ -38,6 +41,20 @@ public final class TerminalServerToolsSection extends PanelContainer {
         void selectWarp(String warpName);
 
         void confirmWarp();
+
+        void confirmQuickAction(String quickAction);
+
+        void selectHome(String homeName);
+
+        void confirmHome();
+
+        void setHome(String homeName);
+
+        void deleteHome(String homeName);
+
+        void requestTpa(String playerName, String targetServerId);
+
+        void respondTpa(String direction, String playerName, String targetServerId, String status);
     }
 
     private final TerminalPanelFactory panels;
@@ -54,6 +71,9 @@ public final class TerminalServerToolsSection extends PanelContainer {
     private final LabelPanel warpListDirectoryLabel;
     private final LabelPanel warpListFootnoteLabel;
 
+    private final QuickActionPanel quickActionPanel;
+    private final HomeManagementPanel homeManagementPanel;
+    private final TpaPanel tpaPanel;
     private final DetailBlockPanel detailBlockPanel;
     private final RecentBlockPanel recentBlockPanel;
     private final ActionFeedbackPanel feedbackPanel;
@@ -91,6 +111,9 @@ public final class TerminalServerToolsSection extends PanelContainer {
             }
         }, ThemeColorKey.TEXT_SECONDARY, false);
 
+        this.quickActionPanel = new QuickActionPanel();
+        this.homeManagementPanel = new HomeManagementPanel();
+        this.tpaPanel = new TpaPanel();
         this.detailBlockPanel = new DetailBlockPanel();
         this.recentBlockPanel = new RecentBlockPanel();
         this.feedbackPanel = new ActionFeedbackPanel();
@@ -168,9 +191,23 @@ public final class TerminalServerToolsSection extends PanelContainer {
             final String stateLabel = getListValue(model.getWarpStateLabels(), index);
             warpListScroll.addScrollableChild(new WarpEntryPanel(warpName, title, subtitle, stateLabel), ENTRY_HEIGHT);
         }
+        int homeCount = Math.max(model.getHomeNames().size(), model.getHomeLines().size());
+        for (int index = 0; index < homeCount; index++) {
+            homeListScrollEntry(index);
+        }
+    }
+
+    private void homeListScrollEntry(int index) {
+        final String homeName = getListValue(model.getHomeNames(), index);
+        final String title = getListValue(model.getHomeLines(), index);
+        final String subtitle = getListValue(model.getHomeSubtitles(), index);
+        warpListScroll.addScrollableChild(new HomeEntryPanel(homeName, title, subtitle), 34);
     }
 
     private void configureWorkspaceCard() {
+        workspaceScroll.addScrollableChild(quickActionPanel, QUICK_ACTION_BLOCK_HEIGHT);
+        workspaceScroll.addScrollableChild(homeManagementPanel, HOME_MANAGEMENT_BLOCK_HEIGHT);
+        workspaceScroll.addScrollableChild(tpaPanel, TPA_BLOCK_HEIGHT);
         workspaceScroll.addScrollableChild(detailBlockPanel, DETAIL_BLOCK_HEIGHT);
         workspaceScroll.addScrollableChild(recentBlockPanel, RECENT_BLOCK_HEIGHT);
         workspaceScroll.addScrollableChild(feedbackPanel, FEEDBACK_HEIGHT);
@@ -447,6 +484,62 @@ public final class TerminalServerToolsSection extends PanelContainer {
         return value;
     }
 
+    private final class QuickActionPanel extends PanelContainer {
+
+        private final LabelPanel headerLabel;
+        private final ButtonPanel homeButton;
+        private final ButtonPanel backButton;
+        private final ButtonPanel spawnButton;
+
+        private QuickActionPanel() {
+            headerLabel = headerLabel("快捷传送");
+            homeButton = createQuickActionButton("回家", "home");
+            backButton = createQuickActionButton("返回", "back");
+            spawnButton = createQuickActionButton("出生点", "spawn");
+            addChild(headerLabel);
+            addChild(homeButton);
+            addChild(backButton);
+            addChild(spawnButton);
+        }
+
+        private ButtonPanel createQuickActionButton(final String label, final String action) {
+            return panels.createButton(new GuiRect(0, 0, 0, 0), new Supplier<String>() {
+                @Override public String get() { return label; }
+            }, new Runnable() {
+                @Override public void run() {
+                    if (actionHandler != null) actionHandler.confirmQuickAction(action);
+                }
+            }, new Supplier<Boolean>() {
+                @Override public Boolean get() { return Boolean.TRUE; }
+            });
+        }
+
+        @Override
+        public void setBounds(GuiRect bounds) {
+            super.setBounds(bounds);
+            GuiRect panelBounds = getBounds();
+            int innerX = panelBounds.getX() + 6;
+            int innerWidth = Math.max(0, panelBounds.getWidth() - 12);
+            headerLabel.setBounds(new GuiRect(innerX, panelBounds.getY() + 5, innerWidth, HEADER_HEIGHT));
+            int buttonY = panelBounds.getY() + 19;
+            int gap = 3;
+            int buttonWidth = Math.max(28, (innerWidth - gap * 2) / 3);
+            homeButton.setBounds(new GuiRect(innerX, buttonY, buttonWidth, TerminalLayoutMetrics.BUTTON_HEIGHT));
+            backButton.setBounds(new GuiRect(innerX + buttonWidth + gap, buttonY, buttonWidth,
+                TerminalLayoutMetrics.BUTTON_HEIGHT));
+            spawnButton.setBounds(new GuiRect(innerX + (buttonWidth + gap) * 2, buttonY,
+                Math.max(0, innerWidth - (buttonWidth + gap) * 2), TerminalLayoutMetrics.BUTTON_HEIGHT));
+        }
+
+        @Override
+        protected void drawSelf(GuiScene scene, int mouseX, int mouseY, float partialTicks) {
+            GuiRect bounds = getBounds();
+            Gui.drawRect(bounds.getX(), bounds.getY(), bounds.getRight(), bounds.getBottom(), 0xFF25313E);
+            Gui.drawRect(bounds.getX() + 1, bounds.getY() + 1, bounds.getRight() - 1, bounds.getBottom() - 1,
+                0xFF16212C);
+        }
+    }
+
     private TerminalNotificationSeverity resolveRecentSeverity() {
         String status = model.getRecentTransferStatus() == null ? "" : model.getRecentTransferStatus().toLowerCase();
         if (status.contains("complete") || status.contains("success") || status.contains("成功")) {
@@ -575,6 +668,271 @@ public final class TerminalServerToolsSection extends PanelContainer {
             Gui.drawRect(bounds.getX(), bounds.getY(), bounds.getRight(), bounds.getBottom(), 0xFF25313E);
             Gui.drawRect(bounds.getX() + 1, bounds.getY() + 1, bounds.getRight() - 1, bounds.getBottom() - 1, 0xFF16212C);
         }
+    }
+
+    private final class HomeEntryPanel extends PanelContainer {
+
+        private final String homeName;
+        private final LabelPanel titleLabel;
+        private final LabelPanel subtitleLabel;
+        private boolean pressed;
+
+        private HomeEntryPanel(final String homeName, final String title, final String subtitle) {
+            this.homeName = homeName == null ? "" : homeName.trim();
+            this.titleLabel = panels.createLabel(new GuiRect(0, 0, 0, 0), new Supplier<String>() {
+                @Override public String get() { return title == null || title.trim().isEmpty() ? "个人 Home" : title.trim(); }
+            }, ThemeColorKey.TEXT_PRIMARY, false);
+            this.subtitleLabel = panels.createLabel(new GuiRect(0, 0, 0, 0), new Supplier<String>() {
+                @Override public String get() { return subtitle == null ? "" : subtitle.trim(); }
+            }, ThemeColorKey.TEXT_SECONDARY, false);
+            addChild(titleLabel);
+            addChild(subtitleLabel);
+        }
+
+        @Override public void setBounds(GuiRect bounds) {
+            super.setBounds(bounds);
+            titleLabel.setBounds(new GuiRect(bounds.getX() + 25, bounds.getY() + 4, Math.max(24, bounds.getWidth() - 32), 10));
+            subtitleLabel.setBounds(new GuiRect(bounds.getX() + 25, bounds.getY() + 16, Math.max(24, bounds.getWidth() - 32), 10));
+        }
+
+        @Override protected void drawSelf(GuiScene scene, int mouseX, int mouseY, float partialTicks) {
+            GuiRect bounds = getBounds();
+            boolean selected = homeName.equals(model.getSelectedHomeName()) || homeName.equals(state.getSelectedHomeName());
+            boolean enabled = !homeName.isEmpty();
+            Gui.drawRect(bounds.getX(), bounds.getY(), bounds.getRight(), bounds.getBottom(), selected ? 0xFF5E9FD8 : 0xFF1A1E26);
+            Gui.drawRect(bounds.getX() + 1, bounds.getY() + 1, bounds.getRight() - 1, bounds.getBottom() - 1,
+                enabled ? selected ? 0xFF18314A : 0xFF12202D : 0xFF10161D);
+            Gui.drawRect(bounds.getX() + 7, bounds.getY() + 9, bounds.getX() + 17, bounds.getY() + 19, 0xFF65B95A);
+            Gui.drawRect(bounds.getX() + 9, bounds.getY() + 11, bounds.getX() + 15, bounds.getY() + 17, 0xFF173623);
+        }
+
+        @Override public boolean mouseClicked(GuiScene scene, int mouseX, int mouseY, int mouseButton) {
+            pressed = mouseButton == 0 && !homeName.isEmpty() && contains(mouseX, mouseY);
+            return pressed;
+        }
+
+        @Override public boolean mouseReleased(GuiScene scene, int mouseX, int mouseY, int mouseButton) {
+            boolean click = pressed && mouseButton == 0 && contains(mouseX, mouseY);
+            pressed = false;
+            if (!click) return false;
+            state.setSelectedHomeName(homeName);
+            state.setHomeNameDraft(homeName);
+            if (actionHandler != null) actionHandler.selectHome(homeName);
+            return true;
+        }
+    }
+
+    private final class HomeManagementPanel extends PanelContainer {
+
+        private final LabelPanel header;
+        private final LabelPanel target;
+        private final TerminalTextFieldPanel homeNameField;
+        private final ButtonPanel setButton;
+        private final ButtonPanel goButton;
+        private final ButtonPanel deleteButton;
+
+        private HomeManagementPanel() {
+            header = headerLabel("个人 Home");
+            target = panels.createLabel(new GuiRect(0, 0, 0, 0), new Supplier<String>() {
+                @Override public String get() {
+                    String name = model.getSelectedHomeName();
+                    return name.isEmpty() ? "输入名称后可在当前位置设定" : name + " -> " + compactServerDisplay(model.getSelectedHomeTargetServerId());
+                }
+            }, ThemeColorKey.TEXT_SECONDARY, false);
+            homeNameField = new TerminalTextFieldPanel(new Supplier<String>() {
+                @Override public String get() { return state.getHomeNameDraft(); }
+            }, new java.util.function.Consumer<String>() {
+                @Override public void accept(String value) { state.setHomeNameDraft(value); }
+            }, new Supplier<Boolean>() {
+                @Override public Boolean get() { return state.isFocused(TerminalServerToolsSectionState.FocusField.HOME); }
+            }, new Runnable() {
+                @Override public void run() { state.focus(TerminalServerToolsSectionState.FocusField.HOME); }
+            }, "Home 名称", 32, new java.util.function.Predicate<Character>() {
+                @Override public boolean test(Character value) {
+                    char c = value == null ? 0 : value.charValue();
+                    return Character.isLetterOrDigit(c) || c == '_' || c == '-';
+                }
+            });
+            setButton = homeButton("设定", new Runnable() { @Override public void run() {
+                if (actionHandler != null) actionHandler.setHome(state.getHomeNameDraft());
+            }});
+            goButton = homeButton("前往", new Runnable() { @Override public void run() {
+                if (actionHandler != null) actionHandler.confirmHome();
+            }});
+            deleteButton = homeButton("删除", new Runnable() { @Override public void run() {
+                if (actionHandler != null) actionHandler.deleteHome(state.getSelectedHomeName());
+            }});
+            addChild(header); addChild(target); addChild(homeNameField); addChild(setButton); addChild(goButton); addChild(deleteButton);
+        }
+
+        private ButtonPanel homeButton(final String label, Runnable click) {
+            return panels.createButton(new GuiRect(0, 0, 0, 0), new Supplier<String>() {
+                @Override public String get() { return label; }
+            }, click, new Supplier<Boolean>() { @Override public Boolean get() { return Boolean.TRUE; } });
+        }
+
+        @Override public void setBounds(GuiRect bounds) {
+            super.setBounds(bounds); int x = bounds.getX() + 6; int width = Math.max(0, bounds.getWidth() - 12);
+            header.setBounds(new GuiRect(x, bounds.getY() + 4, width, 10));
+            target.setBounds(new GuiRect(x, bounds.getY() + 15, width, 10));
+            homeNameField.setBounds(new GuiRect(x, bounds.getY() + 27, width, 14));
+            int gap = 3; int buttonWidth = Math.max(24, (width - gap * 2) / 3); int buttonY = bounds.getY() + 48;
+            setButton.setBounds(new GuiRect(x, buttonY, buttonWidth, TerminalLayoutMetrics.BUTTON_HEIGHT));
+            goButton.setBounds(new GuiRect(x + buttonWidth + gap, buttonY, buttonWidth, TerminalLayoutMetrics.BUTTON_HEIGHT));
+            deleteButton.setBounds(new GuiRect(x + (buttonWidth + gap) * 2, buttonY, Math.max(0, width - (buttonWidth + gap) * 2), TerminalLayoutMetrics.BUTTON_HEIGHT));
+        }
+
+        @Override protected void drawSelf(GuiScene scene, int mouseX, int mouseY, float partialTicks) {
+            GuiRect b = getBounds(); Gui.drawRect(b.getX(), b.getY(), b.getRight(), b.getBottom(), 0xFF25313E);
+            Gui.drawRect(b.getX() + 1, b.getY() + 1, b.getRight() - 1, b.getBottom() - 1, 0xFF16212C);
+        }
+    }
+
+    /** Compact TPA form plus only this player's recent incoming/outgoing requests. */
+    private final class TpaPanel extends PanelContainer {
+
+        private final LabelPanel header;
+        private final LabelPanel hint;
+        private final TerminalTextFieldPanel playerField;
+        private final TerminalTextFieldPanel serverField;
+        private final ButtonPanel requestButton;
+        private final java.util.List<TpaEntryPanel> entries = new java.util.ArrayList<TpaEntryPanel>();
+
+        private TpaPanel() {
+            header = headerLabel("跨服 TPA");
+            hint = panels.createLabel(new GuiRect(0, 0, 0, 0), new Supplier<String>() {
+                @Override public String get() { return "输入玩家名与目标服务器；状态以服务端为准。"; }
+            }, ThemeColorKey.TEXT_SECONDARY, false);
+            playerField = textField(TerminalServerToolsSectionState.FocusField.TPA_PLAYER, "玩家名", 32,
+                new Supplier<String>() { @Override public String get() { return state.getTpaPlayerNameDraft(); } },
+                new java.util.function.Consumer<String>() { @Override public void accept(String value) {
+                    state.setTpaPlayerNameDraft(value);
+                }});
+            serverField = textField(TerminalServerToolsSectionState.FocusField.TPA_SERVER, "目标服务器 ID", 64,
+                new Supplier<String>() { @Override public String get() { return state.getTpaTargetServerIdDraft(); } },
+                new java.util.function.Consumer<String>() { @Override public void accept(String value) {
+                    state.setTpaTargetServerIdDraft(value);
+                }});
+            requestButton = panels.createButton(new GuiRect(0, 0, 0, 0), new Supplier<String>() {
+                @Override public String get() { return "发送请求"; }
+            }, new Runnable() { @Override public void run() {
+                if (actionHandler != null) actionHandler.requestTpa(state.getTpaPlayerNameDraft(),
+                    state.getTpaTargetServerIdDraft());
+            }}, new Supplier<Boolean>() { @Override public Boolean get() {
+                return Boolean.valueOf(!state.getTpaPlayerNameDraft().isEmpty() && !state.getTpaTargetServerIdDraft().isEmpty());
+            }});
+            addChild(header); addChild(hint); addChild(playerField); addChild(serverField); addChild(requestButton);
+            int count = Math.min(4, Math.min(model.getTpaDirections().size(), Math.min(model.getTpaCounterpartyNames().size(),
+                Math.min(model.getTpaTargetServerIds().size(), model.getTpaStatusLabels().size()))));
+            for (int index = 0; index < count; index++) {
+                TpaEntryPanel entry = new TpaEntryPanel(getListValue(model.getTpaDirections(), index),
+                    getListValue(model.getTpaCounterpartyNames(), index), getListValue(model.getTpaTargetServerIds(), index),
+                    getListValue(model.getTpaStatusLabels(), index));
+                entries.add(entry); addChild(entry);
+            }
+        }
+
+        private TerminalTextFieldPanel textField(final TerminalServerToolsSectionState.FocusField focus,
+            String placeholder, int maxLength, Supplier<String> value, java.util.function.Consumer<String> consumer) {
+            return new TerminalTextFieldPanel(value, consumer, new Supplier<Boolean>() {
+                @Override public Boolean get() { return Boolean.valueOf(state.isFocused(focus)); }
+            }, new Runnable() { @Override public void run() { state.focus(focus); } }, placeholder, maxLength,
+                new java.util.function.Predicate<Character>() { @Override public boolean test(Character value) {
+                    char c = value == null ? 0 : value.charValue();
+                    return Character.isLetterOrDigit(c) || c == '_' || c == '-';
+                }});
+        }
+
+        @Override public void setBounds(GuiRect bounds) {
+            super.setBounds(bounds); int x = bounds.getX() + 6; int width = Math.max(0, bounds.getWidth() - 12);
+            header.setBounds(new GuiRect(x, bounds.getY() + 4, width, 10));
+            hint.setBounds(new GuiRect(x, bounds.getY() + 15, width, 10));
+            int fieldWidth = Math.max(30, (width - 44) / 2);
+            playerField.setBounds(new GuiRect(x, bounds.getY() + 27, fieldWidth, 14));
+            serverField.setBounds(new GuiRect(x + fieldWidth + 3, bounds.getY() + 27, fieldWidth, 14));
+            requestButton.setBounds(new GuiRect(x + fieldWidth * 2 + 6, bounds.getY() + 27,
+                Math.max(32, width - fieldWidth * 2 - 6), 14));
+            int entryY = bounds.getY() + 46;
+            for (TpaEntryPanel entry : entries) {
+                entry.setBounds(new GuiRect(x, entryY, width, 24));
+                entryY += 26;
+            }
+        }
+
+        @Override protected void drawSelf(GuiScene scene, int mouseX, int mouseY, float partialTicks) {
+            GuiRect b = getBounds(); Gui.drawRect(b.getX(), b.getY(), b.getRight(), b.getBottom(), 0xFF25313E);
+            Gui.drawRect(b.getX() + 1, b.getY() + 1, b.getRight() - 1, b.getBottom() - 1, 0xFF16212C);
+        }
+    }
+
+    private final class TpaEntryPanel extends PanelContainer {
+        private final String direction;
+        private final String playerName;
+        private final String targetServerId;
+        private final String status;
+        private final LabelPanel line;
+        private final ButtonPanel primary;
+        private final ButtonPanel secondary;
+
+        private TpaEntryPanel(String direction, String playerName, String targetServerId, String status) {
+            this.direction = direction == null ? "" : direction.trim();
+            this.playerName = playerName == null ? "" : playerName.trim();
+            this.targetServerId = targetServerId == null ? "" : targetServerId.trim();
+            this.status = status == null ? "" : status.trim();
+            line = panels.createLabel(new GuiRect(0, 0, 0, 0), new Supplier<String>() {
+                @Override public String get() {
+                    String prefix = "INCOMING".equals(TpaEntryPanel.this.direction) ? "收到" : "发出";
+                    return prefix + " " + TpaEntryPanel.this.playerName + " @ "
+                        + compactServerDisplay(TpaEntryPanel.this.targetServerId) + " · " + tpaStatusLabel(TpaEntryPanel.this.status);
+                }
+            }, ThemeColorKey.TEXT_PRIMARY, false);
+            primary = actionButton("INCOMING".equals(this.direction) ? "接受" : "取消", new Runnable() {
+                @Override public void run() { fire("accept"); }
+            });
+            secondary = actionButton("INCOMING".equals(this.direction) ? "拒绝" : "详情", new Runnable() {
+                @Override public void run() { fire("deny"); }
+            });
+            addChild(line); addChild(primary); addChild(secondary);
+        }
+
+        private ButtonPanel actionButton(final String label, Runnable action) {
+            return panels.createButton(new GuiRect(0, 0, 0, 0), new Supplier<String>() {
+                @Override public String get() { return label; }
+            }, action, new Supplier<Boolean>() { @Override public Boolean get() {
+                return Boolean.valueOf("PENDING".equals(status) && !playerName.isEmpty());
+            }});
+        }
+
+        private void fire(String action) {
+            if (actionHandler == null || !"PENDING".equals(status)) return;
+            if (!"INCOMING".equals(direction) && !"accept".equals(action)) return;
+            actionHandler.respondTpa(direction, playerName, targetServerId, action);
+        }
+
+        @Override public void setBounds(GuiRect bounds) {
+            super.setBounds(bounds); int buttons = "PENDING".equals(status) ? 62 : 0;
+            line.setBounds(new GuiRect(bounds.getX() + 4, bounds.getY() + 7, Math.max(16, bounds.getWidth() - buttons - 8), 10));
+            boolean incoming = "INCOMING".equals(direction);
+            primary.setBounds(new GuiRect(bounds.getRight() - (incoming ? 60 : 30), bounds.getY() + 4, 28, 15));
+            secondary.setBounds(new GuiRect(bounds.getRight() - 30, bounds.getY() + 4, 28, 15));
+            primary.setVisible("PENDING".equals(status));
+            secondary.setVisible("PENDING".equals(status) && incoming);
+        }
+
+        @Override protected void drawSelf(GuiScene scene, int mouseX, int mouseY, float partialTicks) {
+            GuiRect b = getBounds(); Gui.drawRect(b.getX(), b.getY(), b.getRight(), b.getBottom(), 0xFF1A1E26);
+            Gui.drawRect(b.getX() + 1, b.getY() + 1, b.getRight() - 1, b.getBottom() - 1,
+                "INCOMING".equals(direction) ? 0xFF182A39 : 0xFF15202D);
+        }
+    }
+
+    private static String tpaStatusLabel(String status) {
+        if ("PENDING".equals(status)) return "待确认";
+        if ("ACCEPTED".equals(status)) return "已接受";
+        if ("DECLINED".equals(status)) return "已拒绝";
+        if ("CANCELLED".equals(status)) return "已取消";
+        if ("EXPIRED".equals(status)) return "已过期";
+        return status.isEmpty() ? "--" : status;
     }
 
     private final class WarpEntryPanel extends PanelContainer {

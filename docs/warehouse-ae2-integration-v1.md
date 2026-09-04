@@ -2,6 +2,10 @@
 
 日期：2026-07-20
 
+> 2026-08-31 实施状态：个人 `Warehouse Drive` v1 已从尖峰进入受控正式实现；范围、
+> PostgreSQL 真源、方块交互和终端摘要见 `ae2-galactic-warehouse-drive-v1.md`。本次仍然
+> 不实现 Warehouse Port、企业/公共仓、跨服 AE 网络或远程 ME 访问。
+
 本文是 `market-warehouse-v1-product-boundary-draft.md` 与
 `warehouse-transfer-and-audit-boundary-v1.md` 的实现方向补充。前两份文档继续
 定义资产域、市场托管与审计边界；本文只定义未来个人、企业和公共仓的实体
@@ -200,6 +204,31 @@ Phase 0 已完成设计与尖峰验证；下一个实施切片是有限 Base Vau
    显式取出目标；验证市场、奖励、定制市场的失败不重复发放。
 6. 明确 Tier 0 Cell Bay 数、升级槽位、个人/企业/公共账户归属，以及企业是否把
    原生 AE2 Security 作为 v1 强制前置条件。
+
+### 2026-08-30 Phase 0 实施：单 Bay Drive 探针
+
+已加入不注册为玩家方块的 `WarehouseDriveTile` 尖峰：它继承 GTNH 当前 AE2 `TileDrive`，只公开一个 Cell Bay，
+其余九个原生 Drive 槽不会出现在 Cell count、状态或侧向可访问列表中。Cell 内容、容量、频道与供电仍由 AE2
+本身管理，JGB 没有复制 Cell NBT 或建立虚拟 ME 库存。
+
+- `Ae2WarehouseDriveProbe` 使用真实 `MEInventoryHandler` 和 `Actionable.SIMULATE` 查询单 Cell 的可注入数量；
+  它不执行真实注入，不接市场、Base Vault、数据库或跨服网络；
+- `WarehouseDriveCellBay` 将单格插入、占用拒绝、非空拆卸拒绝、频道/供电不可用、部分容量等判定抽为纯 Java，
+  便于无世界/无真人自动化测试；
+- AE2 只作为 `compileOnly` 依赖，不打包；派生适配文件保留 LGPL SPDX 与来源说明，并在 JAR 内附带许可证；
+- 本轮故意不注册 Block、GUI、账户所有权、组织权限、市场 Port 或交付适配器。这样不会向现有玩家开放一个没有
+  拆装授权与审计的半成品 Drive。
+
+### 2026-08-31 个人 Warehouse Drive v1：受控注册与审计
+
+- 正式注册了玩家方块，并以 `warehouse_drive` / `warehouse_drive_operation` 保存个人所有权、
+  位置、版本与服务端动作审计；AE2 Cell 内容不写入 JGB 数据库。
+- 每台 Drive 只开放一个真实 Bay；侧向自动化不暴露 Cell 槽。放置、安装、取出和拆除均使用服务器注入的
+  UUID、本服 ID 与坐标重验；非所有者、假玩家、非空 Cell 拆除与爆炸无法绕过。
+- 终端“银河仓储”页只读显示登记 Drive、已加载状态、Cell、供电/频道、物品/类型摘要和本人审计；它不会
+  主动加载区块，也不会成为第二套 ME Terminal。
+- 注册实体后的 AE2 接线、频道、供电、Cell 插拔、chunk reload 与原生终端互操作仍需最后单人世界事件矩阵。
+  在此之前不开放 Warehouse Port 或任何市场自动转移。
 
 ## 9. v1 容量与玩法边界
 

@@ -69,6 +69,8 @@ import com.jsirgalaxybase.modules.core.vault.domain.VaultOperationHistoryPage;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultOperationStatus;
 import com.jsirgalaxybase.modules.core.vault.application.VaultItemStackCodec;
 import com.jsirgalaxybase.modules.core.vault.infrastructure.VaultCustomMarketDeliveryPort;
+import com.jsirgalaxybase.modules.itempolicy.application.ItemPolicyRuntime;
+import com.jsirgalaxybase.modules.itempolicy.domain.ItemPolicyScope;
 import com.jsirgalaxybase.modules.core.market.port.MarketCustodyInventoryRepository;
 import com.jsirgalaxybase.modules.core.market.port.AccountInventoryResolver;
 import com.jsirgalaxybase.modules.core.market.port.MarketOrderBookRepository;
@@ -644,8 +646,11 @@ final class TerminalMarketService {
                 new java.util.function.Supplier<ExchangeMarketExecutionResult>() {
                     @Override
                     public ExchangeMarketExecutionResult get() {
+                        ItemStack selected = context.vaultService.getPersonalSlotStack(
+                            serverPlayer.getUniqueID().toString(), vaultSlotIndex);
                         ItemStack input = context.vaultService.takeVaultItemForInternalTransfer(requestId,
-                            serverPlayer.getUniqueID().toString(), vaultSlotIndex, 1, "EXCHANGE_SETTLEMENT");
+                            serverPlayer.getUniqueID().toString(), vaultSlotIndex, selected.stackSize,
+                            "EXCHANGE_SETTLEMENT");
                         return context.exchangeService.exchangeVaultCoinFormal(requestId,
                             serverPlayer.getUniqueID().toString(), input).getFormalResult();
                     }
@@ -720,6 +725,10 @@ final class TerminalMarketService {
         }
         try {
             ensurePersonalMarketAccount(serverPlayer);
+            ItemStack selectedStack = context.vaultService.getPersonalSlotStack(serverPlayer.getUniqueID().toString(),
+                vaultSlotIndex);
+            ItemPolicyRuntime.requireAllowed(ItemPolicyScope.CUSTOM_MARKET_ESCROW,
+                serverPlayer.getUniqueID().toString(), "terminal-custom-market-publish", selectedStack);
             final String requestId = newRequestId("terminal-custom-market-publish");
             CustomMarketService.PublishListingResult result = context.vaultService.inSharedTransaction(
                 new java.util.function.Supplier<CustomMarketService.PublishListingResult>() {
@@ -1082,6 +1091,9 @@ final class TerminalMarketService {
         try {
             ensurePersonalMarketAccount(serverPlayer);
             product = context.spotMarketService.inspectCatalogProduct(selectedProductKey).requireProduct();
+            ItemPolicyRuntime.requireAllowed(ItemPolicyScope.MARKET_CUSTODY,
+                serverPlayer.getUniqueID().toString(), "terminal-standard-market-deposit",
+                createPolicyStack(product));
             final StandardizedMarketProduct selectedProduct = product;
             final String playerRef = serverPlayer.getUniqueID().toString();
             final long requested = requestedQuantity;
@@ -1564,7 +1576,8 @@ final class TerminalMarketService {
             TerminalNotificationSeverity.SUCCESS,
             "汇率兑换已入账",
             "transactionId=" + result.getPostingResult().getTransaction().getTransactionId() + "，pair="
-                + result.getQuoteResult().getPairDefinition().getPairCode() + "，实际兑换值="
+                + result.getQuoteResult().getPairDefinition().getPairCode() + "，输入数量="
+                + result.getQuoteResult().getInputQuantity() + "，实际兑换值="
                 + formatAmount(result.getQuoteResult().getEffectiveExchangeValue()) + " STARCOIN，贡献值="
                 + formatAmount(result.getQuoteResult().getContributionValue()) + "，ruleVersion="
                 + result.getQuoteResult().getRuleVersion().getRuleKey() + "，reasonCode="
@@ -2541,6 +2554,12 @@ final class TerminalMarketService {
 
     private String newRequestId(String prefix) {
         return MarketRequestIdFactory.newRoot(prefix);
+    }
+
+    private ItemStack createPolicyStack(StandardizedMarketProduct product) {
+        if (product == null) return null;
+        Object item = Item.itemRegistry.getObject(product.getRegistryName());
+        return item instanceof Item ? new ItemStack((Item) item, 1, product.getMeta()) : null;
     }
 
     private ExchangeContext resolveExchangeContext() {

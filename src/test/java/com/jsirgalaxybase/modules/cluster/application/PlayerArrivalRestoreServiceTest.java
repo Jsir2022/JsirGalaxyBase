@@ -18,6 +18,7 @@ import com.jsirgalaxybase.modules.cluster.domain.TeleportTarget;
 import com.jsirgalaxybase.modules.cluster.domain.TransferTicket;
 import com.jsirgalaxybase.modules.cluster.domain.TransferTicketStatus;
 import com.jsirgalaxybase.modules.cluster.port.LocalTeleportExecutor;
+import com.jsirgalaxybase.modules.cluster.port.ArrivalTargetResolver;
 import com.jsirgalaxybase.modules.cluster.port.TeleportTicketRepository;
 
 public class PlayerArrivalRestoreServiceTest {
@@ -91,6 +92,20 @@ public class PlayerArrivalRestoreServiceTest {
         assertEquals(TransferTicketStatus.EXPIRED, ticketRepository.activeTicket.getStatus());
         assertTrue(ticketRepository.activeTicket.getStatusMessage().contains("expired"));
         assertFalse(ticketRepository.activeTicket.getStatusMessage().contains("retry pending"));
+    }
+
+    @Test
+    public void arrivalResolverIsAuditedOnlyAfterLocalPlacementSucceeds() {
+        FakeTicketRepository ticketRepository = new FakeTicketRepository();
+        RecordingLocalTeleportExecutor executor = new RecordingLocalTeleportExecutor();
+        PlayerArrivalRestoreService service = new PlayerArrivalRestoreService("server-beta", ticketRepository, executor);
+        RecordingResolver resolver = new RecordingResolver(new TeleportTarget("server-beta", 0, 99, 80, 99, 0, 0));
+        service.setArrivalTargetResolver(resolver);
+        ticketRepository.activeTicket = createTicket("player-resolver", TransferTicketStatus.DISPATCHED, Instant.now().plusSeconds(30));
+
+        assertTrue(service.tryRestorePlayer("player-resolver", null, "test"));
+        assertEquals(99.0D, executor.lastTarget.getX(), 0.0001D);
+        assertEquals(1, resolver.successCalls);
     }
 
     private TransferTicket createTicket(String playerUuid, TransferTicketStatus status, Instant expiresAt) {
@@ -183,6 +198,14 @@ public class PlayerArrivalRestoreServiceTest {
         public void teleport(EntityPlayerMP player, TeleportTarget target) {
             throw new IllegalStateException("dimension is not ready");
         }
+    }
+
+    private static final class RecordingResolver implements ArrivalTargetResolver {
+        private final TeleportTarget target;
+        private int successCalls;
+        private RecordingResolver(TeleportTarget target) { this.target = target; }
+        @Override public TeleportTarget resolve(TransferTicket ticket, EntityPlayerMP player) { return target; }
+        @Override public void afterSuccessfulRestore(TransferTicket ticket, TeleportTarget resolvedTarget) { successCalls++; }
     }
 
 }

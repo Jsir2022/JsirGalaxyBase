@@ -44,4 +44,12 @@ public class TerminalPageTest {
         assertTrue(TerminalPage.SERVER_TOOLS.isServerToolsPage());
         assertEquals("server_tools", TerminalPage.SERVER_TOOLS.toTopLevelPageId());
     }
+
+    @Test
+    public void warehouseIsIndependentTopLevelPage() {
+        assertEquals(TerminalPage.WAREHOUSE, TerminalPage.fromId("warehouse"));
+        assertEquals("warehouse", TerminalPage.WAREHOUSE.toTopLevelPageId());
+        assertEquals("资产", TerminalPage.WAREHOUSE.getLabel());
+        assertTrue(TerminalPage.WAREHOUSE.getLead().contains("Base Vault"));
+    }
 }

@@ -176,7 +176,8 @@ public final class MarketOrderEntryPopup extends ModalPopupPanel {
         long quantity = parse(quantityText());
         long price = orderType == TerminalMarketSectionState.OrderType.MARKET ? parse(marketPrice) : parse(priceText());
         draw(font, "结算预览", x, b.getY() + 118, 0xFF71879B, b.getWidth() - 24);
-        draw(font, "预估总额 " + saturatedMultiply(quantity, price) + "  手续费: 服务端复核",
+        String estimatedGross = price <= 0L ? "--" : String.valueOf(saturatedMultiply(quantity, price));
+        draw(font, "预估总额 " + estimatedGross + "  手续费: 服务端复核",
             x, b.getY() + 132, 0xFFF0C75E, b.getWidth() - 24);
         draw(font, accountSummary + (assetRoute.isEmpty() ? "" : "  " + assetRoute),
             x, b.getY() + 146, 0xFFBFCBDA, b.getWidth() - 24);
@@ -261,6 +262,11 @@ public final class MarketOrderEntryPopup extends ModalPopupPanel {
 
     String disabledReason() {
         if (parse(quantityText()) <= 0L) return "请输入大于 0 的数量";
+        if (orderType == TerminalMarketSectionState.OrderType.MARKET && parse(marketPrice) <= 0L) {
+            return side == TerminalMarketSectionState.OrderSide.BUY
+                ? "卖盘为空，无法市价买入；可改用限价挂单"
+                : "买盘为空，无法市价卖出；可改用限价挂单";
+        }
         if (orderType == TerminalMarketSectionState.OrderType.LIMIT && parse(priceText()) <= 0L) {
             return "请输入限价，或选择买一 / 最新 / 卖一";
         }

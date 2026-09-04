@@ -8,10 +8,13 @@ import com.jsirgalaxybase.module.ModuleManager;
 import com.jsirgalaxybase.modules.capability.ChainMiningCapabilityModule;
 import com.jsirgalaxybase.modules.cluster.ClusterModule;
 import com.jsirgalaxybase.modules.core.InstitutionCoreModule;
+import com.jsirgalaxybase.modules.warehouse.infrastructure.minecraft.TerminalAssetCenterGuiHandler;
 import com.jsirgalaxybase.modules.diagnostics.ClientItemDumpModule;
+import com.jsirgalaxybase.modules.land.LandModule;
+import com.jsirgalaxybase.modules.itempolicy.ItemPolicyModule;
 import com.jsirgalaxybase.modules.servertools.ServerToolsModule;
 import com.jsirgalaxybase.modules.terminal.TerminalModule;
-import com.jsirgalaxybase.modules.core.vault.infrastructure.minecraft.BaseVaultGuiHandler;
+import com.jsirgalaxybase.modules.warehouse.WarehouseModule;
 
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
@@ -36,6 +39,9 @@ public class ModBootstrap {
         moduleContext = new ModuleContext(client, configuration, moduleManager);
 
         moduleManager.addModule(new InstitutionCoreModule());
+        moduleManager.addModule(new ItemPolicyModule());
+        moduleManager.addModule(new LandModule());
+        moduleManager.addModule(new WarehouseModule());
         moduleManager.addModule(new ClusterModule());
         moduleManager.addModule(new ServerToolsModule());
         moduleManager.addModule(new ChainMiningCapabilityModule());
@@ -50,8 +56,8 @@ public class ModBootstrap {
 
     public void init(FMLInitializationEvent event) {
         moduleManager.init(moduleContext, event);
-        NetworkRegistry.INSTANCE.registerGuiHandler(GalaxyBase.instance, new BaseVaultGuiHandler());
-        GalaxyBase.LOG.info("Registered Base Vault native container GUI");
+        NetworkRegistry.INSTANCE.registerGuiHandler(GalaxyBase.instance, new TerminalAssetCenterGuiHandler());
+        GalaxyBase.LOG.info("Registered unified personal asset center container GUI");
     }
 
     public void postInit(FMLPostInitializationEvent event) {

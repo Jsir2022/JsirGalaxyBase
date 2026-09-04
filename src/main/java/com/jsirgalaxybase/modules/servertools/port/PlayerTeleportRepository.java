@@ -37,6 +37,25 @@ public interface PlayerTeleportRepository {
     Optional<TpaRequest> findPendingTpaRequest(String requesterPlayerName, String targetPlayerName,
         String targetServerId, Instant now);
 
+    Optional<TpaRequest> acceptPendingTpaRequest(String requesterPlayerName, String targetPlayerName,
+        String targetServerId, com.jsirgalaxybase.modules.cluster.domain.TeleportTarget acceptedTarget, Instant now);
+
+    Optional<TpaRequest> declinePendingTpaRequest(String requesterPlayerName, String targetPlayerName,
+        String targetServerId, Instant now);
+
+    Optional<TpaRequest> cancelPendingTpaRequest(String requesterPlayerUuid, String targetPlayerName,
+        String targetServerId, Instant now);
+
+    List<TpaRequest> listPendingTpaRequestsForTarget(String targetServerId, String targetPlayerName, Instant now);
+
+    List<TpaRequest> listAcceptedTpaRequestsForRequester(String requesterServerId, String requesterPlayerUuid,
+        Instant now);
+
+    List<TpaRequest> listRecentTpaRequestsForRequester(String requesterServerId, String requesterPlayerUuid,
+        int limit);
+
+    List<TpaRequest> listRecentTpaRequestsForTarget(String targetServerId, String targetPlayerName, int limit);
+
     int expirePendingTpaRequests(Instant now);
 
     RandomTeleportRecord saveRandomTeleportRecord(RandomTeleportRecord randomTeleportRecord);

@@ -4,6 +4,18 @@
 
 ## 当前最建议先看的内容
 
+- `ae2-galactic-warehouse-terminal-bay-v2.md`
+  - 当前个人 AE2 银河仓储的正式方向：终端托管的一格真实 Storage Cell Bay 与 Base Vault 统一资产中心；
+    不需要实体 Drive、不建立外部 ME 网络，Cell 的容量和内容限制仍完全由 AE2 负责
+- `ae2-galactic-warehouse-drive-v1.md`
+  - 已部署的实体 Drive 兼容批次；保留登记/审计历史，已被 v2 终端 Bay 作为后续主入口取代
+
+- `serverutilities-land-property-integration-v1.md`
+  - 修正“传送能力已落地不等于 ServerUtilities 已完整集成”，定义 JGB 原生领地保护、一次性旧数据迁移、独立 Mod 卸载，以及地皮、Team、职业、银行和地产市场的制度关系
+- `serverutilities-personal-land-code-reuse-evaluation-v1.md`
+  - 当前个人优先版本的代码级评估；列出 SU 可复制、需重构和不应搬入的类，以及个人挂牌、银行结算、PROPERTY 页面和旧 team 数据 staging 边界
+- `personal-land-postgresql-runtime-v1.md`
+  - 个人地皮 PostgreSQL 真源、幂等事务、服务端配置和 SHADOW/ENFORCE 保护边界
 - `terminal-number-display-standard-v1.md`
   - 终端数字显示的语义化规范；定义盘口/图表三位有效数字的 `K -> M -> G -> T` 紧凑数量，以及银行、价格、订单和确认流程必须保留的精确千分位
 - `standardized-market-self-match-bug-2026-08-18.md`

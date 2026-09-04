@@ -53,6 +53,24 @@ public class TerminalServiceTest {
     }
 
     @Test
+    public void itemPolicyPageIsNavigableAndFailsSafeWhenPolicyRuntimeIsDisabled() {
+        TerminalOpenApproval approval = TerminalService.buildTerminalSnapshot(
+            null, "item_policy", "policy-session", TerminalActionType.SELECT_PAGE, "nav_click");
+
+        assertEquals("item_policy", approval.getSelectedPageId());
+        TerminalOpenApproval.NavItem itemPolicyNav = null;
+        for (TerminalOpenApproval.NavItem item : approval.getNavItems()) {
+            if ("item_policy".equals(item.getPageId())) { itemPolicyNav = item; break; }
+        }
+        assertNotNull(itemPolicyNav);
+        assertTrue(itemPolicyNav.isSelected());
+        TerminalOpenApproval.PageSnapshot policy = approval.getPageSnapshots().get(9);
+        assertEquals("item_policy", policy.getPageId());
+        assertEquals("item_policy_disabled", policy.getSections().get(0).getSectionId());
+        assertTrue(policy.getSections().get(0).getDetail().contains("不会扫描"));
+    }
+
+    @Test
     public void refreshActionProducesRefreshNotificationAndStableSessionToken() {
         TerminalOpenApproval approval = TerminalService.buildTerminalSnapshot(
             null,
@@ -571,6 +589,30 @@ public class TerminalServiceTest {
     }
 
     @Test
+    public void serverToolsActionPayloadKeepsLegacyWarpAndCarriesQuickAction() {
+        TerminalServerToolsActionPayload legacyWarp = TerminalServerToolsActionPayload.decode(
+            TerminalServerToolsActionPayload.forWarp("s2test").encode());
+        TerminalServerToolsActionPayload quickAction = TerminalServerToolsActionPayload.decode(
+            TerminalServerToolsActionPayload.forQuickAction("home").encode());
+        TerminalServerToolsActionPayload namedHome = TerminalServerToolsActionPayload.decode(
+            TerminalServerToolsActionPayload.forHome("mine").encode());
+        TerminalServerToolsActionPayload tpa = TerminalServerToolsActionPayload.decode(
+            TerminalServerToolsActionPayload.forTpa("TargetPlayer", "s2").encode());
+
+        assertEquals("s2test", legacyWarp.getWarpName());
+        assertFalse(legacyWarp.hasQuickAction());
+        assertEquals("home", quickAction.getQuickAction());
+        assertFalse(quickAction.hasWarpName());
+        assertEquals("mine", namedHome.getHomeName());
+        assertFalse(namedHome.hasWarpName());
+        assertFalse(namedHome.hasQuickAction());
+        assertEquals("TargetPlayer", tpa.getTpaPlayerName());
+        assertEquals("s2", tpa.getTpaTargetServerId());
+        assertFalse(tpa.hasWarpName());
+        assertFalse(tpa.hasHomeName());
+    }
+
+    @Test
     public void serverToolsSnapshotRoundTripsThroughTerminalSnapshotMessage() {
         TerminalOpenApproval approval = new TerminalOpenApproval(
             "server_tools",
@@ -597,6 +639,9 @@ public class TerminalServiceTest {
                     Arrays.asList("前往 S2 测试节点", "返回 Lobby 中枢"),
                     Arrays.asList("可用", "可用"),
                     Arrays.asList("05-18 10:00 | lobby -> s2 | COMPLETED | restore completed"),
+                    Arrays.asList("home | lobby", "mine | s2"),
+                    Arrays.asList("home", "mine"),
+                    Arrays.asList("dim 0 / 0, 70, 0", "dim 0 / 10, 70, 10"),
                     "s2test",
                     "s2test",
                     "target=s2",
@@ -604,6 +649,10 @@ public class TerminalServiceTest {
                     "dim 0 / 0, 80, 0",
                     "前往 S2 测试节点",
                     true,
+                    "mine",
+                    "s2",
+                    "dim 0 / 10, 70, 10",
+                    "Home mine -> s2",
                     "lobby",
                     "s2",
                     "COMPLETED",
@@ -623,6 +672,9 @@ public class TerminalServiceTest {
         assertEquals("05-18 10:00 | lobby -> s2 | COMPLETED | restore completed",
             model.getSelectedPageSnapshot().getServerToolsSectionModel().getRecentTransferLines().get(0));
         assertEquals("COMPLETED", model.getSelectedPageSnapshot().getServerToolsSectionModel().getRecentTransferStatus());
+        assertEquals("mine", model.getSelectedPageSnapshot().getServerToolsSectionModel().getSelectedHomeName());
+        assertEquals("s2", model.getSelectedPageSnapshot().getServerToolsSectionModel().getSelectedHomeTargetServerId());
+        assertEquals("mine", model.getSelectedPageSnapshot().getServerToolsSectionModel().getHomeNames().get(1));
     }
 
     @Test
@@ -665,6 +717,73 @@ public class TerminalServiceTest {
 
             assertEquals("本服传送完成", feedback.getTitle());
             assertTrue(feedback.getBody().contains("lobbytest"));
+        } finally {
+            TerminalService.resetServerToolsRuntimeProviderForTest();
+            TerminalService.resetServerToolsPageFacadeForTest();
+        }
+    }
+
+    @Test
+    public void defaultServerToolsFacadeUsesRuntimeBridgeForQuickHome() {
+        TerminalService.setServerToolsRuntimeProviderForTest(new FixedServerToolsRuntimeProvider(
+            new RecordingServerToolsRuntimeBridge(GatewayDispatchResult.completedLocal("home completed"))));
+        TerminalService.resetServerToolsPageFacadeForTest();
+
+        try {
+            TerminalServerToolsSectionSnapshot.ActionFeedback feedback =
+                TerminalService.serverToolsPageFacade.confirmQuickAction(null, "home");
+
+            assertEquals("本服传送完成", feedback.getTitle());
+            RecordingServerToolsRuntimeBridge bridge =
+                (RecordingServerToolsRuntimeBridge) TerminalService.serverToolsRuntimeProvider.resolve();
+            assertTrue(bridge.prepareCalled);
+            assertTrue(bridge.dispatchCalled);
+            assertEquals(TeleportKind.HOME, bridge.lastDispatchPlan.getTeleportKind());
+        } finally {
+            TerminalService.resetServerToolsRuntimeProviderForTest();
+            TerminalService.resetServerToolsPageFacadeForTest();
+        }
+    }
+
+    @Test
+    public void defaultServerToolsFacadeUsesExistingNamedHomeTeleportChain() {
+        TerminalService.setServerToolsRuntimeProviderForTest(new FixedServerToolsRuntimeProvider(
+            new RecordingServerToolsRuntimeBridge(GatewayDispatchResult.pendingRemote("proxy dispatch requested",
+                ticket("req-terminal-home", TransferTicketStatus.DISPATCHED, "proxy dispatch requested")))));
+        TerminalService.resetServerToolsPageFacadeForTest();
+        try {
+            TerminalServerToolsSectionSnapshot.ActionFeedback feedback =
+                TerminalService.serverToolsPageFacade.confirmHome(null, "mine");
+            RecordingServerToolsRuntimeBridge bridge =
+                (RecordingServerToolsRuntimeBridge) TerminalService.serverToolsRuntimeProvider.resolve();
+            assertEquals("跨服传送已提交", feedback.getTitle());
+            assertTrue(bridge.prepareCalled);
+            assertTrue(bridge.dispatchCalled);
+            assertEquals(TeleportKind.HOME, bridge.lastDispatchPlan.getTeleportKind());
+            assertEquals("mine", bridge.lastWarpName);
+        } finally {
+            TerminalService.resetServerToolsRuntimeProviderForTest();
+            TerminalService.resetServerToolsPageFacadeForTest();
+        }
+    }
+
+    @Test
+    public void defaultServerToolsFacadeSetsAndDeletesNamedHomeThroughRuntimeBridge() {
+        TerminalService.setServerToolsRuntimeProviderForTest(new FixedServerToolsRuntimeProvider(
+            new RecordingServerToolsRuntimeBridge(GatewayDispatchResult.completedLocal("unused"))));
+        TerminalService.resetServerToolsPageFacadeForTest();
+        try {
+            TerminalServerToolsSectionSnapshot.ActionFeedback setFeedback =
+                TerminalService.serverToolsPageFacade.setHome(null, "mine");
+            RecordingServerToolsRuntimeBridge bridge =
+                (RecordingServerToolsRuntimeBridge) TerminalService.serverToolsRuntimeProvider.resolve();
+            assertEquals("Home 已设定", setFeedback.getTitle());
+            assertEquals("mine", bridge.lastSetHomeName);
+
+            TerminalServerToolsSectionSnapshot.ActionFeedback deleteFeedback =
+                TerminalService.serverToolsPageFacade.deleteHome(null, "mine");
+            assertEquals("Home 已删除", deleteFeedback.getTitle());
+            assertEquals("mine", bridge.lastDeletedHomeName);
         } finally {
             TerminalService.resetServerToolsRuntimeProviderForTest();
             TerminalService.resetServerToolsPageFacadeForTest();
@@ -798,6 +917,14 @@ public class TerminalServiceTest {
                 "跨服传送已提交",
                 "Transfer ticket created / pending remote: " + warpName,
                 TerminalNotificationSeverity.SUCCESS.name());
+        }
+
+        @Override
+        public TerminalServerToolsSectionSnapshot.ActionFeedback confirmQuickAction(
+            net.minecraft.entity.player.EntityPlayerMP player, String quickAction) {
+            confirmCalled = true;
+            return new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                "本服传送完成", "快捷动作: " + quickAction, TerminalNotificationSeverity.SUCCESS.name());
         }
     }
 
@@ -1214,6 +1341,8 @@ public class TerminalServiceTest {
         private boolean prepareCalled;
         private boolean dispatchCalled;
         private String lastWarpName;
+        private String lastSetHomeName;
+        private String lastDeletedHomeName;
         private TeleportDispatchPlan lastDispatchPlan;
 
         private RecordingServerToolsRuntimeBridge(GatewayDispatchResult dispatchResult) {
@@ -1250,6 +1379,12 @@ public class TerminalServiceTest {
         }
 
         @Override
+        public List<com.jsirgalaxybase.modules.servertools.domain.PlayerHome> listHomes(String playerUuid) {
+            return Arrays.asList(new com.jsirgalaxybase.modules.servertools.domain.PlayerHome("player-uuid", "mine",
+                new TeleportTarget("server-beta", 0, 10, 70, 10, 0.0F, 0.0F), Instant.now(), Instant.now()));
+        }
+
+        @Override
         public TeleportDispatchPlan prepareWarpTeleport(net.minecraft.entity.player.EntityPlayerMP player, String warpName) {
             prepareCalled = true;
             lastWarpName = warpName;
@@ -1262,6 +1397,48 @@ public class TerminalServiceTest {
                 "lobbytest".equals(warpName)
                     ? new TeleportTarget("server-alpha", 0, 0, 70, 0, 0.0F, 0.0F)
                     : new TeleportTarget("server-beta", 0, 10, 70, 10, 0.0F, 0.0F));
+            return lastDispatchPlan;
+        }
+
+        @Override
+        public TeleportDispatchPlan prepareHomeTeleport(net.minecraft.entity.player.EntityPlayerMP player) {
+            return prepareQuickTeleport(TeleportKind.HOME, "home");
+        }
+
+        @Override
+        public TeleportDispatchPlan prepareHomeTeleport(net.minecraft.entity.player.EntityPlayerMP player, String homeName) {
+            return prepareQuickTeleport(TeleportKind.HOME, homeName);
+        }
+
+        @Override
+        public com.jsirgalaxybase.modules.servertools.domain.PlayerHome setHome(
+            net.minecraft.entity.player.EntityPlayerMP player, String homeName) {
+            lastSetHomeName = homeName;
+            return new com.jsirgalaxybase.modules.servertools.domain.PlayerHome("player-uuid", homeName,
+                new TeleportTarget("server-alpha", 0, 0, 70, 0, 0.0F, 0.0F), Instant.now(), Instant.now());
+        }
+
+        @Override
+        public boolean deleteHome(net.minecraft.entity.player.EntityPlayerMP player, String homeName) {
+            lastDeletedHomeName = homeName;
+            return "mine".equals(homeName);
+        }
+
+        @Override
+        public TeleportDispatchPlan prepareBackTeleport(net.minecraft.entity.player.EntityPlayerMP player) {
+            return prepareQuickTeleport(TeleportKind.BACK, "back");
+        }
+
+        @Override
+        public TeleportDispatchPlan prepareSpawnTeleport(net.minecraft.entity.player.EntityPlayerMP player) {
+            return prepareQuickTeleport(TeleportKind.SPAWN, "spawn");
+        }
+
+        private TeleportDispatchPlan prepareQuickTeleport(TeleportKind kind, String action) {
+            prepareCalled = true;
+            lastWarpName = action;
+            lastDispatchPlan = new TeleportDispatchPlan("req-terminal-" + action, "player-uuid", "PlayerA",
+                "server-alpha", kind, new TeleportTarget("server-alpha", 0, 0, 70, 0, 0.0F, 0.0F));
             return lastDispatchPlan;
         }
 
@@ -1308,6 +1485,21 @@ public class TerminalServiceTest {
 
         @Override
         public TeleportDispatchPlan prepareWarpTeleport(net.minecraft.entity.player.EntityPlayerMP player, String warpName) {
+            throw new IllegalStateException("should not be called");
+        }
+
+        @Override
+        public TeleportDispatchPlan prepareHomeTeleport(net.minecraft.entity.player.EntityPlayerMP player) {
+            throw new IllegalStateException("should not be called");
+        }
+
+        @Override
+        public TeleportDispatchPlan prepareBackTeleport(net.minecraft.entity.player.EntityPlayerMP player) {
+            throw new IllegalStateException("should not be called");
+        }
+
+        @Override
+        public TeleportDispatchPlan prepareSpawnTeleport(net.minecraft.entity.player.EntityPlayerMP player) {
             throw new IllegalStateException("should not be called");
         }
 

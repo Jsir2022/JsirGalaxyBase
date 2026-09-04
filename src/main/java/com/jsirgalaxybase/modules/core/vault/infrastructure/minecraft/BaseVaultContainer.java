@@ -7,6 +7,8 @@ import java.util.UUID;
 import com.jsirgalaxybase.GalaxyBase;
 import com.jsirgalaxybase.modules.core.vault.application.BaseVaultService;
 import com.jsirgalaxybase.modules.core.vault.application.VaultException;
+import com.jsirgalaxybase.modules.itempolicy.application.ItemPolicyRuntime;
+import com.jsirgalaxybase.modules.itempolicy.domain.ItemPolicyScope;
 
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.InventoryPlayer;
@@ -166,11 +168,25 @@ public final class BaseVaultContainer extends Container {
         if (sameSnapshot(before, after)) {
             return;
         }
+        enforceVaultAdmission(before, after);
         vaultService.commitPersonalContainerMutation(requestId, playerRef,
             vaultInventory.getOpeningSlots(), after, context);
         // Refresh expected versions after a successful write so later clicks do
         // not conflict with our own session's completed mutation.
         vaultInventory.refreshExpectedSlots(vaultService.viewPersonalVault(playerRef));
+    }
+
+    private void enforceVaultAdmission(List<ItemStack> before, List<ItemStack> after) {
+        for (int index = 0; index < after.size(); index++) {
+            ItemStack next = after.get(index);
+            ItemStack previous = before.get(index);
+            if (next == null || next.stackSize <= 0) continue;
+            int beforeQuantity = previous == null ? 0 : previous.stackSize;
+            if (previous == null || !previous.isItemEqual(next)
+                || !ItemStack.areItemStackTagsEqual(previous, next) || next.stackSize > beforeQuantity) {
+                ItemPolicyRuntime.requireAllowed(ItemPolicyScope.BASE_VAULT, playerRef, "base-vault-container", next);
+            }
+        }
     }
 
     private ItemStack resolveAuditStack(int slotId, EntityPlayer actor) {

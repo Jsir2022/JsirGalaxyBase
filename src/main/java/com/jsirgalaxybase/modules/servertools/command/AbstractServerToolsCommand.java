@@ -8,6 +8,7 @@ import net.minecraft.command.ICommandSender;
 import net.minecraft.command.PlayerNotFoundException;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.util.ChatComponentText;
+import net.minecraft.util.ChatComponentTranslation;
 
 import com.jsirgalaxybase.modules.cluster.domain.GatewayDispatchResult;
 import com.jsirgalaxybase.modules.servertools.ServerToolsModule;
@@ -47,16 +48,21 @@ public abstract class AbstractServerToolsCommand extends CommandBase {
         sender.addChatMessage(new ChatComponentText(message));
     }
 
-    protected void sendDispatchResult(ICommandSender sender, GatewayDispatchResult result, String localSuccessText) {
+    protected void sendKey(ICommandSender sender, String key, Object... args) {
+        sender.addChatMessage(new ChatComponentTranslation(key, args));
+    }
+
+    protected void sendDispatchResult(ICommandSender sender, GatewayDispatchResult result, String localSuccessKey,
+        Object... localSuccessArgs) {
         if (result.getStatus() == GatewayDispatchResult.Status.COMPLETED_LOCAL) {
-            send(sender, localSuccessText);
+            sendKey(sender, localSuccessKey, localSuccessArgs);
             return;
         }
         if (result.getStatus() == GatewayDispatchResult.Status.PENDING_REMOTE) {
-            send(sender, result.getMessage());
+            sendKey(sender, "jsirgalaxybase.servertools.transfer.pending");
             return;
         }
-        send(sender, result.getMessage() == null ? "Teleport failed" : result.getMessage());
+        sendKey(sender, "jsirgalaxybase.servertools.transfer.failed");
     }
 
     protected EntityPlayerMP resolveLiveSubject(TeleportDispatchPlan dispatchPlan) {
@@ -73,7 +79,7 @@ public abstract class AbstractServerToolsCommand extends CommandBase {
     protected void handleServiceError(ICommandSender sender, RuntimeException exception) {
         if (exception instanceof ServerToolsException || exception instanceof IllegalArgumentException
             || exception instanceof IllegalStateException) {
-            send(sender, exception.getMessage());
+            sendKey(sender, "jsirgalaxybase.servertools.error.operation_failed");
             return;
         }
         throw exception;

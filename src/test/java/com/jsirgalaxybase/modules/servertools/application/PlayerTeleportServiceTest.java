@@ -61,7 +61,7 @@ public class PlayerTeleportServiceTest {
     }
 
     @Test
-    public void acceptTpaUsesRequesterOriginAsBackRecordAndTargetsAcceptorLocation() {
+    public void acceptTpaPersistsAcceptorLocationForSourceServerDispatch() {
         FakePlayerTeleportRepository repository = new FakePlayerTeleportRepository();
         PlayerTeleportService service = new PlayerTeleportService(repository, new AllowAllPlayerPermissionPolicy());
         Instant now = Instant.now();
@@ -71,13 +71,20 @@ public class PlayerTeleportServiceTest {
 
         TeleportActor acceptor = actor("acceptor-uuid", "Acceptor", "server-beta",
             target("server-beta", 7, 200, 90, 200));
-        TeleportDispatchPlan plan = service.acceptTpa(acceptor, "req-tpa-accept", "Requester", now.plusSeconds(5));
+        TpaRequest accepted = service.acceptTpa(acceptor, "Requester", now.plusSeconds(5));
 
+        assertEquals(TpaRequestStatus.ACCEPTED, accepted.getStatus());
+        assertEquals(acceptor.getCurrentLocation().getX(), accepted.getAcceptedTarget().getX(), 0.0001D);
+        assertEquals(TpaRequestStatus.ACCEPTED, repository.updatedRequest.getStatus());
+        assertTrue(repository.backRecords.isEmpty());
+
+        TeleportActor requester = actor("requester-uuid", "Requester", "server-alpha",
+            target("server-alpha", 0, 1, 65, 1));
+        TeleportDispatchPlan plan = service.prepareAcceptedTpaTeleport(requester, accepted, now.plusSeconds(6));
         assertEquals(TeleportKind.TPA, plan.getTeleportKind());
         assertEquals("requester-uuid", plan.getSubjectPlayerUuid());
         assertEquals("server-alpha", plan.getSourceServerId());
         assertEquals(acceptor.getCurrentLocation().getX(), plan.getTarget().getX(), 0.0001D);
-        assertEquals(TpaRequestStatus.ACCEPTED, repository.updatedRequest.getStatus());
         assertEquals("server-alpha", repository.backRecords.get("requester-uuid").getTarget().getServerId());
     }
 
@@ -93,6 +100,25 @@ public class PlayerTeleportServiceTest {
         assertEquals(TeleportKind.RTP, plan.getTeleportKind());
         assertEquals(1, repository.rtpRecords.size());
         assertEquals(randomTarget.getX(), repository.rtpRecords.get(0).getTarget().getX(), 0.0001D);
+        assertEquals("req-rtp-1", repository.rtpRecords.get(0).getRequestId());
+    }
+
+    @Test
+    public void targetServerRtpSavesBackButDefersAuditUntilTargetArrival() {
+        FakePlayerTeleportRepository repository = new FakePlayerTeleportRepository();
+        FakeServerDirectory directory = new FakeServerDirectory();
+        directory.servers.put("s2", new ServerDescriptor("s2", "S2", null, false, true, Instant.now(), Instant.now()));
+        PlayerTeleportService service = new PlayerTeleportService(repository, new AllowAllPlayerPermissionPolicy(), directory);
+        TeleportActor actor = actor("player-r", "PlayerR", "lobby", target("lobby", 0, 20, 70, 20));
+
+        TeleportDispatchPlan plan = service.prepareTargetServerRandomTeleport(actor, "rtp-remote-1",
+            new com.jsirgalaxybase.modules.servertools.domain.TargetServerRtpProfile("s2", 7, 0, 80, 0, 256, 2048),
+            Instant.now());
+
+        assertEquals(TeleportKind.RTP, plan.getTeleportKind());
+        assertEquals("s2", plan.getTarget().getServerId());
+        assertEquals(0, repository.rtpRecords.size());
+        assertEquals("lobby", repository.backRecords.get("player-r").getTarget().getServerId());
     }
 
     @Test
@@ -137,6 +163,48 @@ public class PlayerTeleportServiceTest {
         }
 
         throw new AssertionError("Expected ServerToolsException for disabled target server");
+    }
+
+    @Test
+    public void declineAndCancelOnlyTransitionPendingRequests() {
+        FakePlayerTeleportRepository repository = new FakePlayerTeleportRepository();
+        PlayerTeleportService service = new PlayerTeleportService(repository, new AllowAllPlayerPermissionPolicy());
+        Instant now = Instant.now();
+        TeleportActor requester = actor("requester-uuid", "Requester", "server-alpha",
+            target("server-alpha", 0, 1, 65, 1));
+        TeleportActor target = actor("target-uuid", "Target", "server-beta", target("server-beta", 0, 4, 65, 4));
+
+        service.createTpaRequest(requester, "request-decline", "Target", "server-beta", now);
+        assertEquals(TpaRequestStatus.DECLINED, service.declineTpa(target, "Requester", now.plusSeconds(1)).getStatus());
+
+        try {
+            service.declineTpa(target, "Requester", now.plusSeconds(2));
+        } catch (ServerToolsException expected) {
+            service.createTpaRequest(requester, "request-cancel", "Target", "server-beta", now.plusSeconds(3));
+            assertEquals(TpaRequestStatus.CANCELLED,
+                service.cancelTpa(requester, "Target", "server-beta", now.plusSeconds(4)).getStatus());
+            return;
+        }
+        throw new AssertionError("A resolved TPA request must not transition twice");
+    }
+
+    @Test
+    public void acceptedTpaCannotDispatchAfterOriginalTimeout() {
+        FakePlayerTeleportRepository repository = new FakePlayerTeleportRepository();
+        PlayerTeleportService service = new PlayerTeleportService(repository, new AllowAllPlayerPermissionPolicy());
+        Instant now = Instant.now();
+        TeleportActor requester = actor("requester-uuid", "Requester", "server-alpha",
+            target("server-alpha", 0, 1, 65, 1));
+        TeleportActor target = actor("target-uuid", "Target", "server-beta", target("server-beta", 0, 4, 65, 4));
+        TpaRequest request = service.createTpaRequest(requester, "request-timeout", "Target", "server-beta", now);
+        TpaRequest accepted = service.acceptTpa(target, "Requester", now.plusSeconds(1));
+
+        try {
+            service.prepareAcceptedTpaTeleport(requester, accepted, request.getExpiresAt());
+        } catch (ServerToolsException expected) {
+            return;
+        }
+        throw new AssertionError("Accepted TPA must not dispatch at or after its original expiry");
     }
 
     private TeleportActor actor(String uuid, String playerName, String serverId, TeleportTarget location) {
@@ -260,6 +328,87 @@ public class PlayerTeleportServiceTest {
                 && pendingRequest.getTargetServerId().equals(targetServerId)
                 && pendingRequest.getExpiresAt().isAfter(now);
             return matches ? Optional.of(pendingRequest) : Optional.<TpaRequest>empty();
+        }
+
+        @Override
+        public Optional<TpaRequest> acceptPendingTpaRequest(String requesterPlayerName, String targetPlayerName,
+            String targetServerId, TeleportTarget acceptedTarget, Instant now) {
+            Optional<TpaRequest> request = findPendingTpaRequest(requesterPlayerName, targetPlayerName, targetServerId,
+                now);
+            if (!request.isPresent()) {
+                return Optional.empty();
+            }
+            pendingRequest = request.get().withAcceptedTarget(acceptedTarget, now);
+            updatedRequest = pendingRequest;
+            return Optional.of(pendingRequest);
+        }
+
+        @Override
+        public Optional<TpaRequest> declinePendingTpaRequest(String requesterPlayerName, String targetPlayerName,
+            String targetServerId, Instant now) {
+            Optional<TpaRequest> request = findPendingTpaRequest(requesterPlayerName, targetPlayerName, targetServerId,
+                now);
+            if (!request.isPresent()) {
+                return Optional.empty();
+            }
+            pendingRequest = request.get().withStatus(TpaRequestStatus.DECLINED, now);
+            updatedRequest = pendingRequest;
+            return Optional.of(pendingRequest);
+        }
+
+        @Override
+        public Optional<TpaRequest> cancelPendingTpaRequest(String requesterPlayerUuid, String targetPlayerName,
+            String targetServerId, Instant now) {
+            if (pendingRequest == null || pendingRequest.getStatus() != TpaRequestStatus.PENDING
+                || !pendingRequest.getRequesterPlayerUuid().equals(requesterPlayerUuid)
+                || !pendingRequest.getTargetPlayerName().equalsIgnoreCase(targetPlayerName)
+                || !pendingRequest.getTargetServerId().equals(targetServerId)
+                || !pendingRequest.getExpiresAt().isAfter(now)) {
+                return Optional.empty();
+            }
+            pendingRequest = pendingRequest.withStatus(TpaRequestStatus.CANCELLED, now);
+            updatedRequest = pendingRequest;
+            return Optional.of(pendingRequest);
+        }
+
+        @Override
+        public List<TpaRequest> listPendingTpaRequestsForTarget(String targetServerId, String targetPlayerName,
+            Instant now) {
+            return findPendingTpaRequest(pendingRequest == null ? "" : pendingRequest.getRequesterPlayerName(),
+                targetPlayerName, targetServerId, now).isPresent()
+                    ? java.util.Collections.singletonList(pendingRequest) : java.util.Collections.<TpaRequest>emptyList();
+        }
+
+        @Override
+        public List<TpaRequest> listAcceptedTpaRequestsForRequester(String requesterServerId, String requesterPlayerUuid,
+            Instant now) {
+            if (pendingRequest != null && pendingRequest.getStatus() == TpaRequestStatus.ACCEPTED
+                && pendingRequest.getRequesterServerId().equals(requesterServerId)
+                && pendingRequest.getRequesterPlayerUuid().equals(requesterPlayerUuid)
+                && pendingRequest.getExpiresAt().isAfter(now)) {
+                return java.util.Collections.singletonList(pendingRequest);
+            }
+            return java.util.Collections.emptyList();
+        }
+
+        @Override
+        public List<TpaRequest> listRecentTpaRequestsForRequester(String requesterServerId, String requesterPlayerUuid,
+            int limit) {
+            if (pendingRequest != null && pendingRequest.getRequesterServerId().equals(requesterServerId)
+                && pendingRequest.getRequesterPlayerUuid().equals(requesterPlayerUuid)) {
+                return java.util.Collections.singletonList(pendingRequest);
+            }
+            return java.util.Collections.emptyList();
+        }
+
+        @Override
+        public List<TpaRequest> listRecentTpaRequestsForTarget(String targetServerId, String targetPlayerName,
+            int limit) {
+            if (pendingRequest != null && pendingRequest.getTargetServerId().equals(targetServerId)
+                && pendingRequest.getTargetPlayerName().equalsIgnoreCase(targetPlayerName)) {
+                return java.util.Collections.singletonList(pendingRequest);
+            }
+            return java.util.Collections.emptyList();
         }
 
         @Override

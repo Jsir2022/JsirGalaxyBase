@@ -167,6 +167,8 @@ public class TerminalOpenApproval {
         private final TerminalCustomMarketSectionSnapshot customMarketSectionSnapshot;
         private final TerminalExchangeMarketSectionSnapshot exchangeMarketSectionSnapshot;
         private final TerminalServerToolsSectionSnapshot serverToolsSectionSnapshot;
+        private final TerminalLandSectionSnapshot landSectionSnapshot;
+        private final TerminalNotificationCenterSnapshot notificationCenterSnapshot;
 
         public PageSnapshot(String pageId, String title, String lead, List<Section> sections) {
             this(pageId, title, lead, sections, null, null);
@@ -195,6 +197,28 @@ public class TerminalOpenApproval {
             TerminalCustomMarketSectionSnapshot customMarketSectionSnapshot,
             TerminalExchangeMarketSectionSnapshot exchangeMarketSectionSnapshot,
             TerminalServerToolsSectionSnapshot serverToolsSectionSnapshot) {
+            this(pageId, title, lead, sections, bankSectionSnapshot, marketSectionSnapshot,
+                customMarketSectionSnapshot, exchangeMarketSectionSnapshot, serverToolsSectionSnapshot, null);
+        }
+
+        public PageSnapshot(String pageId, String title, String lead, List<Section> sections,
+            TerminalBankSectionSnapshot bankSectionSnapshot, TerminalMarketSectionSnapshot marketSectionSnapshot,
+            TerminalCustomMarketSectionSnapshot customMarketSectionSnapshot,
+            TerminalExchangeMarketSectionSnapshot exchangeMarketSectionSnapshot,
+            TerminalServerToolsSectionSnapshot serverToolsSectionSnapshot,
+            TerminalLandSectionSnapshot landSectionSnapshot) {
+            this(pageId, title, lead, sections, bankSectionSnapshot, marketSectionSnapshot,
+                customMarketSectionSnapshot, exchangeMarketSectionSnapshot, serverToolsSectionSnapshot,
+                landSectionSnapshot, null);
+        }
+
+        public PageSnapshot(String pageId, String title, String lead, List<Section> sections,
+            TerminalBankSectionSnapshot bankSectionSnapshot, TerminalMarketSectionSnapshot marketSectionSnapshot,
+            TerminalCustomMarketSectionSnapshot customMarketSectionSnapshot,
+            TerminalExchangeMarketSectionSnapshot exchangeMarketSectionSnapshot,
+            TerminalServerToolsSectionSnapshot serverToolsSectionSnapshot,
+            TerminalLandSectionSnapshot landSectionSnapshot,
+            TerminalNotificationCenterSnapshot notificationCenterSnapshot) {
             this.pageId = normalize(pageId, "home");
             this.title = normalize(title, "制度总览");
             this.lead = normalize(lead, "当前玩家制度摘要");
@@ -210,6 +234,12 @@ public class TerminalOpenApproval {
             this.serverToolsSectionSnapshot = "server_tools".equalsIgnoreCase(this.pageId)
                 ? (serverToolsSectionSnapshot == null ? TerminalServerToolsSectionSnapshot.placeholder() : serverToolsSectionSnapshot)
                 : serverToolsSectionSnapshot;
+            this.landSectionSnapshot = "property".equalsIgnoreCase(this.pageId)
+                ? (landSectionSnapshot == null ? TerminalLandSectionSnapshot.unavailable() : landSectionSnapshot)
+                : landSectionSnapshot;
+            this.notificationCenterSnapshot = "notifications".equalsIgnoreCase(this.pageId)
+                ? (notificationCenterSnapshot == null ? TerminalNotificationCenterSnapshot.empty() : notificationCenterSnapshot)
+                : notificationCenterSnapshot;
         }
 
         public static PageSnapshot placeholder(String pageId, String title, String lead) {
@@ -222,7 +252,8 @@ public class TerminalOpenApproval {
                 "market".equalsIgnoreCase(normalize(pageId, "home")) ? TerminalMarketSectionSnapshot.placeholder("market") : null,
                 null,
                 null,
-                "server_tools".equalsIgnoreCase(normalize(pageId, "home")) ? TerminalServerToolsSectionSnapshot.placeholder() : null);
+                "server_tools".equalsIgnoreCase(normalize(pageId, "home")) ? TerminalServerToolsSectionSnapshot.placeholder() : null,
+                "property".equalsIgnoreCase(normalize(pageId, "home")) ? TerminalLandSectionSnapshot.unavailable() : null);
         }
 
         public String getPageId() {
@@ -259,6 +290,14 @@ public class TerminalOpenApproval {
 
         public TerminalServerToolsSectionSnapshot getServerToolsSectionSnapshot() {
             return serverToolsSectionSnapshot;
+        }
+
+        public TerminalLandSectionSnapshot getLandSectionSnapshot() {
+            return landSectionSnapshot;
+        }
+
+        public TerminalNotificationCenterSnapshot getNotificationCenterSnapshot() {
+            return notificationCenterSnapshot;
         }
     }
 
@@ -302,11 +341,22 @@ public class TerminalOpenApproval {
         private final String title;
         private final String body;
         private final String severityName;
+        private final String sourceId;
+        private final String targetPageId;
+        private final String targetRecordId;
 
         public NotificationEntry(String title, String body, String severityName) {
+            this(title, body, severityName, "terminal", "", "");
+        }
+
+        public NotificationEntry(String title, String body, String severityName, String sourceId,
+            String targetPageId, String targetRecordId) {
             this.title = normalize(title, "终端通知");
             this.body = normalize(body, "当前没有通知内容。");
             this.severityName = normalize(severityName, "INFO");
+            this.sourceId = normalize(sourceId, "terminal");
+            this.targetPageId = normalize(targetPageId, "");
+            this.targetRecordId = normalize(targetRecordId, "");
         }
 
         public static NotificationEntry placeholder(String title, String body, String severityName) {
@@ -324,5 +374,9 @@ public class TerminalOpenApproval {
         public String getSeverityName() {
             return severityName;
         }
+
+        public String getSourceId() { return sourceId; }
+        public String getTargetPageId() { return targetPageId; }
+        public String getTargetRecordId() { return targetRecordId; }
     }
 }

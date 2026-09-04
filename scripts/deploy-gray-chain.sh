@@ -174,14 +174,21 @@ main() {
     done
 
     if (( ${#services_to_restart[@]} > 0 )); then
+        local -a restart_markers=()
+        for target in "${services_to_restart[@]}"; do
+            restart_markers+=("$backup_dir/.${target}-restart-marker")
+            touch "${restart_markers[${#restart_markers[@]} - 1]}"
+        done
         log "Restarting gray services: ${services_to_restart[*]}"
         restart_gray_services "${services_to_restart[@]}"
         for target in "${services_to_restart[@]}"; do
             wait_for_supervisor_running "$target" >/dev/null
         done
         if (( ! SKIP_LOG_CHECK )); then
+            local marker_index=0
             for target in "${services_to_restart[@]}"; do
-                wait_for_log_done "$target"
+                wait_for_log_done "$target" 90 2 "${restart_markers[$marker_index]}"
+                marker_index=$((marker_index + 1))
             done
         fi
     fi

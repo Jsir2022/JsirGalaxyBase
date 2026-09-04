@@ -5,6 +5,335 @@
 这份文件用于记录 `JsirGalaxyBase` 的持续开发摘要。
 从本次开始，后续每次实际代码变更都应补一条简要 work log。
 
+### 2026-09-01 - 银河仓储 v2：终端托管真实 Cell Bay 与统一资产中心
+
+- 将后续主体验收收口为“终端提供一个 Bay，而非要求玩家摆放实体 Drive”：每位玩家在银河仓储页打开一格原版
+  `Container`，可从背包拖放或 Shift 插入/取出一枚真实 AE2 Storage Cell。Cell 的完整 NBT 由 PostgreSQL
+  保存，容量、物品/类型限制继续由 AE2 Cell 自身解释；不构造第二套物品账本。
+- 新增 `warehouse_terminal_bay` 与 `warehouse_terminal_bay_operation` migration、JDBC 仓储和共享 JDBC schema
+  校验。写入按本服/服务端 UUID/requestId/语义键/版本串行化，Cell 只能是一枚经 AE2 注册表认可的 Storage Cell；
+  重放返回原回执，语义冲突被拒绝并保留前后快照审计。
+- 银河终端改为统一资产中心：Base Vault、一个 Cell Bay 与最近操作在同一页展示；打开 Base Vault 或 Bay 是两个
+  明确入口。页面不再把 Bay 描述成供电、频道或已接入外部 ME 网络，亦不列举或复制 Cell 内物品。
+- 实体 `Warehouse Drive`、其已应用 migration 和方块 ID 保留为兼容内容，不新增配方、不迁移真实 Cell；生产库尚无
+  Drive 登记。灰度已于 2026-09-02 应用纯新增 `20260901_001_add_terminal_warehouse_bay.sql`，同一 JAR 已复制到
+  Lobby 与 Prism 客户端（客户端未启动）；Lobby 重启后完成 `Done`，共享 JDBC schema 校验通过，Bay 与操作审计表初始均为
+  0 行。S1、S2 与 ServerUtilities 未触碰，旧 JAR 已备份到对应 deploy backup 目录。
+- 自动验证：Docker 定向单测、终端页面路由测试和隔离 PostgreSQL schema 集成测试通过；覆盖 Bay 空槽、非 AE2
+  物品拒绝、单格规范化、版本冲突、requestId 幂等/语义冲突、Drive/Bay 表隔离和 schema fail-fast。
+
+### 2026-08-31 - AE2 银河仓储 v1：个人 Warehouse Drive、产权审计与终端状态
+
+- 将原有未注册的 `WarehouseDriveTile` 尖峰升级为个人实体仓入口：注册 AE2 Drive 风格方块、Tile 和单一真实
+  Cell Bay；普通右键不打开原生十格 Drive GUI，终端也不构造第二个 ME Terminal。
+- 新增 `warehouse_drive` 与 `warehouse_drive_operation` migration。它们只保存 Drive 的位置、个人所有权、版本和
+  服务端操作审计；所有 Cell 内容、容量、频道、供电与 Storage Grid 真相仍在 AE2。Base Vault 未实现
+  `ICellContainer`，未接入 AE 网络。
+- 放置、Cell 安装、空 Cell 取出和拆除都由共享 PostgreSQL 事务中的 UUID/本服/坐标/所有权检查授权；假玩家、
+  非所有者、非空 Cell 拆除和爆炸不能绕过。侧向自动化不再暴露 Cell 槽。启用 `warehouseEnabled=true` 时缺 AE2、
+  共享 JDBC 或 schema 会 fail-fast。
+- 新增顶层“银河仓储”终端页，只读显示本人已登记 Drive、已加载状态、Cell、频道/供电、物品/类型摘要与近期审计；
+  不主动加载区块、不列举 ME 物品、不跨服访问。
+- 自动验证：新增 `WarehouseDriveServiceTest`、`WarehousePostgresIntegrationTest`，并回归单 Bay 与终端路由测试；
+  Docker Gradle `compileJava`、`testClasses`、定向单测及隔离 PostgreSQL schema 集成测试通过。Warehouse Port、
+  市场自动投递、组织仓和跨服 AE 网络均明确留在后续批次。
+- 灰度：已应用 `20260831_003_add_ae2_warehouse_drive.sql`，构建产物、Lobby 与 Prism 客户端 JAR 的
+  SHA-256 均为 `007cb3274b832f54f1633bc9c0659ead5e859204945bf87af30311e5bed0fbb0`。Lobby 先以
+  `warehouseEnabled=false` 成功启动，再切换为 `true`；日志确认个人 Warehouse Drive runtime 已使用
+  `galaxy_gtnh_lobby` 的共享 JDBC 就绪。客户端未启动，未创建 Drive，S1、S2 与 ServerUtilities 未触碰。
+
+### 2026-08-31 - 系统 Warp 与服务器目录：受审计维护入口
+
+- 新增 `/jgbst admin setwarp|delwarp|warp-enabled|server-enabled`。裸 `/setwarp` 与 `/delwarp` 暂不注册，
+  避免与仍保留的 ServerUtilities 冲突；普通玩家仍仅能浏览和使用系统 Warp。
+- 管理入口要求原版命令等级 2，维护坐标和服务器身份只从服务端在线操作者注入。Warp 仅能在维护者当前服设置，
+  跨服目标需在目标服设置；不能把客户端坐标或远程服位置写入数据库。
+- 新增 migration `20260831_001_add_servertools_admin_audit.sql` 和 `servertools_admin_operation`：Warp 写入、
+  删除、启停以及目录服务器启停与操作者/前后快照审计行在同一 PostgreSQL 事务中提交。审计 schema 缺失只会拒绝
+  管理动作，不破坏既有玩家传送链。
+- 自动验证：新增 `ServerToolsAdminServiceTest`，并扩展隔离 PostgreSQL `ServerToolsPostgresIntegrationTest`
+  覆盖审计行、Warp 启停和服务器目录启停；定向 Docker Gradle 回归通过。
+
+### 2026-08-31 - 终端通知中心页面 v1：筛选、定位与有界玩家快照
+
+- 影响范围：`TerminalPlayerNotificationCenter`、`TerminalNotificationFeed`、终端页面快照/网络编解码、
+  `TerminalNotificationCenterSection` 与对应定向测试。
+- 新增顶层 `通知 / 消息中心`；市场恢复、跨服传送、地产 `SHADOW` 与银行等来源继续各自拥有业务真源，
+  通知中心仅保存当前玩家的 40 条有界展示索引，不建立第二套订单、票据、产权或账本。
+- 同一来源/目标/内容的通知合并为出现次数；普通 INFO 刷新不进入历史。全量通知页快照不会被 HUD
+  当作新的 Toast 重播，Toast 仍只读取本次动作反馈。
+- 页面支持来源和严重等级循环筛选、固定 6 条分页，以及点击记录复用既有受控页面定位；不发送玩家、
+  订单所有者、坐标或客户端筛选状态给服务端。
+- 验证：Docker Gradle 定向 `TerminalNotificationFeedTest`、`TerminalPlayerNotificationCenterTest`、
+  `TerminalNotificationCenterStateTest`、`TerminalNotificationPacketTest`、`TerminalServiceTest` 通过。
+
+### 2026-08-31 - ServerTools 终端 TPA 页面 v1
+
+- `群组服传送` 页新增服务端快照驱动的 TPA 表单和近期收发件箱：显式目标服务器发起、收到请求接受/拒绝、
+  已发待确认请求取消，以及 `PENDING / ACCEPTED / DECLINED / CANCELLED / EXPIRED` 状态展示。
+- 新增版本化五段 `TerminalServerToolsActionPayload`，同时兼容旧 Warp、快捷动作和 Home payload。TPA payload
+  只包含另一位玩家和目标服；服务端继续从 `EntityPlayerMP` 与本服配置注入身份，所有动作都复用既有
+  `PlayerTeleportService`、PostgreSQL 条件状态更新和接受后源服 ticket 派发链。
+- 快照与网络模型只传当前玩家自身的请求方向、对手名、目标服和状态；不向客户端发送 UUID、坐标、
+  接受者落点或其他玩家的 TPA。写动作均经过终端精确确认框，最终由服务端重验。
+- 自动验证：Docker Gradle `compileJava compileTestJava`、`TerminalServiceTest` 与
+  `TerminalServerToolsSectionPacketTest` 通过；CodeGraph 同步后复核终端 section、壳、网络与 runtime bridge，
+  Docker Gradle 全量 `test`、`assemble` 和 `git diff --check` 均通过。
+- 灰度：同一 runtime JAR SHA-256 `13614be469755ab7420b930a9d1f79be456103075c1389f4d7b665b73b4c5b26`
+  已同步到构建产物、Lobby 与 Prism 客户端；Lobby 本次启动到达 `Done (1.153s)!`。客户端未启动，
+  S1、S2、ServerUtilities 和 PostgreSQL schema 均未修改。
+
+### 2026-08-31 - 市场恢复扫描与 PostgreSQL 回归审计收口
+
+- 严格只读市场审计定位到 4 条 8 月旧 `BUY_ORDER_CREATE` 恢复记录：关联订单、正式冻结银行流水和返还流水均已不存在，玩家账户冻结额为 `0`；旧版本曾错误地把同账户解冻当作账户间转账，之后每次启动又因“冻结余额不足”在第一条记录中止整批恢复扫描。
+- `MarketRecoveryService` 现在仅在存在关联订单或正式冻结流水时执行资金返还；若两者都不存在则写入明确的
+  `NO_PERSISTED_FREEZE_OR_ORDER` 审计结论并安全收口，不会从玩家账户的聚合冻结余额中猜测或释放其他订单的资金。
+  已存在正式返还流水的重复扫描仍只重放原结论，不会二次返还。
+- 修正 `MarketPostgresIntegrationTest` 的隔离 JVM 夹具：定制市场快照不再依赖未启动 Forge 时没有 ItemBlock 的
+  `Blocks.stone`，改用本地 `Item` 夹具，实际 PostgreSQL 的发布、购买、领取路径重新可执行。
+- 验证：CodeGraph 复核恢复链及其受影响测试；`StandardizedSpotMarketServiceTest`、Docker Gradle 全量
+  `test`、`assemble`、`git diff --check` 通过；真实 PostgreSQL 隔离 schema 的银行、市场、地产、物品策略、
+  ServerTools 五组集成测试通过（不写生产业务数据）。部署后 Lobby 启动扫描已收口 4 条旧记录，
+  `scripts/market-audit.sh --strict` 返回 `anomaly_count=0`。
+- 灰度：runtime JAR SHA-256 `20a0f5045c2f1eafc18162dc91e628bed19e5c08a7676d6d26edee1fa490df1f`
+  已同步到构建产物、Lobby 与 Prism 客户端，Lobby 到达 `Done (1.155s)!`；客户端未启动，S1/S2 和
+  ServerUtilities 未触碰。
+
+### 2026-08-30 - 定制市场与汇率市场规则收口
+
+- 复核并固化定制市场的独立 `listing / snapshot / trade / audit` 链：发布、浏览、购买、取消、待领取、
+  Base Vault 投递、未知交付锁定和管理员受审计恢复均不复用标准商品订单簿；单元与 PostgreSQL 回归覆盖
+  发布、成交、领取、投递失败、完成写入失败、手工恢复及 requestId 语义冲突。
+- 汇率市场将规则版本升级为 `exchange-taskcoin-v1-stack64`：任务书硬币报价与执行均由服务端限制为
+  单个 Base Vault 物品栈（64 枚），超限返回结构化 `EXCHANGE_INPUT_QUANTITY_LIMIT`；终端提交改为实际按所选
+  Vault 格完整数量结算，修复报价按整叠但旧实现只扣一枚的不一致。
+- `ExchangeMarketService` 以本服配置身份产生报价与账本，执行拒绝外部来源服伪造；银行兑换审计新增最大输入量，
+  储备不足不写半条事务，重复 requestId 重放原交易而不再次扣减储备。新增单元与 PostgreSQL 集成回归覆盖这些边界。
+- 本批不引入市场化汇率、手续费、日/周期额度、自动补储备或第二套兑换账本；固定规则的后续经济调整必须以新规则版本
+  进入独立评审。
+- 验证：CodeGraph 复核 `CustomMarketService`、`ExchangeMarketService`、终端执行入口与受影响测试；定向服务回归、
+  实际 PostgreSQL 隔离 schema 的银行/市场集成测试、Docker Gradle 全量 `test`、`assemble` 与 `git diff --check`
+  均通过。集成测试还发现并修复规则键超过既有 `VARCHAR(32)` 的回滚问题；测试不会写入生产业务 schema。
+- 灰度：同一 JAR（SHA-256 `f485ee269b878dff30b70d322ae206bab8a1fc7d218f5630ab595df823edbf69`）已部署 Lobby
+  与 Prism 客户端，三处哈希一致；无新增 migration。Lobby 到达 `Done (1.209s)!`，客户端未启动，S1/S2 与
+  ServerUtilities 未触碰。
+
+### 2026-08-30 - AE2 Warehouse Phase 0：单 Cell Bay 技术尖峰
+
+- 新增仅供技术验证的 `WarehouseDriveTile` 和 `Ae2WarehouseDriveProbe`：直接复用 GTNH AE2 的真实 Cell、
+  频道、供电、容量与 `Actionable.SIMULATE` 语义，限制为一个 Cell Bay，不复制 Cell 内容进入 JGB 数据库。
+- 新增纯 Java 单 Bay 状态机与定向测试，覆盖非法/重复插拔、非空 Cell 拆卸拒绝、无频道或无供电拒绝、部分容量与
+  模拟操作不改变已存数量。
+- 该尖峰没有注册 Block 或 GUI，也不接市场、Base Vault、跨服 ME、账户归属、组织权限或 Warehouse Port；防止
+  未完成拆装权限和审计前向玩家暴露半成品实体仓。
+- AE2 使用 `compileOnly` 依赖且不被打包；新增 LGPL 来源说明与随 JAR 打包的许可证。Docker Gradle 全量
+  `test`、`assemble`、AE2 未打包断言与 `git diff --check` 均通过。
+- 灰度：同一 JAR（SHA-256 `e7f79a2a3c9d358eb08ac73b6834e4651dae6ec18b04edbfb155bf41b504f035`）已部署 Lobby
+  与 Prism 客户端，三处哈希一致；Lobby 到达 `Done (1.163s)!`，客户端未启动，S1/S2、市场交付和现有
+  ServerUtilities 未触碰。
+
+### 2026-08-30 - BanItem 物品准入策略核心
+
+- 新增服务端纯策略模块：以真实 `ItemStack` 注册名和 metadata 匹配严格配置的 deny rule，范围覆盖标准市场
+  托管、定制挂牌托管、Base Vault 存入，并为地产自动化预留范围；默认关闭且不附带任何禁用表。
+- 标准市场与定制挂牌均在从 Vault 取物前判定；Base Vault 原生容器仅在新增/增加物品提交前判定。拒绝会保留
+  原库存、写入 `item_policy_audit`，不会扫描、删除或改写既有物品。
+- 新增 `20260830_001_add_item_policy_audit.sql`，启用时要求 InstitutionCore 的共享 PostgreSQL 连接、完整表和
+  索引，否则 fail-fast，禁止未审计的静默降级。
+- 自动验证覆盖规则解析、范围、metadata、配置错误、先审计后拒绝、Vault/终端配置回归；PostgreSQL 集成测试
+  覆盖缺表 fail-fast 与审计落库（仅在注入 `JGB_BANKING_IT_*` 时执行）。Docker Gradle 全量 `test` 为 437 项、
+  0 失败、43 项按环境跳过；`assemble` 和 `git diff --check` 均通过。
+- 灰度：`20260830_001_add_item_policy_audit.sql` 已应用；同一 JAR（SHA-256
+  `004113cadd53db5a1483fe84d1b51442629ec372439f09d9481c83625cf6a02e`）已部署 Lobby 与 Prism 客户端，三处
+  哈希一致。Lobby 到达 `Done (1.229s)!`，日志确认策略为默认 disabled；客户端未启动，S1/S2 和
+  ServerUtilities 未触碰。
+
+### 2026-08-30 - 终端统一通知中心：结构化来源与跳转合同
+
+- 将终端通知从“标题/正文/级别”扩展为结构化来源、目标页面和目标记录；市场恢复、跨服 ticket 与地产
+  `SHADOW` 可分别标识为 `market-recovery`、`transfer-ticket`、`land-shadow`，客户端点击优先按合同跳转，
+  旧通知仍保留文本推断回退。
+- 新增纯 Java、有界 `TerminalNotificationFeed`：同键合并计数、最新优先、每页最多 12 条、总量最多 40 条；
+  供后续终端通知页和服务端事件来源复用，不创建第二套聊天或资产状态系统。
+- 地产 `SHADOW` 对真实玩家的拒绝判断会记录最新观察事项，继续不取消事件；终端地产页可显示并定位该观察记录。
+- 自动验证覆盖通知网络 round-trip、来源/目标保真、分页/限频语义及 SHADOW 观察记录；Docker Gradle 全量
+  `test`、`assemble` 与 `git diff --check` 均通过。该能力随本次后续 JAR 继续部署于 Lobby 与客户端，客户端
+  未启动，Lobby 已到达 `Done`。
+
+### 2026-08-30 - ServerTools 终端 1.1：命名 Home 管理与跨服详情
+
+- 群组服传送页新增当前玩家的命名 Home 列表、目标服/维度/坐标详情、名称输入、设定、删除和前往动作；
+  所有写操作与传送均经过确认弹窗。
+- `TerminalServerToolsActionPayload` 保持一段 Warp、两段 Warp/快捷动作兼容解码，第三段追加 Home 名称；
+  终端快照和两套网络包同步传递 Home 列表及选中详情。
+- 服务端始终从在线玩家构造 `TeleportActor`；设定/删除复用 `PlayerTeleportService`，前往复用
+  `prepareHomeTeleport -> Cluster ticket -> 目标服恢复`。不新增 Home 表、坐标客户端信任或另一套传送系统。
+- 自动验证：覆盖旧 payload 兼容、原始网络 `ByteBuf` round-trip、Home 跨服计划派发、设定/删除运行时桥接和
+  终端滚动布局；Docker Gradle 全量 `test`、`assemble` 与 `git diff --check` 均通过。
+- 灰度：同一 runtime JAR（SHA-256 `1f27da49d27112f34cdd73e077acd92b6a52aa11bcf1d50e5f3a080b35f41240`）已部署到 Lobby
+  与 Prism 客户端，三处哈希一致；客户端未启动。Lobby 已到达 `Done (1.530s)!`，S1/S2 未触碰。
+
+### 2026-08-28 - ServerTools 终端快捷传送 1.0
+
+- 复核后确认终端已有“服务器目录 + Warp + 最近 ticket”页面，本轮不重复创建页面；在既有右侧工作区
+  增加“回家 / 返回 / 出生点”快捷操作，并保留 Warp 选择与精确确认弹窗。
+- 快捷操作经版本化 `TerminalServerToolsActionPayload` 进入服务端，分别复用默认 `home`、`back`、
+  `spawn` 的既有 `PlayerTeleportService -> ClusterTeleportService -> ticket/Connect -> 目标服恢复` 主链，
+  没有新增客户端身份、数据库表或第二套传送实现。旧单段 Warp payload 继续兼容解码。
+- 本版明确不在终端伪造家园名称输入、家园列表删除或 RTP 安全选点；它们保留命令入口，后续应作为
+  ServerTools 页面 1.1 的独立交互批次，而不是把随机落点逻辑复制进 UI。
+- 验证与部署：CodeGraph 复核 `TerminalService`、payload、终端壳与 ServerTools runtime bridge 的影响链；
+  定向终端测试、全量 `test`、`assemble` 与 `git diff --check` 通过。JAR SHA-256 为
+  `b79ff0648c24206e951b03b90aa1339d0094c6af5ecdb8708afa6e8b84d81a62`，已部署 Lobby 与客户端，
+  客户端未启动；Lobby 到达 `Done (1.345s)!`。S1、S2 与数据库未修改。
+
+### 2026-08-28 - 无真人跨服 TPA 传送模拟回归
+
+- 将 ServerTools 已接受 TPA 的“源服扫描、计划构造、进程内重复抑制”抽为纯 Java
+  `AcceptedTpaSourceDispatcher`；Forge runtime controller 仅提供真实在线连接并调用该调度器，
+  没有向生产环境加入假人、机器人或第二套传送链。
+- 新增无真人端到端模拟：保留真实 TPA 服务、Cluster ticket 服务与目标服恢复服务，以受控 gateway 和
+  本服传送执行器替代网络与客户端，验证目标接受落点、源服派发、确定性 requestId、重复 tick、重启后
+  ticket 幂等、目标恢复完成、源服隔离与 30 秒超时边界。
+- 该回归不能替代在线模式下的 Velocity/Bungee 实际切服、Forge 重连和真实玩家落点验收；这些仍等待
+  S2 的既有世界文件启动问题解决后再由真人账号执行。
+- 验证与部署：CodeGraph `impact/affected` 复核调度器、Forge 控制器和模拟链；定向模拟回归、全量
+  `test`、`assemble` 与 `git diff --check` 通过。JAR SHA-256 为
+  `2fe8ae4b4c58a3682b6f30b0e2786fd06b2937289a736689cee2650e3cf1dd2c`，已部署到 Lobby 与客户端，
+  客户端未启动；Lobby 到达 `Done (1.252s)!` 且 TPA runtime controller 已注册。S1、S2 和数据库均未改动。
+
+### 2026-08-28 - ServerTools 跨服 TPA 闭环与 SU 兼容命令
+
+- 新增 `/sethome`、`/delhome`、`/tpaccept`、`/tpdeny`；保留既有 `/home set/delete` 与
+  `/tpa accept/deny`，新增 `/tpa cancel` 和 `/tpa status`。
+- `player_tpa_request` 增加接受者落点与 `DECLINED/CANCELLED` 状态；新增 migration 以条件更新保证
+  接受、拒绝、取消竞争时仅一个状态迁移成功，并增加目标提示、源服派发与近期查询索引。
+- 新增 ServerTools tick/login 控制器：目标服只记录接受者落点，源服在请求者在线、仍在原服且未超时
+  时以确定性 requestId 派发现有 cluster ticket，修复跨服接受时目标服没有请求者连接的问题。
+- ServerTools 及 TPA 玩家反馈改为中英文翻译键；PostgreSQL 真源、代理 Connect、目标服落点恢复链
+  保持不变，未引入 Redis、Presence 或第二套传送系统。
+- 自动验证：CodeGraph 复核服务、模块、JDBC 仓储和测试影响链；新增兼容命令、状态机、超时、并发、
+  migration 升级、schema fail-fast 与源服隔离回归；Docker Gradle `test`、`assemble` 与
+  `git diff --check` 均通过。
+- 灰度：已将同一 JAR（SHA-256 `2c3e283dc49009f55810f4ea1211e9b47aa4c1b7037f82ab7be99ece5f8be786`）
+  部署至 Lobby、S2 与客户端（未启动客户端），并成功应用
+  `20260828_001_expand_tpa_request_lifecycle.sql`。Lobby 正常启动且 TPA runtime controller 已注册；
+  S2 因既有 `World/level.dat`/`level.dat_old` 的 ZLIB 损坏退出，未对该世界文件作任何处理。
+
+### 2026-08-28 - ServerUtilities 跨服指令架构与开源实现复核
+
+- 使用 CodeGraph 复核 `PlayerTeleportService -> ClusterTeleportService -> BungeeCordGatewayAdapter
+  -> PlayerArrivalRestoreService`：现有 PostgreSQL 数据、幂等 ticket、代理切服和目标服落点恢复已构成
+  可恢复的跨服主链，不需要重写第二套传送系统。
+- 对照 ServerUtilities 源码确认应吸收的是 `sethome/delhome/tpaccept/tpdeny` 等玩家入口和
+  warmup/cooldown 体验，不引入其单服 Universe、NBT 数据或旧网络宿主。
+- 对照 HuskHomes、Velocity/BungeeCord 官方文档和 Spigot 社区实现：共享 SQL 与实时消息 broker
+  应分层；插件消息受在线玩家载体限制，Redis 适合后续低延迟 Presence/通知但不是当前前置条件。
+- 将下一实施批收敛为兼容命令、TPA 拒绝/取消/查询/过期、目标服数据库轮询提示、本地化和状态并发
+  测试；自动找服、Redis/代理消息总线、全局 spawn/RTP、warmup/cooldown、收费与 death-back
+  进入后续优化池。
+- 本轮仅更新已有设计与命令文档，没有修改 Java、数据库、配置或部署产物；未启动客户端，未触碰
+  Lobby、S1、S2 和 ServerUtilities JAR。
+
+### 2026-08-27 - 个人地产 C.2 高 GUI Scale 视觉比例修正
+
+- 根据 1680x840 实机截图反推约 350x193 逻辑工作区，修正原先固定最小尺寸在 GUI Scale 4 下
+  被放大的问题：顶部业务区压缩到 32px，地图恢复到至少 74% 内容宽度，检查器收敛到约 24%。
+- 地图工具栏由 22px 缩为 13px，底部状态条同步压缩；悬浮卡改用地图相对宽度，不再使用
+  170px 硬下限。
+- 玩家皮肤定位针取消 34px 最小值，改为随区块尺寸计算且不覆盖多个区块；头像、针体和朝向箭头
+  保持同一缩放关系。
+- 检查器拆分所有者、产权、保护、地形与四类市场占位信息，修复中文界面显示字面量 `\n`。
+- 本轮未改地产网络合同、PostgreSQL、产权数据、认领安全规则和价格能力；Lobby 继续保持
+  `SHADOW`，ServerUtilities 保留。
+- 验证与部署：CodeGraph `query/impact/affected` 将回归范围收敛到地产 section、地图输入与布局测试；
+  Docker Gradle 定向测试和完整 `test` 均通过，全量为 413 项、0 失败、37 项按环境跳过，
+  `assemble`、语言文件换行检查和 `git diff --check` 通过。构建、Lobby 与客户端 JAR SHA-256
+  均为 `a44faaf8661d8e2a3db3cf9f33205b2011ee7d3b5ce84a35ba225a76a1fa094e`。
+- Lobby 本次启动到达 `Done (1.409s)!`，地产运行时为
+  `SHADOW / activeTitles=1 / fakePlayersAllowed=false`；Lobby 与客户端的 ServerUtilities 2.2.2
+  均保留。未启动客户端，未触碰 S1/S2。
+
+### 2026-08-24 - 个人地产 Batch C.1 真实区块地图
+
+- 用专用地图画布替换 225 个普通按钮：客户端只读取已加载区块并生成 16x16 地形瓦片，
+  叠加本人/他人/保留区产权色、外边界、选择框和玩家方向标记；未知区块明确显示斜纹。
+- 新增三级缩放、滚轮、拖拽平移、定位与刷新；视口最多偏离玩家 16 区块，远级最大 31x31。
+  地形使用内存 LRU 和单后台采样线程，OpenGL 纹理只在渲染线程创建、上传和释放，不写磁盘。
+- 地产网络合同改为受限视口与稀疏产权单元，兼容旧六段 action payload；越界认领返回
+  `OUT_OF_RANGE`，不会错误认领脚下区块。认领范围仍是玩家实时位置周围 15x15。
+- 来源与许可：地形采样参考 `Reference/ServerUtilities` 的 `ThreadReloadChunkSelector`，派生
+  文件保留 LGPL-3.0-or-later SPDX；SU 仍是参考源码和灰度期并存 Mod，不成为 JGB 运行依赖。
+- 自动化：Docker Gradle 全量 `test` 已通过，覆盖负坐标、视口限幅、缩放锚点、旧payload、
+  稀疏产权、保留区、越界认领、网络往返、布局和地形明暗。人工地图观感与保护事件矩阵后置。
+- 验证与部署：全量测试共 404 项、0 失败、37 项按环境跳过；另行注入现有测试数据库配置后，
+  PostgreSQL 地产集成测试 5/5 通过。`assemble` 与 `git diff --check` 通过，最终 JAR SHA-256 为
+  `6d23dd948b028352f581b50ee56324b34bc7fda177edd4f049f4fe8b4e94f76d`。
+- 同一 JAR 已部署到 Lobby 与客户端，客户端未启动，S1/S2 未修改。Lobby 到达
+  `Done (1.154s)!`，地产运行时为 `SHADOW / activeTitles=0 / fakePlayersAllowed=false`，Lobby 和
+  客户端的 ServerUtilities 2.2.2 均保留。启动日志仍有本批无关的既有市场恢复警告
+  `insufficient frozen balance`，不影响地产运行时就绪，但应在市场恢复账本任务中继续处理。
+
+### 2026-08-23 - 个人地皮 Batch C 终端闭环与自动验证
+
+- 新增独立顶层 `PROPERTY / 地产` 页面，首版提供“附近地皮 / 我的地皮”：附近页使用服务端当前玩家位置生成 15x15 网格，我的地皮使用服务端计数与分页，并显示选中产权、版本、配额和 SHADOW/ENFORCE 状态。
+- 新增结构化地产动作载荷、快照、客户端模型和网络编解码；客户端不能提交玩家 UUID、本服 ID或维度，服务端从在线玩家和当前服运行时注入身份。任意远程空区块会被收敛回当前网格，只有已证实属于本人的产权可从“我的地皮”跨距离选中。
+- 认领与放弃使用精确确认框、唯一 requestId 和 expectedVersion；服务端继续复用 Batch B 的归属、配额、禁用维度、保留区、幂等与版本校验，成功后返回最新保护快照。
+- 新增中英文地产 UI 文案、负坐标/15x15 映射、越界选择、认领放弃、11 条/每页 4 条、载荷边界、网络往返和专用页面边界测试。
+- 修复灰度部署脚本可能接受旧 `Done (` 日志的问题：每次重启创建时间标记，只接受本次重启后更新的日志；新增独立脚本回归。
+- 人工 Forge 事件矩阵仍后置；Lobby 必须保持 `SHADOW`，ServerUtilities 继续保留，S1/S2 不在本批部署范围。
+- 验证与部署：CodeGraph 查询/调用链/impact 确认影响集中在终端快照、网络编解码、页面模型、专用 section 和地皮服务；Docker Gradle 全量为 396 项、0 失败、37 项按环境跳过，5 项 PostgreSQL 地皮集成测试另行强制执行通过，`assemble`、`git diff --check`、语言键一致性与部署脚本回归通过。
+- 构建、Lobby 与客户端 JAR SHA-256 均为 `bcb8136e7febc625900c426946e2ae86d5e0e956a21fd4c8db9b881c083854b0`；Lobby 本次到达 `Done (1.205s)!`，地产运行时为 `SHADOW / activeTitles=0 / fakePlayersAllowed=false`，数据库仍为 0 条产权和 0 条操作。客户端未启动，ServerUtilities 在 Lobby 和客户端均保留。
+
+### 2026-08-22 - 个人地皮 Batch B PostgreSQL 与保护执行层
+
+- 新增个人产权与操作日志 migration；产权按 server/dimension/chunk 唯一，放弃改为 `REVOKED + version++`，操作保存结构化前后快照。
+- 新增共享 JDBC 仓储、事务执行器和 schema fail-fast；请求、玩家配额与区块使用 advisory lock，服务重启可从 PostgreSQL 重建本服保护快照，失败事务不会留下半条产权。
+- 增加服务端 land 配置和严格解析；`LandModule` 不再创建内存正式运行时，只在 dedicated server 启用后复用 Institution Core 的共享连接。
+- 增加 SHADOW/ENFORCE 保护层，覆盖破坏、放置、交互、非玩家实体攻击、爆炸方块和假玩家；PvP 不变，假玩家默认拒绝，日志与玩家提示限频。
+- 本批没有命令、终端地产页、挂牌或交易。Lobby 已进入 SHADOW 并继续保留 ServerUtilities；启动日志确认 `activeTitles=0`、`fakePlayersAllowed=false`，数据库产权与操作表均为 0 行。
+- 验证与部署：`git diff --check`、Docker Gradle 地皮定向测试、5 项真实 PostgreSQL 隔离 schema 测试、常规全量 `test` 与 `assemble` 通过；全量为 385 项、0 失败、37 项按环境跳过。强制开启全部 PostgreSQL 集成测试时另发现 1 个既有银行 missing-schema 错误文案断言不匹配，本批未改无关银行合同。
+- migration `20260822_001_add_personal_land.sql` 已应用；最终构建、Lobby 与客户端 JAR SHA-256 均为 `659bd21cc5e744038837baaba29c841d0660da049519cebe2a6ff52025787494`。Lobby 到达 `Done (1.380s)!`，客户端未启动；S1/S2、旧 Team claim 均未修改。
+
+### 2026-08-22 - 完成个人地皮 Batch A 代码尖峰
+
+- 新增并注册 `LandModule`，落地跨服区块键、版本化个人产权、状态/结果枚举、结构化动作回执，以及个人认领和放弃服务。
+- 认领支持 `requestId + semanticsKey` 幂等、单人上限、禁用维度和保留区块；放弃时重新校验所有者、版本和产权状态。新增可从仓储重建、以不可变快照发布的 `LandProtectionIndex`。
+- 当前只使用内存仓储，默认上限 4 是测试占位；尚未接 PostgreSQL、Forge 保护事件、终端 PROPERTY 页面、银行地产交易或旧 SU 数据迁移，因此不能视为游戏内功能已经上线。
+- 补齐 `THIRD_PARTY_NOTICES.md`、派生源码 SPDX/来源说明和发布资源打包，修正资源目录 MIT 许可证的占位版权。构建 JAR 已确认包含第三方声明与 ServerUtilities LGPL 全文。
+- 验证：`git diff --check`、Docker Gradle 地皮定向测试和 `assemble` 通过。本轮未部署、未删除 ServerUtilities JAR，也未触碰 S1；既有市场弹窗工作区修改保持原样。
+
+### 2026-08-22 - 个人地皮优先与 ServerUtilities 代码复用评估
+
+- 主题：在确认可沿用 LGPL-3.0-or-later 后，评估 ServerUtilities claim 源码可复制范围，并把首轮范围收紧为个人认领、个人挂牌和个人购买。
+- 源码结论：SU 全仓 592 个 Java 文件、约 54,091 行；claim 数据、命令、网络和旧 GUI 候选面约 2,317 行。区块坐标、claim 状态、内存索引、Forge chunk ticket、保护事件与地图算法有复用价值；TeamData、Universe、PermissionAPI、旧 wrapper、旧 GUI 和命令宿主不进入个人首版。
+- 架构结论：只新增一个内部 `LandModule`，不把保护、产权、交易拆成多个 Mod；PostgreSQL 是产权/挂牌/审计真源，本服内存 map 是可重建保护索引。
+- 交易与 UI：个人地产借鉴定制市场的 requestId、row lock、状态机、共享事务和审计，但无 ItemStack/待领取；终端新增 `PROPERTY` 页，使用“附近地皮 / 我的地皮 / 在售地产 / 交易记录”，MARKET 仅作为路由入口。
+- 迁移边界：旧 S1/S2 claim 属于 team，组织关系未定前只进入 migration staging，不自动归个人；个人版可先在无旧 claim 的隔离环境或 Lobby 验证无 SU 独立运行，S1/S2 删除后置。
+- 文档：新增 `serverutilities-personal-land-code-reuse-evaluation-v1.md`，同步修订地产总设计、映射表、产品方向与文档入口。本轮没有复制生产代码、改数据库、删除 JAR、部署或触碰 S1。
+
+### 2026-08-22 - 修正 ServerUtilities 最终形态并补齐地产制度关系
+
+- 主题：纠正“长期保留 ServerUtilities 保护适配器”的错误理解，明确把所需能力重构进 BaseMod，迁移验收后删除独立 ServerUtilities。
+- 文档核对：复查项目定位、银行账户/账本、三类市场、定制挂牌、ServerTools 权限预留、终端职业占位及 ServerUtilities 映射；仓库文档引用的旧 `../../Docs/设定.md` 等外部策划文件当前实际路径不存在，因此未把这些历史引用当成现行事实。
+- 设计结果：JGB 原生 PostgreSQL 产权与本服内存保护索引是唯一正式运行态；ServerUtilities 只用于冻结参考行为和一次性只读导出/导入，不得成为编译、启动、页面或保护判断依赖。
+- 制度关系：Team 是组织、共同产权和 Team 银行账户的主体；职业是个人规则输入，不是 Team 岗位或产权主体；个人/Team 资金统一走银行账本；地产使用独立固定价挂牌和产权过户，不进入标准商品订单簿；BQ/职业后续通过事实和版本化规则接入。
+- 最小路线：原生个人 claim → GTNH 保护矩阵 → 最小 Team → 迁移演练与灰度卸载 → 固定价地产交易；本轮不修改代码、数据库、服务器配置或任何 JAR，不触碰 S1。
+
+### 2026-08-22 - 修正 ServerUtilities 集成状态并建立领地/地产路线
+
+- 修正此前判断：JGB 只吸收了 `home/back/spawn/warp/tpa/rtp`、跨服 ticket 与终端传送页，并未完成 ServerUtilities 的 claim、chunk loading、team/rank、领地地图或其他工具集成。
+- 实时只读检查确认 Lobby、S1、S2 与客户端均有 ServerUtilities 2.2.2，三服 claim/protection/chunk-loading 配置启用；S1 有 23 个、S2 有 16 个现存团队 claim 数据文件，Lobby 为 0。本轮不修改配置或 `.dat`，不触碰 S1。
+- 新增 `serverutilities-land-property-integration-v1.md`：把领地保护、产权登记和地产交易分开。该条最初写成运行时只读 Adapter 路线，已由同日上方“修正 ServerUtilities 最终形态”记录废止；现行路线是 JGB 原生实现和一次性旧数据迁移。地产不进入标准商品订单簿，chunk loading 不随产权出售。
+- 更新 ServerUtilities 映射、当前产品方向、AE2 仓储优先级和文档索引。AE2 方向保留但暂缓；BanItem 策略、BQ 任务事实、职业系统和连锁挖矿均记录为后续任务，其中 BQ/职业尚无权威制度合同，不做占位实现。
+- 本轮仅更新设计文档，没有修改代码、数据库、服务器配置或部署产物。
+
+### 2026-08-20 - 修复空对手盘被误报为余额不足
+
+- 实机截图确认买入弹窗处于市价模式，账户余额为 `891385`，但盘口为“买一 61 / 最新 69 / 卖一 --”；根因不是银行余额，而是当前没有可立即成交的卖单。客户端此前将缺失的卖一价格解析为 0，再由最大可买量分支误报“银行可用余额不足”，并把预估总额错误显示为 0。
+- 市价买入缺少卖盘时现在明确提示“卖盘为空，无法市价买入；可改用限价挂单”；市价卖出缺少买盘时给出对称提示。对手价不存在时预估总额显示 `--`，真实余额不足与库存不足校验保持不变；限价单仍可在无对手盘时正常挂入订单簿等待成交。
+- 验证与部署：Docker Gradle 定向 `MarketOrderEntryPopupTest` 通过，新增买卖双向空对手盘回归；`assemble` 通过。构建产物、Lobby 与 Prism 客户端 JAR SHA-256 均为 `c953d7e4f47a4de2b7551e958582be0066cf57d4af4fe452794743285bbca040`。Lobby 已完成重启与部署脚本启动检查；未触碰 S1/S2，也未启动客户端。
+
 ### 2026-08-19 - 复盘并收口终端数字显示遗漏
 
 - 复盘语义化数字规范的全部客户端落点，确认旧的独立 `K/M` 算法已经清除，服务端快照、网络结构和操作请求继续携带原始整数。
@@ -2388,3 +2717,62 @@
 - 订单与资产中心重新分配纵向预算：账户摘要卡由 34 压缩至 28，页签由 20 压缩至 18；宽度不少于 600 时，搜索、搜索/重置动作及商品、方向、状态、时间筛选合并为单行。表头偏移从 120 降至 80，窄界面保留双行工具栏并使用 103 偏移，固定页脚和服务端分页语义不变。
 - 新增弹窗宿主边界/内容驱动高度测试，以及订单中心宽窄布局的表格预算测试。Docker Gradle 定向测试与完整 `test` 均通过（`BUILD SUCCESSFUL`）；`git diff --check` 通过。未启动客户端或自动截图。
 - 部署：`scripts/deploy-jgb.sh --targets lobby,s2,client` 已构建并同步；构建产物、Lobby、S2、Prism 客户端四处 SHA-256 均为 `59ca489d69a3d485a6b1f755e6764ed35ce868c3ea2f9ac474b96d8cf43115bf`，客户端文件时间为 `2026-08-17 22:40:57 +0800`。Lobby 达到 `Done (1.548s)`；S2 仍因既有世界 NBT 的 ZLIB `EOFException` 未到 Done，部署脚本因此返回非零。未启动客户端、未自动截图，部署目标未包含 S1。
+
+### 2026-08-24 - 个人地产 Batch C.2 大地图与交互改造
+
+- 地产附近地图从居中正方形改为完整矩形工作区，最长边按近 9、中 15、远 31 个正方形区块显示；地图工具栏、图例和指针状态收进画布，右侧检查器限制为紧凑宽度。
+- 玩家标记改为真实客户端皮肤头像定位针并带方向箭头；悬浮补齐安全长整型方块范围、距离、加载/生物群系、产权号/版本、所有者脱敏状态和操作原因。
+- 接入左键选择、4px 拖拽阈值、滚轮锚点缩放、右键权威快照后菜单、`F/R/+/-/Tab/Esc`。确认框打开时继续由终端 popup 层独占输入，认领/放弃仍走服务端身份、半径、版本和幂等校验。
+- 认领费用、参考地价、挂牌价和最近过户价只显示“未启用 / 未挂牌 / —”；本批没有增加数据库字段、银行扣款、客户端身份字段或地产交易合同。
+- CodeGraph 前置查询覆盖 `TerminalLandMapPanel`、`LandMapViewport`、`TerminalLandSection` 和 `CanvasScreen`；自动测试覆盖矩形数学、输入分流、图层状态和最小 620×340 布局。最终构建、部署和哈希记录在本批交付结果中补齐。
+- 最终验证：Docker Gradle 全量 `test` 通过（409 项，37 项环境跳过，0 失败）；另以 Lobby PostgreSQL 配置强制执行 `LandPostgresIntegrationTest` 5 项，0 跳过/失败。`assemble`、语言文件结构检查和 `git diff --check` 均通过。
+- 部署：同一 runtime JAR 仅同步到 Lobby 与 Prism 客户端，三处 SHA-256 均为 `7725268364894f4dacd3b25dd7db8917930d06f1c2719bbda36943724f8bc45d`；客户端未启动，S1/S2 不在目标中。Lobby 达到 `Done (1.435s)`，地产运行时以 `SHADOW` 就绪并恢复 1 条有效产权；Lobby 与客户端均继续保留 `ServerUtilities-2.2.2.jar`。
+# 2026-08-31 - 物品准入策略终端诊断页
+
+- 终端新增“物品策略”只读页：显示服务器已解析拒绝规则，以及当前玩家、本服范围内最近 12 条拒绝审计。页面不扫描背包、不改写既有物品，也不暴露其他玩家或跨服记录。
+- 策略未启用、运行时不可用和审计数据库暂时不可读均显示明确状态；策略本身不会因诊断查询失败降级为允许。
+- 新增 PostgreSQL 查询隔离/时间排序覆盖，并回归终端导航与禁用策略安全空态。
+# 2026-08-31 - 全局 Hub / Spawn 与目标服 RTP
+
+- `/spawn` 现在可由服务端 `globalHubTarget` 配置提升为跨服全局 Hub；未配置时严格保留当前世界出生点语义。
+- `/rtp <targetServerId>` 使用现有 transfer ticket：源服只校验配置和服务器目录，目标服才在自己的维度选择安全随机点，随后以 ticket requestId 幂等写入最终 RTP 审计。源服不会访问或加载远端世界。
+- 新增 `20260831_002_add_global_entry_rtp_audit.sql`，为 RTP 审计补齐 requestId 和实际目标服；覆盖配置解析、远端计划不预写伪坐标、目标服解析与 PostgreSQL 迁移/幂等写入。
+- 验证：Docker 定向单测、Lobby PostgreSQL 临时 schema 集成测试、完整 Docker `test` 与 `assemble` 均通过；完整测试为 465 项通过、48 项既有环境条件跳过。
+- 部署：`20260831_001_add_servertools_admin_audit.sql` 和 `20260831_002_add_global_entry_rtp_audit.sql` 已按迁移历史表应用。runtime JAR SHA-256 `6409361a211ca9644d0031382906f2af625e17de2fe899aadc5db1f548116b20` 已同步至 Lobby 与 Prism 客户端；Lobby 已到 `Done (1.296s)`，客户端未启动，S1/S2 未触碰。全局 Hub 与目标服 RTP 配置保持默认空值，未在本轮启用。
+
+# 2026-09-02 - 银河资产中心统一容器与视觉重构
+
+- 将终端仓储入口重构为紧凑的双列 Vault/Bay 状态卡、两个直接工作区入口和自适应审计区，移除窄终端下强制纵向堆叠造成的越界。
+- 新增接近全屏的 `资产概览 / Base Vault / AE2 存储 / 操作记录` 四页签资产中心。Base Vault 27 格、单个真实 AE2 Cell Bay 与玩家背包由同一个服务器权威 Container 管理，不再弹出两套简陋小窗口。
+- Forge 只注册一个资产 GUI handler，并兼容旧 Vault/Bay GUI ID；修复同一 Mod 实例重复注册 handler 可能覆盖前一个入口的问题。
+- 服务端按页签拒绝隐藏槽位点击，Vault 与 Bay 继续分别使用既有版本、幂等和审计合同；失败交互恢复 Vault、Bay、玩家背包和光标快照。操作记录仅查询当前玩家并合并普通 Vault/Bay 记录。
+- 不伪造银行、ME 网络、频道、供电或 64K 容量；Cell 未插入时显示真实空态，插入后才读取其真实 AE2 容量与类型数据。
+- 自动验证覆盖 `350×193` 和 `620×340` 布局、终端入口不越界、页签槽位可见性、审计协议上限、Vault 最近操作隔离以及 Bay/Vault 服务回归。Docker Gradle 全量 `test`、使用 Lobby PostgreSQL 配置的 `WarehousePostgresIntegrationTest`、`assemble` 与 `git diff --check` 均通过。
+- 部署：runtime JAR、Lobby 与 Prism 客户端三处 SHA-256 均为 `c36ee1b9a837abdd82abe3fa7ddeb01ccf7d642b9342f63804be2fafba5a9aeb`。Lobby 完成 `FMLServerStartedEvent`，日志确认 `Registered unified personal asset center container GUI`；客户端未启动，部署目标未包含 S1、S2。
+
+# 2026-09-02 - 资产显示框架与业务动态后续待办
+
+- 实机复核确认独立资产 Container 仍存在两项架构问题：它没有复用终端壳组件，返回时关闭容器后重新请求终端会闪屏；当前“操作记录”把手工槽位变更和 Bay 版本审计暴露成了玩家内容。
+- 后续不把整个终端根页面升级成 Container。计划抽离无继承关系的 `CanvasSceneRuntime`，由普通 `GuiScreen` 宿主和原生 `GuiContainer` 宿主共同委托；在其上分别建立 `TerminalScreenBase` 与 `TerminalContainerScreenBase`，并共享状态栏、导航、主题、弹窗和内容区布局。
+- 资产 Container 页面将直接展示 Vault、Cell Bay 与玩家背包，移除说明卡和二次入口；服务端 Container、版本、准入、失败恢复与技术审计继续保留。
+- 玩家可见记录改为结构化“资产动态”，只纳入真实卖出成交到账、买入入库、定制交付、撤单返还以及交付/恢复结果；手工存取、整理、Cell 插拔等记录只留在后台审计。卖出不得以挂单托管代替成交，业务链需用稳定关联键去重。
+- CodeGraph 复核：`CanvasScreen` 的框架影响面约 47 个符号，而直接改造 `TerminalHomeScreen` 会影响约 202 个符号，因此采用组合式双宿主框架。此次仅更新待办与设计文档，没有修改代码、数据库或部署状态。
+
+# 2026-09-04 - 终端 GUI 双宿主框架与资产页原生化
+
+- 抽取无 Minecraft 宿主继承的 `CanvasSceneRuntime`；`CanvasScreen` 与新增 `CanvasContainerScreen` 共同委托根 Panel、Popup、Hover、主题和输入分派。新增普通/Container 两种终端基类，并用 `TerminalShellFrame` 复用状态栏、导航、背景和 `TerminalHomeLayout`。
+- 资产导航现在直接打开统一 Container。存储管理在同一会话中显示 27 格 Base Vault、真实 AE2 Cell Bay 与玩家背包；窄屏纵向堆叠、宽屏并排。背包 Shift-click 固定进入 Vault，Cell 仅能手动拖入 Bay，Vault/Bay 可 Shift-click 返回背包。
+- 新增同周期 `TerminalRouteCoordinator`，Container 返回或切换普通终端页面时立即恢复缓存终端壳并请求服务端快照，不再先关闭到游戏画面。
+- 玩家“操作记录”改为“资产动态”：结构化投影标准市场卖出结算、实际 Vault 买入交付、定制市场交付、撤单返还、失败与恢复；手工存取、整理和 Cell 插拔仍保留后台审计但不显示。新增定制成交按玩家隔离的近期查询，不新增数据库表。
+- CodeGraph 前置确认 `CanvasScreen` 影响 47 个符号、`TerminalAssetCenterContainer` 影响 51 个符号、`TerminalHomeScreen` 影响 202 个符号，因此保留 `GuiScene` 合同并采用组合迁移；完成后重新同步索引并复核 `CanvasSceneRuntime`、`CanvasContainerScreen`、资产 Container 与资产动态投影的影响链。
+- 自动验证：双宿主/布局/协议/资产动态定向测试通过；Docker Gradle 全量 `test` 为 492 项、52 项既有环境条件跳过、0 失败；Lobby PostgreSQL 上强制执行市场集成 15/15 与仓储集成 4/4，均 0 跳过、0 失败；`assemble` 与 `git diff --check` 通过。
+- 部署：同一 runtime JAR 仅同步到 Lobby 与 Prism 客户端，构建产物和两处目标 SHA-256 均为 `472c675afb3b987da5484ad47420a3262eb23c8b0613e50f2272e07d3e95e717`。Lobby 达到 `Done (1.312s)`；客户端未启动，部署目标不包含 S1、S2。本批没有新增或修改资产数据库结构。
+
+# 2026-09-05 - 资产中心单 Cell 内容浏览与左右分区
+
+- 存储管理调整为明确的左右结构：左侧同时显示 27 格 Base Vault 与玩家背包，右侧始终保留一个真实 Cell Bay；Cell 未插入时不显示空内容网格，插入后直接显示该 Cell 的分页内容。
+- 新增服务端 Cell 内容快照与有限存取动作。每种物品按虚拟条目显示真实 `long` 数量；左键提取一组、右键提取一个，手持物品经明确按钮存入。容量、类型与物品准入继续由 AE2 Cell inventory 和现有物品策略决定，不建立外部 AE 网络或第二套库存。
+- Cell 写操作复用 Bay 的 PostgreSQL 产权行、版本和操作审计：请求使用幂等 `requestId`，同时校验所有者、Bay 版本和当前服务器侧光标；客户端不能提交玩家身份或任意存取数量，提取物品标识也只作不可信提示并由当前 Cell 重新匹配。协议保留旧资产动态快照和旧请求的兼容解码。
+- 本轮只完成资产中心功能与布局，现代化平滑主题暂不实施，等待实机核对后再单独设计。
+- 验证：CodeGraph 完成变更后同步并复核资产 GUI、Bay 服务、快照协议和受影响测试链；仓储/协议/布局定向测试、仓储 PostgreSQL 4 项集成测试、全量 `test`（496 项，52 项既有环境条件跳过，0 失败）、`assemble` 与 `git diff --check` 均通过。
+- 部署：runtime JAR、Lobby 与 Prism 客户端三处 SHA-256 均为 `edce03d59ac46d70903f9962dc55ff87bd9674dbf7170d0ee0b1d144d7a3223c`。Lobby 达到 `Done (1.281s)` 并注册统一资产中心 Container；客户端未启动，部署目标不包含 S1、S2。本轮没有新增或修改数据库结构。

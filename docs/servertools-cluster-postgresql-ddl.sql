@@ -91,6 +91,20 @@ CREATE TABLE IF NOT EXISTS server_warp (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS servertools_admin_operation (
+    operation_id BIGSERIAL PRIMARY KEY,
+    request_id VARCHAR(64) NOT NULL UNIQUE,
+    actor_player_uuid VARCHAR(64) NOT NULL,
+    actor_player_name VARCHAR(64) NOT NULL,
+    source_server_id VARCHAR(64) NOT NULL,
+    action VARCHAR(32) NOT NULL,
+    target_type VARCHAR(16) NOT NULL,
+    target_key VARCHAR(64) NOT NULL,
+    before_snapshot TEXT NOT NULL,
+    after_snapshot TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS player_tpa_request (
     request_id VARCHAR(64) PRIMARY KEY,
     requester_player_uuid VARCHAR(64) NOT NULL,
@@ -105,20 +119,49 @@ CREATE TABLE IF NOT EXISTS player_tpa_request (
     requester_origin_pitch REAL NOT NULL,
     target_player_name VARCHAR(64) NOT NULL,
     target_server_id VARCHAR(64) NOT NULL,
+    accepted_target_dimension_id INT,
+    accepted_target_x DOUBLE PRECISION,
+    accepted_target_y DOUBLE PRECISION,
+    accepted_target_z DOUBLE PRECISION,
+    accepted_target_yaw REAL,
+    accepted_target_pitch REAL,
     status VARCHAR(24) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT ck_player_tpa_request_status CHECK (status IN ('PENDING', 'ACCEPTED', 'EXPIRED'))
+    CONSTRAINT ck_player_tpa_request_status CHECK (status IN ('PENDING', 'ACCEPTED', 'DECLINED', 'CANCELLED', 'EXPIRED')),
+    CONSTRAINT ck_player_tpa_request_accepted_target CHECK (
+        status <> 'ACCEPTED'
+        OR (
+            accepted_target_dimension_id IS NOT NULL
+            AND accepted_target_x IS NOT NULL
+            AND accepted_target_y IS NOT NULL
+            AND accepted_target_z IS NOT NULL
+            AND accepted_target_yaw IS NOT NULL
+            AND accepted_target_pitch IS NOT NULL
+        )
+    )
 );
 
 CREATE INDEX IF NOT EXISTS idx_player_tpa_target_lookup
     ON player_tpa_request (target_server_id, target_player_name, requester_player_name, status, expires_at DESC);
 
+CREATE INDEX IF NOT EXISTS idx_player_tpa_requester_accepted_dispatch
+    ON player_tpa_request (requester_server_id, requester_player_uuid, expires_at DESC)
+    WHERE status = 'ACCEPTED';
+
+CREATE INDEX IF NOT EXISTS idx_player_tpa_requester_recent
+    ON player_tpa_request (requester_server_id, requester_player_uuid, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_player_tpa_target_recent
+    ON player_tpa_request (target_server_id, target_player_name, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS player_rtp_record (
     record_id BIGSERIAL PRIMARY KEY,
+    request_id VARCHAR(96) NOT NULL UNIQUE,
     player_uuid VARCHAR(64) NOT NULL,
     source_server_id VARCHAR(64) NOT NULL,
+    target_server_id VARCHAR(64) NOT NULL,
     dimension_id INT NOT NULL,
     target_x DOUBLE PRECISION NOT NULL,
     target_y DOUBLE PRECISION NOT NULL,
@@ -130,5 +173,8 @@ CREATE TABLE IF NOT EXISTS player_rtp_record (
 
 CREATE INDEX IF NOT EXISTS idx_player_rtp_record_player
     ON player_rtp_record (player_uuid, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_player_rtp_record_target
+    ON player_rtp_record (target_server_id, created_at DESC);
 
 COMMIT;

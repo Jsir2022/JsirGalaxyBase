@@ -10,6 +10,8 @@ import net.minecraft.entity.player.EntityPlayerMP;
 import com.jsirgalaxybase.GalaxyBase;
 import com.jsirgalaxybase.modules.cluster.domain.TransferTicket;
 import com.jsirgalaxybase.modules.cluster.domain.TransferTicketStatus;
+import com.jsirgalaxybase.modules.cluster.domain.TeleportTarget;
+import com.jsirgalaxybase.modules.cluster.port.ArrivalTargetResolver;
 import com.jsirgalaxybase.modules.cluster.port.LocalTeleportExecutor;
 import com.jsirgalaxybase.modules.cluster.port.TeleportTicketRepository;
 
@@ -21,6 +23,10 @@ public class PlayerArrivalRestoreService {
     private final TeleportTicketRepository ticketRepository;
     private final LocalTeleportExecutor localTeleportExecutor;
     private final Set<String> inFlightTickets = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
+    private volatile ArrivalTargetResolver arrivalTargetResolver = new ArrivalTargetResolver() {
+        @Override public TeleportTarget resolve(TransferTicket ticket, EntityPlayerMP player) { return ticket.getTarget(); }
+        @Override public void afterSuccessfulRestore(TransferTicket ticket, TeleportTarget resolvedTarget) {}
+    };
 
     public PlayerArrivalRestoreService(String localServerId, TeleportTicketRepository ticketRepository,
         LocalTeleportExecutor localTeleportExecutor) {
@@ -34,6 +40,12 @@ public class PlayerArrivalRestoreService {
             return false;
         }
         return tryRestorePlayer(player.getUniqueID().toString(), player, trigger);
+    }
+
+    /** Allows a target-server-only policy to refine a durable ticket target. */
+    public void setArrivalTargetResolver(ArrivalTargetResolver resolver) {
+        if (resolver == null) return;
+        arrivalTargetResolver = resolver;
     }
 
     boolean tryRestorePlayer(String playerUuid, EntityPlayerMP player, String trigger) {
@@ -60,7 +72,12 @@ public class PlayerArrivalRestoreService {
                 ticket.getSourceServerId(),
                 ticket.getTarget().getServerId(),
                 trigger);
-            localTeleportExecutor.teleport(player, ticket.getTarget());
+            TeleportTarget resolvedTarget = arrivalTargetResolver.resolve(ticket, player);
+            if (resolvedTarget == null || !localServerId.equals(resolvedTarget.getServerId())) {
+                throw new IllegalStateException("Target arrival resolver returned an invalid local target");
+            }
+            localTeleportExecutor.teleport(player, resolvedTarget);
+            arrivalTargetResolver.afterSuccessfulRestore(ticket, resolvedTarget);
             TransferTicket completed = ticket.withStatus(TransferTicketStatus.COMPLETED,
                 truncate("Target restore completed on " + localServerId), Instant.now());
             ticketRepository.update(completed);

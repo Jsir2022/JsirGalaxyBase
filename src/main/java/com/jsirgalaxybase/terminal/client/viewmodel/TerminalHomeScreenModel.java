@@ -135,9 +135,11 @@ public class TerminalHomeScreenModel {
         List<NavItemModel> defaults = new ArrayList<NavItemModel>();
         defaults.add(new NavItemModel("home", "首页", "", true, "home".equals(selectedPageId)));
         defaults.add(new NavItemModel("market", "市场", "三市场入口", true, "market".equals(selectedPageId)));
+        defaults.add(new NavItemModel("property", "地产", "个人地皮", true, "property".equals(selectedPageId)));
         defaults.add(new NavItemModel("bank", "银行", "", true, "bank".equals(selectedPageId)));
         defaults.add(new NavItemModel("server_tools", "传送", "", true, "server_tools".equals(selectedPageId)));
-        defaults.add(new NavItemModel("vault", "仓库", "保险箱", true, "vault".equals(selectedPageId)));
+        defaults.add(new NavItemModel("notifications", "通知", "消息中心", true, "notifications".equals(selectedPageId)));
+        defaults.add(new NavItemModel("warehouse", "资产", "银河仓储", true, "warehouse".equals(selectedPageId)));
         return defaults;
     }
 
@@ -145,9 +147,13 @@ public class TerminalHomeScreenModel {
         List<PageSnapshotModel> defaults = new ArrayList<PageSnapshotModel>();
         defaults.add(PageSnapshotModel.placeholder(TerminalPage.HOME));
         defaults.add(PageSnapshotModel.placeholder(TerminalPage.MARKET));
+        defaults.add(PageSnapshotModel.placeholder(TerminalPage.PROPERTY));
         defaults.add(PageSnapshotModel.placeholder(TerminalPage.BANK));
         defaults.add(PageSnapshotModel.placeholder(TerminalPage.SERVER_TOOLS));
         defaults.add(PageSnapshotModel.placeholder(TerminalPage.VAULT));
+        defaults.add(PageSnapshotModel.placeholder(TerminalPage.NOTIFICATIONS));
+        defaults.add(PageSnapshotModel.placeholder(TerminalPage.ITEM_POLICY));
+        defaults.add(PageSnapshotModel.placeholder(TerminalPage.WAREHOUSE));
         return defaults;
     }
 
@@ -171,9 +177,11 @@ public class TerminalHomeScreenModel {
         TerminalPage[] topLevelPages = new TerminalPage[] {
             TerminalPage.HOME,
             TerminalPage.MARKET,
+            TerminalPage.PROPERTY,
             TerminalPage.BANK,
             TerminalPage.SERVER_TOOLS,
-            TerminalPage.VAULT };
+            TerminalPage.VAULT,
+            TerminalPage.NOTIFICATIONS, TerminalPage.ITEM_POLICY, TerminalPage.WAREHOUSE };
         for (TerminalPage page : topLevelPages) {
             normalized.add(findPageSnapshot(pageSnapshots, page));
         }
@@ -316,6 +324,8 @@ public class TerminalHomeScreenModel {
         private final TerminalCustomMarketSectionModel customMarketSectionModel;
         private final TerminalExchangeMarketSectionModel exchangeMarketSectionModel;
         private final TerminalServerToolsSectionModel serverToolsSectionModel;
+        private final TerminalLandSectionModel landSectionModel;
+        private final TerminalNotificationCenterModel notificationCenterModel;
 
         public PageSnapshotModel(String pageId, String title, String lead, List<SectionModel> sections) {
             this(pageId, title, lead, sections, null, null);
@@ -344,6 +354,25 @@ public class TerminalHomeScreenModel {
             TerminalCustomMarketSectionModel customMarketSectionModel,
             TerminalExchangeMarketSectionModel exchangeMarketSectionModel,
             TerminalServerToolsSectionModel serverToolsSectionModel) {
+            this(pageId, title, lead, sections, bankSectionModel, marketSectionModel, customMarketSectionModel,
+                exchangeMarketSectionModel, serverToolsSectionModel, null);
+        }
+
+        public PageSnapshotModel(String pageId, String title, String lead, List<SectionModel> sections,
+            TerminalBankSectionModel bankSectionModel, TerminalMarketSectionModel marketSectionModel,
+            TerminalCustomMarketSectionModel customMarketSectionModel,
+            TerminalExchangeMarketSectionModel exchangeMarketSectionModel,
+            TerminalServerToolsSectionModel serverToolsSectionModel, TerminalLandSectionModel landSectionModel) {
+            this(pageId, title, lead, sections, bankSectionModel, marketSectionModel, customMarketSectionModel,
+                exchangeMarketSectionModel, serverToolsSectionModel, landSectionModel, null);
+        }
+
+        public PageSnapshotModel(String pageId, String title, String lead, List<SectionModel> sections,
+            TerminalBankSectionModel bankSectionModel, TerminalMarketSectionModel marketSectionModel,
+            TerminalCustomMarketSectionModel customMarketSectionModel,
+            TerminalExchangeMarketSectionModel exchangeMarketSectionModel,
+            TerminalServerToolsSectionModel serverToolsSectionModel, TerminalLandSectionModel landSectionModel,
+            TerminalNotificationCenterModel notificationCenterModel) {
             this.pageId = TerminalPage.fromId(normalize(pageId, "home")).toTopLevelPageId();
             TerminalPage page = TerminalPage.fromId(this.pageId);
             this.title = normalize(title, page.getTitle());
@@ -361,6 +390,12 @@ public class TerminalHomeScreenModel {
             this.serverToolsSectionModel = page == TerminalPage.SERVER_TOOLS
                 ? (serverToolsSectionModel == null ? TerminalServerToolsSectionModel.placeholder() : serverToolsSectionModel)
                 : serverToolsSectionModel;
+            this.landSectionModel = page == TerminalPage.PROPERTY
+                ? (landSectionModel == null ? TerminalLandSectionModel.unavailable() : landSectionModel)
+                : landSectionModel;
+            this.notificationCenterModel = page == TerminalPage.NOTIFICATIONS
+                ? (notificationCenterModel == null ? TerminalNotificationCenterModel.empty() : notificationCenterModel)
+                : notificationCenterModel;
         }
 
         public static PageSnapshotModel placeholder(TerminalPage page) {
@@ -379,7 +414,8 @@ public class TerminalHomeScreenModel {
                     resolvedPage == TerminalPage.MARKET ? TerminalMarketSectionModel.placeholder(TerminalPage.MARKET.getId()) : null,
                     null,
                     null,
-                    resolvedPage == TerminalPage.SERVER_TOOLS ? TerminalServerToolsSectionModel.placeholder() : null);
+                    resolvedPage == TerminalPage.SERVER_TOOLS ? TerminalServerToolsSectionModel.placeholder() : null,
+                    resolvedPage == TerminalPage.PROPERTY ? TerminalLandSectionModel.unavailable() : null);
         }
 
         public String getPageId() {
@@ -437,6 +473,17 @@ public class TerminalHomeScreenModel {
         public boolean hasServerToolsSectionModel() {
             return serverToolsSectionModel != null;
         }
+
+        public TerminalLandSectionModel getLandSectionModel() {
+            return landSectionModel;
+        }
+
+        public boolean hasLandSectionModel() {
+            return landSectionModel != null;
+        }
+
+        public TerminalNotificationCenterModel getNotificationCenterModel() { return notificationCenterModel; }
+        public boolean hasNotificationCenterModel() { return notificationCenterModel != null; }
     }
 
     public static final class SectionModel {
@@ -479,11 +526,22 @@ public class TerminalHomeScreenModel {
         private final String title;
         private final String body;
         private final String severityName;
+        private final String sourceId;
+        private final String targetPageId;
+        private final String targetRecordId;
 
         public NotificationModel(String title, String body, String severityName) {
+            this(title, body, severityName, "terminal", "", "");
+        }
+
+        public NotificationModel(String title, String body, String severityName, String sourceId,
+            String targetPageId, String targetRecordId) {
             this.title = normalize(title, "终端通知");
             this.body = normalize(body, "当前没有通知内容。");
             this.severityName = normalize(severityName, "INFO");
+            this.sourceId = normalize(sourceId, "terminal");
+            this.targetPageId = normalize(targetPageId, "");
+            this.targetRecordId = normalize(targetRecordId, "");
         }
 
         public static NotificationModel placeholder(String title, String body, String severityName) {
@@ -501,6 +559,10 @@ public class TerminalHomeScreenModel {
         public String getSeverityName() {
             return severityName;
         }
+
+        public String getSourceId() { return sourceId; }
+        public String getTargetPageId() { return targetPageId; }
+        public String getTargetRecordId() { return targetRecordId; }
 
         public TerminalNotificationSeverity getSeverity() {
             return TerminalNotificationSeverity.fromName(severityName);

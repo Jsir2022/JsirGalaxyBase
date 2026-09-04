@@ -141,6 +141,35 @@ public final class TerminalShellPanels {
         void selectWarp(String warpName);
 
         void confirmWarp(String warpName);
+
+        void confirmQuickAction(String quickAction);
+
+        void selectHome(String homeName);
+
+        void confirmHome(String homeName);
+
+        void setHome(String homeName);
+
+        void deleteHome(String homeName);
+
+        void requestTpa(String playerName, String targetServerId);
+
+        void respondTpa(String direction, String playerName, String targetServerId, String action);
+    }
+
+    public interface LandActionHandler {
+        void selectChunk(int chunkX, int chunkZ, long version);
+        void selectTab(com.jsirgalaxybase.terminal.TerminalLandActionPayload.Tab tab);
+        void changePage(int pageIndex);
+        void changeViewport(int chunkX, int chunkZ,
+            com.jsirgalaxybase.terminal.TerminalLandActionPayload.Zoom zoom);
+        void refreshMap();
+        void openClaimConfirm();
+        void openUnclaimConfirm();
+    }
+
+    public interface NotificationActionHandler {
+        void openNotificationTarget(String pageId, String recordId);
     }
 
     public static PanelContainer createStatusBand(TerminalPanelFactory panels, GuiRect bounds,
@@ -158,7 +187,7 @@ public final class TerminalShellPanels {
         final TerminalHomeScreenModel.PageSnapshotModel snapshot = TerminalSectionRouter.resolveSnapshot(model);
         boolean marketPage = snapshot.hasMarketSectionModel() || snapshot.hasCustomMarketSectionModel()
             || snapshot.hasExchangeMarketSectionModel();
-        boolean refreshVisible = snapshot.hasServerToolsSectionModel() || marketPage;
+        boolean refreshVisible = snapshot.hasServerToolsSectionModel() || snapshot.hasLandSectionModel() || marketPage;
         TerminalPage selectedPage = TerminalPage.fromId(model.getSelectedPageId());
         boolean centerVisible = accountCenterAction != null
             && (selectedPage == TerminalPage.MARKET || selectedPage == TerminalPage.MARKET_STANDARDIZED
@@ -288,7 +317,7 @@ public final class TerminalShellPanels {
         TerminalBankSectionState bankSectionState, BankActionHandler bankActionHandler,
         TerminalMarketSectionState marketSectionState, MarketActionHandler marketActionHandler) {
         return createSectionBody(panels, bounds, model, refreshAction, closeAction, bankSectionState, bankActionHandler,
-            marketSectionState, marketActionHandler, null, null);
+            marketSectionState, marketActionHandler, null, null, null, null, null, null);
     }
 
     public static PanelContainer createSectionBody(TerminalPanelFactory panels, GuiRect bounds,
@@ -297,6 +326,33 @@ public final class TerminalShellPanels {
         TerminalMarketSectionState marketSectionState, MarketActionHandler marketActionHandler,
         @Nullable TerminalServerToolsSectionState serverToolsSectionState,
         @Nullable ServerToolsActionHandler serverToolsActionHandler) {
+        return createSectionBody(panels, bounds, model, refreshAction, closeAction, bankSectionState, bankActionHandler,
+            marketSectionState, marketActionHandler, serverToolsSectionState, serverToolsActionHandler, null, null, null, null);
+    }
+
+    public static PanelContainer createSectionBody(TerminalPanelFactory panels, GuiRect bounds,
+        final TerminalHomeScreenModel model, Runnable refreshAction, Runnable closeAction,
+        TerminalBankSectionState bankSectionState, BankActionHandler bankActionHandler,
+        TerminalMarketSectionState marketSectionState, MarketActionHandler marketActionHandler,
+        @Nullable TerminalServerToolsSectionState serverToolsSectionState,
+        @Nullable ServerToolsActionHandler serverToolsActionHandler,
+        @Nullable TerminalLandSectionState landSectionState,
+        @Nullable LandActionHandler landActionHandler) {
+        return createSectionBody(panels, bounds, model, refreshAction, closeAction, bankSectionState, bankActionHandler,
+            marketSectionState, marketActionHandler, serverToolsSectionState, serverToolsActionHandler,
+            landSectionState, landActionHandler, null, null);
+    }
+
+    public static PanelContainer createSectionBody(TerminalPanelFactory panels, GuiRect bounds,
+        final TerminalHomeScreenModel model, Runnable refreshAction, Runnable closeAction,
+        TerminalBankSectionState bankSectionState, BankActionHandler bankActionHandler,
+        TerminalMarketSectionState marketSectionState, MarketActionHandler marketActionHandler,
+        @Nullable TerminalServerToolsSectionState serverToolsSectionState,
+        @Nullable ServerToolsActionHandler serverToolsActionHandler,
+        @Nullable TerminalLandSectionState landSectionState,
+        @Nullable LandActionHandler landActionHandler,
+        @Nullable TerminalNotificationCenterState notificationCenterState,
+        @Nullable final NotificationActionHandler notificationActionHandler) {
         PanelContainer content = new PanelContainer();
         content.setBounds(bounds);
         final TerminalHomeScreenModel.PageSnapshotModel snapshot = TerminalSectionRouter.resolveSnapshot(model);
@@ -307,7 +363,54 @@ public final class TerminalShellPanels {
         int sectionX = bounds.getX();
         int sectionY = bounds.getY() + topInset;
         int sectionWidth = Math.max(1, bounds.getWidth());
-        if (snapshot.hasBankSectionModel()) {
+        if (snapshot.hasNotificationCenterModel()) {
+            TerminalNotificationCenterSection notificationCenter = new TerminalNotificationCenterSection(panels,
+                snapshot.getNotificationCenterModel(), notificationCenterState,
+                new TerminalNotificationCenterSection.ActionHandler() {
+                    @Override public void openTarget(String pageId, String recordId) {
+                        if (notificationActionHandler != null) notificationActionHandler.openNotificationTarget(pageId, recordId);
+                    }
+                    @Override public void rebuild() {
+                        if (notificationActionHandler instanceof NotificationCenterRebuildHandler) {
+                            ((NotificationCenterRebuildHandler) notificationActionHandler).rebuildNotificationCenter();
+                        }
+                    }
+                });
+            notificationCenter.setBounds(new GuiRect(sectionX, sectionY, sectionWidth, bodyAvailableHeight));
+            content.addChild(notificationCenter);
+        } else if (TerminalPage.WAREHOUSE.getId().equals(snapshot.getPageId())) {
+            TerminalWarehouseSection warehouse = new TerminalWarehouseSection(panels, model, snapshot);
+            warehouse.setBounds(new GuiRect(sectionX, sectionY, sectionWidth, bodyAvailableHeight));
+            content.addChild(warehouse);
+        } else if (snapshot.hasLandSectionModel()) {
+            TerminalLandSection landSection = new TerminalLandSection(panels, snapshot.getLandSectionModel(),
+                landSectionState, new TerminalLandSection.ActionHandler() {
+                    @Override public void selectChunk(int chunkX, int chunkZ, long version) {
+                        if (landActionHandler != null) landActionHandler.selectChunk(chunkX, chunkZ, version);
+                    }
+                    @Override public void selectTab(com.jsirgalaxybase.terminal.TerminalLandActionPayload.Tab tab) {
+                        if (landActionHandler != null) landActionHandler.selectTab(tab);
+                    }
+                    @Override public void changePage(int pageIndex) {
+                        if (landActionHandler != null) landActionHandler.changePage(pageIndex);
+                    }
+                    @Override public void changeViewport(int chunkX, int chunkZ,
+                        com.jsirgalaxybase.terminal.TerminalLandActionPayload.Zoom zoom) {
+                        if (landActionHandler != null) landActionHandler.changeViewport(chunkX, chunkZ, zoom);
+                    }
+                    @Override public void refreshMap() {
+                        if (landActionHandler != null) landActionHandler.refreshMap();
+                    }
+                    @Override public void openClaimConfirm() {
+                        if (landActionHandler != null) landActionHandler.openClaimConfirm();
+                    }
+                    @Override public void openUnclaimConfirm() {
+                        if (landActionHandler != null) landActionHandler.openUnclaimConfirm();
+                    }
+                });
+            landSection.setBounds(new GuiRect(sectionX, sectionY, sectionWidth, bodyAvailableHeight));
+            content.addChild(landSection);
+        } else if (snapshot.hasBankSectionModel()) {
             TerminalBankSection bankSection = new TerminalBankSection(panels, snapshot.getBankSectionModel(), bankSectionState, new TerminalBankSection.ActionHandler() {
                 @Override
                 public void openAccount() {
@@ -571,6 +674,48 @@ public final class TerminalShellPanels {
                             serverToolsActionHandler.confirmWarp(selectedName);
                         }
                     }
+
+                    @Override
+                    public void confirmQuickAction(String quickAction) {
+                        if (serverToolsActionHandler != null) {
+                            serverToolsActionHandler.confirmQuickAction(quickAction);
+                        }
+                    }
+
+                    @Override
+                    public void selectHome(String homeName) {
+                        if (serverToolsActionHandler != null) serverToolsActionHandler.selectHome(homeName);
+                    }
+
+                    @Override
+                    public void confirmHome() {
+                        if (serverToolsActionHandler != null) {
+                            serverToolsActionHandler.confirmHome(serverToolsSectionState == null ? ""
+                                : serverToolsSectionState.getSelectedHomeName());
+                        }
+                    }
+
+                    @Override
+                    public void setHome(String homeName) {
+                        if (serverToolsActionHandler != null) serverToolsActionHandler.setHome(homeName);
+                    }
+
+                    @Override
+                    public void deleteHome(String homeName) {
+                        if (serverToolsActionHandler != null) serverToolsActionHandler.deleteHome(homeName);
+                    }
+
+                    @Override
+                    public void requestTpa(String playerName, String targetServerId) {
+                        if (serverToolsActionHandler != null) serverToolsActionHandler.requestTpa(playerName, targetServerId);
+                    }
+
+                    @Override
+                    public void respondTpa(String direction, String playerName, String targetServerId, String action) {
+                        if (serverToolsActionHandler != null) {
+                            serverToolsActionHandler.respondTpa(direction, playerName, targetServerId, action);
+                        }
+                    }
                 });
             serverToolsSection.setBounds(new GuiRect(sectionX, sectionY, sectionWidth, bodyAvailableHeight));
             content.addChild(serverToolsSection);
@@ -594,15 +739,25 @@ public final class TerminalShellPanels {
 
             List<TerminalHomeScreenModel.NotificationModel> notifications = model.getNotifications();
             for (int i = 0; i < notifications.size(); i++) {
+                final TerminalHomeScreenModel.NotificationModel notification = notifications.get(i);
                 bodyScroll.addScrollableChild(
-                    panels.createNotificationCard(new GuiRect(scrollX, 0, scrollWidth, computeNotificationHeight(notifications.get(i), homeSectionContentWidth)),
-                        notifications.get(i)),
-                    computeNotificationHeight(notifications.get(i), homeSectionContentWidth));
+                    panels.createNotificationCard(new GuiRect(scrollX, 0, scrollWidth, computeNotificationHeight(notification, homeSectionContentWidth)),
+                        notification, new Runnable() { @Override public void run() {
+                            if (notificationActionHandler != null && notification != null
+                                && notification.getTargetPageId() != null && !notification.getTargetPageId().trim().isEmpty()) {
+                                notificationActionHandler.openNotificationTarget(notification.getTargetPageId(), notification.getTargetRecordId());
+                            }
+                        }}),
+                    computeNotificationHeight(notification, homeSectionContentWidth));
             }
             content.addChild(bodyScroll);
         }
 
         return content;
+    }
+
+    public interface NotificationCenterRebuildHandler extends NotificationActionHandler {
+        void rebuildNotificationCenter();
     }
 
     static int computeEvenSectionHeight(int availableHeight, int sectionCount, int gap, int preferredHeight) {

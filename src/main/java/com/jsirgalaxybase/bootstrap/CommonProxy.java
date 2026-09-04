@@ -50,4 +50,10 @@ public class CommonProxy {
     public Object createBaseVaultClientGui(InventoryPlayer inventory) {
         return null;
     }
+
+    /** Client-only 银河仓储 Bay GUI factory. Dedicated servers intentionally return null. */
+    public Object createTerminalWarehouseBayClientGui(InventoryPlayer inventory) { return null; }
+
+    /** Client-only unified personal asset center. Dedicated servers intentionally return null. */
+    public Object createTerminalAssetCenterClientGui(InventoryPlayer inventory, int initialTabCode) { return null; }
 }

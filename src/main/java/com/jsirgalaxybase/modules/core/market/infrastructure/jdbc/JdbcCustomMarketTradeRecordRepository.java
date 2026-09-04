@@ -4,6 +4,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Optional;
+import java.util.ArrayList;
+import java.util.List;
 
 import com.jsirgalaxybase.modules.core.banking.infrastructure.jdbc.AbstractJdbcRepository;
 import com.jsirgalaxybase.modules.core.banking.infrastructure.jdbc.JdbcConnectionCallback;
@@ -102,6 +104,28 @@ public class JdbcCustomMarketTradeRecordRepository extends AbstractJdbcRepositor
                 } finally {
                     statement.close();
                 }
+            }
+        });
+    }
+
+    @Override
+    public List<CustomMarketTradeRecord> findRecentByPlayer(final String playerRef, final int limit) {
+        return connectionManager.withConnection(new JdbcConnectionCallback<List<CustomMarketTradeRecord>>() {
+            @Override public List<CustomMarketTradeRecord> doInConnection(java.sql.Connection connection)
+                throws SQLException {
+                PreparedStatement statement = connection.prepareStatement(
+                    "SELECT * FROM custom_market_trade_record WHERE seller_player_ref = ? OR buyer_player_ref = ?"
+                        + " ORDER BY created_at DESC, trade_id DESC LIMIT ?");
+                try {
+                    statement.setString(1, playerRef); statement.setString(2, playerRef);
+                    statement.setInt(3, Math.max(1, Math.min(50, limit)));
+                    ResultSet rows = statement.executeQuery();
+                    try {
+                        List<CustomMarketTradeRecord> result = new ArrayList<CustomMarketTradeRecord>();
+                        while (rows.next()) result.add(mapTradeRecord(rows));
+                        return result;
+                    } finally { rows.close(); }
+                } finally { statement.close(); }
             }
         });
     }

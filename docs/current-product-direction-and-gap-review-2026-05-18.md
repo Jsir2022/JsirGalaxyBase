@@ -2,6 +2,39 @@
 
 Date: 2026-05-18
 
+## 2026-08-22 Priority Revision
+
+This document's May phase order is historical. The ServerTools transfer page and the standardized-market
+workflow have since advanced substantially, but ServerUtilities as a whole is not integrated. The next
+planning focus is minimum validation across the remaining capability lines, beginning with a native JGB
+land/claim implementation and a one-time ServerUtilities data migration design. Existing S1/S2 claim data
+must be preserved, but the independent ServerUtilities mod is removed after cutover rather than retained as
+a runtime adapter.
+
+The following candidates are recorded but deferred behind minimum validation:
+
+- AE2 Warehouse Drive and audited Warehouse Port: approved direction, Base Vault prerequisite complete,
+  implementation deferred rather than cancelled;
+- BanItem / ItemBlacklist policy adapter: useful for dangerous-item admission and land/warehouse automation,
+  but not a prerequisite for the first native land-protection validation;
+- BetterQuesting task facts: strategically important for contribution, public orders and rewards, but no
+  authoritative event/settlement contract has been approved;
+- career system: still a product-design gap; no placeholder profession rules should be invented merely to
+  unlock another feature;
+- chain mining: remains an isolated capability placeholder until career, tool, energy, whitelist and load
+  policies exist.
+
+The detailed land/property direction is in `serverutilities-land-property-integration-v1.md`.
+The confirmed first implementation scope is personal ownership and personal fixed-price trading only;
+Team and public ownership remain a separate product-design task after that loop is validated.
+
+### 2026-08-30 更新：物品准入策略核心
+
+`BanItem / ItemBlacklist` 的第一层已改为 JGB 原生的服务端资产域准入：标准市场、定制挂牌和 Base Vault
+存入在进入点判定，拒绝审计写入 PostgreSQL。它默认关闭，不扫描或删除玩家既有物品；完整禁用表、地产
+自动化与 AE2 Warehouse Port 接入仍应在各自功能批次按真实业务风险单独确认。正式合同见
+`item-policy-admission-v1.md`。
+
 This note records the current product direction confirmed after the terminal usability pass and the first real ServerTools cross-server warp validation.
 
 ## Current Direction
@@ -39,6 +72,15 @@ Remaining:
 - Add a formal group-server / ServerTools page.
 - Keep polishing actual page content density through real mouse browsing, especially long lists, button visibility, and scroll areas.
 - Add more player-facing state explanations: why an action is disabled, what server the player is on, what the last transfer did, and how to recover from a failed action.
+
+### 2026-08-31 - 通知中心页面 v1
+
+- 新增顶层 `通知 / 消息中心` 页面。它是当前玩家的有界展示索引，不替代市场订单、交付恢复、
+  跨服 ticket、银行账本或地产产权的业务真源。
+- 页面仅保留重要结果；普通刷新不会淹没列表。相同结果合并并显示次数，服务端最多保留 40 条。
+- 客户端可按来源（市场、传送、地产、银行、其他）和等级筛选，使用固定 6 条分页；点击带目标的
+  记录只复用既有终端页面定位，不传输订单所有者、坐标或客户端筛选状态。
+- 它不是跨重启的第二套事件日志：需要长期审计时仍查询对应 PostgreSQL 业务表。
 
 ### ServerTools And Cluster
 

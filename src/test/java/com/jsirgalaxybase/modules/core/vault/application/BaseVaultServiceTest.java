@@ -58,6 +58,21 @@ public class BaseVaultServiceTest {
         assertEquals(5, count(service.viewPersonalVault("player-a"), TEST_ITEM));
     }
 
+    @Test
+    public void recentOperationsAreScopedToThePersonalVaultAndLimited() {
+        InMemoryRepository repository = new InMemoryRepository();
+        BaseVaultService service = new BaseVaultService(repository, new DirectTransactionRunner());
+        service.deliverToPersonalVault("vault-recent-a", "player-a", "TEST", new ItemStack(TEST_ITEM, 1));
+        service.deliverToPersonalVault("vault-recent-b", "player-b", "TEST", new ItemStack(TEST_ITEM, 1));
+        service.deliverToPersonalVault("vault-recent-c", "player-a", "TEST", new ItemStack(TEST_ITEM, 1));
+
+        List<VaultOperation> recent = service.findPersonalRecentOperations("player-a", 1);
+
+        assertEquals(1, recent.size());
+        assertTrue(recent.get(0).getRequestId().startsWith("vault-recent-"));
+        assertEquals(service.ensurePersonalVault("player-a").getAccountId(), recent.get(0).getAccountId());
+    }
+
     @Test(expected = VaultCapacityException.class)
     public void fullPersonalVaultRejectsAnotherUniqueStack() {
         BaseVaultService service = new BaseVaultService(new InMemoryRepository(), new DirectTransactionRunner());
@@ -323,6 +338,20 @@ public class BaseVaultServiceTest {
         @Override
         public void saveOperationSlotChanges(long operationId, List<VaultOperationSlotChange> changes) {
             operationSlotChanges.put(Long.valueOf(operationId), new ArrayList<VaultOperationSlotChange>(changes));
+        }
+
+        @Override
+        public List<VaultOperation> findRecentOperations(long accountId, int limit) {
+            List<VaultOperation> recent = new ArrayList<VaultOperation>();
+            for (VaultOperation operation : operations.values()) {
+                if (operation.getAccountId() == accountId) recent.add(operation);
+            }
+            java.util.Collections.sort(recent, new java.util.Comparator<VaultOperation>() {
+                @Override public int compare(VaultOperation left, VaultOperation right) {
+                    return Long.compare(right.getOperationId(), left.getOperationId());
+                }
+            });
+            return recent.size() <= limit ? recent : new ArrayList<VaultOperation>(recent.subList(0, limit));
         }
 
         private List<VaultOperationSlotChange> getOperationSlotChanges(long operationId) {

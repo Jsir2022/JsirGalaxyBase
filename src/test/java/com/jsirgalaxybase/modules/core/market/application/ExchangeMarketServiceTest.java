@@ -3,6 +3,7 @@ package com.jsirgalaxybase.modules.core.market.application;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -102,6 +103,81 @@ public class ExchangeMarketServiceTest {
     }
 
     @Test
+    public void quoteTaskCoinToStarcoinRejectsMoreThanOneVaultStackBeforeSettlement() {
+        ExchangeMarketService service = new ExchangeMarketService(minimalInfrastructure(), new TaskCoinExchangePlanner(),
+            "s1-test");
+
+        ExchangeMarketQuoteResult quote = service.quoteTaskCoinToStarcoin(new ExchangeMarketQuoteRequest("req-quote-4",
+            "player-a", "other-server", "dreamcraft:item.CoinChemistII", 65L)).get();
+
+        assertEquals(ExchangeMarketLimitStatus.DISALLOWED, quote.getLimitPolicy().getStatus());
+        assertEquals("EXCHANGE_INPUT_QUANTITY_LIMIT", quote.getLimitPolicy().getReasonCode());
+        assertEquals(64L, quote.getLimitPolicy().getMaximumInputQuantity());
+        assertTrue(quote.getNotes().contains("64"));
+        assertEquals("s1-test", quote.getSourceServerId());
+    }
+
+    @Test
+    public void executeRejectsForeignSourceServerBeforeAnyBankPosting() {
+        ExchangeMarketService service = new ExchangeMarketService(minimalInfrastructure(), new TaskCoinExchangePlanner(),
+            "s1-test");
+
+        try {
+            service.executeTaskCoinToStarcoin(new ExchangeMarketExecutionRequest("req-foreign-source", "player-a",
+                "other-server", "base-vault", "dreamcraft:item.CoinChemistII", 1L));
+            fail("Expected source server mismatch to be rejected");
+        } catch (MarketExchangeException expected) {
+            assertTrue(expected.getMessage().contains("来源服"));
+        }
+    }
+
+    @Test
+    public void executeRejectsInsufficientReserveWithoutCreatingPosting() {
+        FakeBankAccountRepository accountRepository = new FakeBankAccountRepository();
+        accountRepository.addAccount(playerAccount("player-a", 0L));
+        accountRepository.addAccount(reserveAccount(199L));
+        FakeBankTransactionRepository transactionRepository = new FakeBankTransactionRepository();
+        BankingInfrastructure infrastructure = infrastructure(accountRepository, transactionRepository,
+            new FakeLedgerEntryRepository(), new FakeCoinExchangeRecordRepository());
+        ExchangeMarketService service = new ExchangeMarketService(infrastructure, new TaskCoinExchangePlanner(),
+            "s1-test");
+
+        try {
+            service.executeTaskCoinToStarcoin(new ExchangeMarketExecutionRequest("req-reserve-short", "player-a",
+                "s1-test", "base-vault", "dreamcraft:item.CoinChemistII", 2L));
+            fail("Expected insufficient reserve to reject exchange");
+        } catch (MarketExchangeException expected) {
+            assertTrue(expected.getMessage().contains("储备余额不足"));
+        }
+
+        assertEquals(199L, accountRepository.findById(20L).get().getAvailableBalance());
+        assertEquals(0L, accountRepository.findById(10L).get().getAvailableBalance());
+        assertTrue(!transactionRepository.findByRequestId("req-reserve-short").isPresent());
+    }
+
+    @Test
+    public void executeReplaysSameRequestWithoutDebitingReserveTwice() {
+        FakeBankAccountRepository accountRepository = new FakeBankAccountRepository();
+        accountRepository.addAccount(playerAccount("player-a", 0L));
+        accountRepository.addAccount(reserveAccount(5000L));
+        FakeBankTransactionRepository transactionRepository = new FakeBankTransactionRepository();
+        BankingInfrastructure infrastructure = infrastructure(accountRepository, transactionRepository,
+            new FakeLedgerEntryRepository(), new FakeCoinExchangeRecordRepository());
+        ExchangeMarketService service = new ExchangeMarketService(infrastructure, new TaskCoinExchangePlanner(),
+            "s1-test");
+        ExchangeMarketExecutionRequest request = new ExchangeMarketExecutionRequest("req-exchange-replay", "player-a",
+            "s1-test", "base-vault", "dreamcraft:item.CoinChemistII", 2L);
+
+        ExchangeMarketExecutionResult first = service.executeTaskCoinToStarcoin(request);
+        ExchangeMarketExecutionResult replay = service.executeTaskCoinToStarcoin(request);
+
+        assertEquals(first.getPostingResult().getTransaction().getTransactionId(),
+            replay.getPostingResult().getTransaction().getTransactionId());
+        assertEquals(4800L, accountRepository.findById(20L).get().getAvailableBalance());
+        assertEquals(200L, accountRepository.findById(10L).get().getAvailableBalance());
+    }
+
+    @Test
     public void executeTaskCoinToStarcoinPropagatesRuleAndAuditFieldsIntoSettlement() {
         FakeBankAccountRepository accountRepository = new FakeBankAccountRepository();
         accountRepository.addAccount(new BankAccount(10L, "PLY-A", BankAccountType.PLAYER,
@@ -147,6 +223,28 @@ public class ExchangeMarketServiceTest {
             new DirectTransactionRunner());
         return new BankingInfrastructure(bankingService, accountRepository, new FakeBankTransactionRepository(),
             new FakeLedgerEntryRepository(), new FakeCoinExchangeRecordRepository(), new DirectTransactionRunner());
+    }
+
+    private BankingInfrastructure infrastructure(FakeBankAccountRepository accountRepository,
+        FakeBankTransactionRepository transactionRepository, FakeLedgerEntryRepository ledgerEntryRepository,
+        FakeCoinExchangeRecordRepository coinExchangeRecordRepository) {
+        BankingApplicationService bankingService = new BankingApplicationService(accountRepository, transactionRepository,
+            ledgerEntryRepository, coinExchangeRecordRepository, new DirectTransactionRunner());
+        return new BankingInfrastructure(bankingService, accountRepository, transactionRepository, ledgerEntryRepository,
+            coinExchangeRecordRepository, new DirectTransactionRunner());
+    }
+
+    private BankAccount playerAccount(String playerRef, long availableBalance) {
+        return new BankAccount(10L, "PLY-A", BankAccountType.PLAYER, BankingConstants.OWNER_TYPE_PLAYER_UUID,
+            playerRef, BankingConstants.DEFAULT_CURRENCY_CODE, availableBalance, 0L, BankAccountStatus.ACTIVE, 0L,
+            "Player A", "{}", Instant.now(), Instant.now());
+    }
+
+    private BankAccount reserveAccount(long availableBalance) {
+        return new BankAccount(20L, "EXCH-RESERVE", BankAccountType.EXCHANGE_RESERVE,
+            BankingConstants.OWNER_TYPE_PUBLIC_FUND_CODE, "EXCHANGE_RESERVE", BankingConstants.DEFAULT_CURRENCY_CODE,
+            availableBalance, 0L, BankAccountStatus.ACTIVE, 0L, "Exchange Reserve", "{}", Instant.now(),
+            Instant.now());
     }
 
     private static final class FakeBankAccountRepository implements BankAccountRepository {

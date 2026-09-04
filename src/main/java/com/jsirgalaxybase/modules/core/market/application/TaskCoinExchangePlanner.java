@@ -4,10 +4,11 @@ import java.util.Optional;
 
 import com.jsirgalaxybase.modules.core.market.domain.TaskCoinDescriptor;
 import com.jsirgalaxybase.modules.core.market.domain.TaskCoinExchangeQuote;
+import com.jsirgalaxybase.modules.core.market.domain.ExchangeMarketRuleSet;
 
 public class TaskCoinExchangePlanner {
 
-    public static final String RULE_VERSION = "market-phase1-source-blind-v1";
+    public static final String RULE_VERSION = ExchangeMarketRuleSet.TASK_COIN_RULE_VERSION;
     public static final String REGISTRY_PREFIX = "dreamcraft:item.Coin";
     private final TaskCoinCatalog catalog;
 

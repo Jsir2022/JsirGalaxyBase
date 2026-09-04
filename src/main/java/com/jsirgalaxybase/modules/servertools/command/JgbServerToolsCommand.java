@@ -23,7 +23,7 @@ public class JgbServerToolsCommand extends AbstractServerToolsCommand {
 
     @Override
     public String getCommandUsage(ICommandSender sender) {
-        return "/jgbst warp [list|name]";
+        return "/jgbst warp [list|name] | /jgbst admin <setwarp|delwarp|warp-enabled|server-enabled>";
     }
 
     @Override

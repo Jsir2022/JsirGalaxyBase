@@ -94,11 +94,14 @@ public class InstitutionCoreModuleTest {
         try {
             Constructor<ModConfiguration> constructor = ModConfiguration.class.getDeclaredConstructor(java.io.File.class,
                 boolean.class, String.class, int.class, float.class, float.class, float.class, boolean.class,
-                String.class, String.class, String.class, String.class);
+                String.class, String.class, String.class, String.class, boolean.class, String.class, int.class,
+                int[].class, String[].class, boolean.class, boolean.class, String[].class, String.class,
+                String[].class);
             constructor.setAccessible(true);
             return constructor.newInstance(tempDir.toFile(), true, "jsirgalaxybase/item_dumps", 0x529BED, 0.90f,
                 0.90f, 0.13f, bankingEnabled, "jdbc:postgresql://example.invalid:5432/jsirgalaxybase", "test",
-                "test", sourceServerId);
+                "test", sourceServerId, false, "SHADOW", 4, new int[0], new String[0], false, false,
+                new String[0], "", new String[0]);
         } catch (ReflectiveOperationException exception) {
             throw new IllegalStateException("failed to create test configuration", exception);
         }

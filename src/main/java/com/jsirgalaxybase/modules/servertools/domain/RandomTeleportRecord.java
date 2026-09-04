@@ -7,6 +7,7 @@ import com.jsirgalaxybase.modules.cluster.domain.TeleportTarget;
 public class RandomTeleportRecord {
 
     private final long recordId;
+    private final String requestId;
     private final String playerUuid;
     private final String sourceServerId;
     private final TeleportTarget target;
@@ -14,7 +15,13 @@ public class RandomTeleportRecord {
 
     public RandomTeleportRecord(long recordId, String playerUuid, String sourceServerId, TeleportTarget target,
         Instant createdAt) {
+        this(recordId, "", playerUuid, sourceServerId, target, createdAt);
+    }
+
+    public RandomTeleportRecord(long recordId, String requestId, String playerUuid, String sourceServerId,
+        TeleportTarget target, Instant createdAt) {
         this.recordId = recordId;
+        this.requestId = requestId == null ? "" : requestId;
         this.playerUuid = playerUuid;
         this.sourceServerId = sourceServerId;
         this.target = target;
@@ -24,6 +31,8 @@ public class RandomTeleportRecord {
     public long getRecordId() {
         return recordId;
     }
+
+    public String getRequestId() { return requestId; }
 
     public String getPlayerUuid() {
         return playerUuid;

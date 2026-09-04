@@ -99,6 +99,12 @@ public final class JdbcServerToolsInfrastructureFactory {
             "requester_origin_pitch",
             "target_player_name",
             "target_server_id",
+            "accepted_target_dimension_id",
+            "accepted_target_x",
+            "accepted_target_y",
+            "accepted_target_z",
+            "accepted_target_yaw",
+            "accepted_target_pitch",
             "status",
             "created_at",
             "expires_at",
@@ -106,8 +112,10 @@ public final class JdbcServerToolsInfrastructureFactory {
         });
         columns.put("player_rtp_record", new String[] {
             "record_id",
+            "request_id",
             "player_uuid",
             "source_server_id",
+            "target_server_id",
             "dimension_id",
             "target_x",
             "target_y",

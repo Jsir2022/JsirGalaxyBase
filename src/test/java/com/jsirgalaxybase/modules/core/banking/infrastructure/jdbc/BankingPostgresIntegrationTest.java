@@ -37,6 +37,9 @@ import com.jsirgalaxybase.modules.core.banking.application.BankingConstants;
 import com.jsirgalaxybase.modules.core.banking.application.BankingException;
 import com.jsirgalaxybase.modules.core.banking.application.command.FrozenBalanceCommand;
 import com.jsirgalaxybase.modules.core.banking.application.command.InternalTransferCommand;
+import com.jsirgalaxybase.modules.core.market.application.ExchangeMarketService;
+import com.jsirgalaxybase.modules.core.market.application.TaskCoinExchangePlanner;
+import com.jsirgalaxybase.modules.core.market.domain.ExchangeMarketExecutionRequest;
 import com.jsirgalaxybase.modules.core.banking.infrastructure.BankingInfrastructure;
 import com.jsirgalaxybase.modules.core.banking.domain.BankAccount;
 import com.jsirgalaxybase.modules.core.banking.domain.BankAccountStatus;
@@ -228,7 +231,9 @@ public class BankingPostgresIntegrationTest {
             JdbcBankingInfrastructureFactory.create(emptyContext.getSchemaJdbcUrl(), config.username, config.password);
             fail("Expected missing-table validation failure");
         } catch (BankingException exception) {
-            assertTrue(exception.getMessage().contains("Required banking table is missing"));
+            assertTrue(exception.getMessage().contains("schema is outdated or drifted"));
+            assertTrue(exception.getMessage().contains("missing tables"));
+            assertTrue(exception.getMessage().contains("bank_account"));
         } finally {
             emptyContext.close();
         }
@@ -663,6 +668,36 @@ public class BankingPostgresIntegrationTest {
         assertEquals(0L, realAccountRepository.findById(playerAccount.getAccountId()).get().getFrozenBalance());
     }
 
+    @Test
+    public void exchangeMarketPersistsVersionedRuleLedgerAndReplaysOnPostgres() {
+        BankAccount playerAccount = accountRepository.save(playerAccountDraft(
+            "ACCT-EXCHANGE-PLAYER", "player-exchange", "Exchange Player", "{}", 0L));
+        BankAccount reserveAccount = accountRepository.save(exchangeReserveAccountDraft(5_000L));
+        BankingInfrastructure infrastructure = new BankingInfrastructure(bankingService, accountRepository,
+            transactionRepository, ledgerEntryRepository, coinExchangeRecordRepository, transactionRunner,
+            connectionManager);
+        ExchangeMarketService exchangeService = new ExchangeMarketService(infrastructure,
+            new TaskCoinExchangePlanner(), "test-server");
+        ExchangeMarketExecutionRequest request = new ExchangeMarketExecutionRequest("req-jdbc-exchange-market",
+            "player-exchange", "test-server", "base-vault", "dreamcraft:item.CoinChemistII", 2L);
+
+        BankPostingResult first = exchangeService.executeTaskCoinToStarcoin(request).getPostingResult();
+        BankPostingResult replay = exchangeService.executeTaskCoinToStarcoin(request).getPostingResult();
+
+        assertEquals(first.getTransaction().getTransactionId(), replay.getTransaction().getTransactionId());
+        assertEquals(1L, countRows("bank_transaction"));
+        assertEquals(2L, countRows("ledger_entry"));
+        assertEquals(1L, countRows("coin_exchange_record"));
+        assertEquals(200L, accountRepository.findById(playerAccount.getAccountId()).get().getAvailableBalance());
+        assertEquals(4_800L, accountRepository.findById(reserveAccount.getAccountId()).get().getAvailableBalance());
+        assertEquals(TaskCoinExchangePlanner.RULE_VERSION,
+            coinExchangeRecordRepository.findByTransactionId(first.getTransaction().getTransactionId()).get()
+                .getRuleVersion());
+        String auditJson = coinExchangeRecordRepository.findByTransactionId(first.getTransaction().getTransactionId())
+            .get().getExtraJson().replaceAll("\\s+", "");
+        assertTrue(auditJson.contains("\"maximumInputQuantity\":64"));
+    }
+
     private <T> Callable<T> awaitAndRun(final CountDownLatch ready, final CountDownLatch start, final Callable<T> task) {
         return new Callable<T>() {
 
@@ -795,6 +830,25 @@ public class BankingPostgresIntegrationTest {
             BankAccountStatus.ACTIVE,
             0L,
             ownerRef,
+            "{}",
+            now,
+            now);
+    }
+
+    private BankAccount exchangeReserveAccountDraft(long availableBalance) {
+        Instant now = Instant.now();
+        return new BankAccount(
+            0L,
+            "EXCHANGE-RESERVE",
+            BankAccountType.EXCHANGE_RESERVE,
+            BankingConstants.OWNER_TYPE_PUBLIC_FUND_CODE,
+            "EXCHANGE_RESERVE",
+            BankingConstants.DEFAULT_CURRENCY_CODE,
+            availableBalance,
+            0L,
+            BankAccountStatus.ACTIVE,
+            0L,
+            "Exchange Reserve",
             "{}",
             now,
             now);

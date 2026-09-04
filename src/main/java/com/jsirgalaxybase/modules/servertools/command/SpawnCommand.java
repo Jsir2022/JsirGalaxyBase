@@ -35,11 +35,11 @@ public class SpawnCommand extends AbstractServerToolsCommand {
         }
         EntityPlayerMP player = requirePlayer(sender);
         try {
-            TeleportTarget spawnTarget = resolveSpawnTarget(player.worldObj);
+            TeleportTarget spawnTarget = module.getGlobalEntryRules().getHubTarget().orElse(resolveSpawnTarget(player.worldObj));
             TeleportDispatchPlan dispatchPlan = service.prepareSpawnTeleport(module.captureActor(player),
                 PlayerTeleportService.newRequestId("spawn"), spawnTarget);
             GatewayDispatchResult result = module.dispatchTeleport(resolveLiveSubject(dispatchPlan), dispatchPlan);
-            sendDispatchResult(sender, result, "Teleported to world spawn.");
+            sendDispatchResult(sender, result, "jsirgalaxybase.servertools.spawn.teleported");
         } catch (RuntimeException exception) {
             handleServiceError(sender, exception);
         }

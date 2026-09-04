@@ -9,6 +9,10 @@ import net.minecraftforge.common.config.Property;
 public class ModConfiguration {
 
     private static final String BANKING_CATEGORY = "banking";
+    private static final String ITEM_POLICY_CATEGORY = "item_policy";
+    private static final String GLOBAL_ENTRY_CATEGORY = "global_entry";
+    private static final String LAND_CATEGORY = "land";
+    private static final String WAREHOUSE_CATEGORY = "warehouse";
     private static final String TERMINAL_CATEGORY = "terminal";
     private static final int DEFAULT_TERMINAL_ACCENT_COLOR = 0x529BED;
     private static final float DEFAULT_TERMINAL_PANEL_WIDTH_RATIO = 0.72f;
@@ -27,11 +31,25 @@ public class ModConfiguration {
     private final String bankingJdbcUsername;
     private final String bankingJdbcPassword;
     private final String bankingSourceServerId;
+    private final boolean landEnabled;
+    private final String landProtectionMode;
+    private final int landMaxClaimsPerPlayer;
+    private final int[] landBlockedDimensions;
+    private final String[] landReservedChunks;
+    private final boolean landAllowFakePlayers;
+    private final boolean warehouseEnabled;
+    private final boolean itemPolicyEnabled;
+    private final String[] itemPolicyRules;
+    private final String globalHubTarget;
+    private final String[] targetServerRtpProfiles;
 
     private ModConfiguration(File minecraftDirectory, boolean autoDumpItemsOnClientStart, String itemDumpDirectory,
         int terminalAccentColor, float terminalPanelWidthRatio, float terminalPanelHeightRatio,
         float terminalNavigationWidthRatio, boolean bankingPostgresEnabled, String bankingJdbcUrl,
-        String bankingJdbcUsername, String bankingJdbcPassword, String bankingSourceServerId) {
+        String bankingJdbcUsername, String bankingJdbcPassword, String bankingSourceServerId, boolean landEnabled,
+        String landProtectionMode, int landMaxClaimsPerPlayer, int[] landBlockedDimensions,
+        String[] landReservedChunks, boolean landAllowFakePlayers, boolean warehouseEnabled, boolean itemPolicyEnabled, String[] itemPolicyRules,
+        String globalHubTarget, String[] targetServerRtpProfiles) {
         this.minecraftDirectory = minecraftDirectory;
         this.autoDumpItemsOnClientStart = autoDumpItemsOnClientStart;
         this.itemDumpDirectory = itemDumpDirectory;
@@ -44,6 +62,37 @@ public class ModConfiguration {
         this.bankingJdbcUsername = bankingJdbcUsername;
         this.bankingJdbcPassword = bankingJdbcPassword;
         this.bankingSourceServerId = bankingSourceServerId;
+        this.landEnabled = landEnabled;
+        this.landProtectionMode = landProtectionMode;
+        this.landMaxClaimsPerPlayer = landMaxClaimsPerPlayer;
+        this.landBlockedDimensions = landBlockedDimensions.clone();
+        this.landReservedChunks = landReservedChunks.clone();
+        this.landAllowFakePlayers = landAllowFakePlayers;
+        this.warehouseEnabled = warehouseEnabled;
+        this.itemPolicyEnabled = itemPolicyEnabled;
+        this.itemPolicyRules = itemPolicyRules.clone();
+        this.globalHubTarget = globalHubTarget;
+        this.targetServerRtpProfiles = targetServerRtpProfiles.clone();
+    }
+
+    /**
+     * Kept for the existing server-side configuration test fixture and older
+     * internal bootstrap adapters. Warehouse remains opt-in when that legacy
+     * construction path is used.
+     */
+    @SuppressWarnings("unused")
+    private ModConfiguration(File minecraftDirectory, boolean autoDumpItemsOnClientStart, String itemDumpDirectory,
+        int terminalAccentColor, float terminalPanelWidthRatio, float terminalPanelHeightRatio,
+        float terminalNavigationWidthRatio, boolean bankingPostgresEnabled, String bankingJdbcUrl,
+        String bankingJdbcUsername, String bankingJdbcPassword, String bankingSourceServerId, boolean landEnabled,
+        String landProtectionMode, int landMaxClaimsPerPlayer, int[] landBlockedDimensions,
+        String[] landReservedChunks, boolean landAllowFakePlayers, boolean itemPolicyEnabled, String[] itemPolicyRules,
+        String globalHubTarget, String[] targetServerRtpProfiles) {
+        this(minecraftDirectory, autoDumpItemsOnClientStart, itemDumpDirectory, terminalAccentColor,
+            terminalPanelWidthRatio, terminalPanelHeightRatio, terminalNavigationWidthRatio, bankingPostgresEnabled,
+            bankingJdbcUrl, bankingJdbcUsername, bankingJdbcPassword, bankingSourceServerId, landEnabled,
+            landProtectionMode, landMaxClaimsPerPlayer, landBlockedDimensions, landReservedChunks, landAllowFakePlayers,
+            false, itemPolicyEnabled, itemPolicyRules, globalHubTarget, targetServerRtpProfiles);
     }
 
     public static ModConfiguration load(File configFile, boolean client) {
@@ -122,9 +171,74 @@ public class ModConfiguration {
             BANKING_CATEGORY,
             "local-dev",
             "Logical source_server_id written into banking transactions on this server.");
+        final boolean landEnabled = serverConfiguration != null && serverConfiguration.getBoolean(
+            "landEnabled",
+            LAND_CATEGORY,
+            false,
+            "Enables the JGB personal-land PostgreSQL runtime and Forge protection handler.");
+        final String landProtectionMode = serverConfiguration == null ? "SHADOW" : serverConfiguration.getString(
+            "landProtectionMode",
+            LAND_CATEGORY,
+            "SHADOW",
+            "SHADOW records denied decisions without cancelling events; ENFORCE actively protects claimed chunks.");
+        final int landMaxClaimsPerPlayer = serverConfiguration == null ? 4 : serverConfiguration.getInt(
+            "landMaxClaimsPerPlayer",
+            LAND_CATEGORY,
+            4,
+            1,
+            10000,
+            "Maximum number of active personal chunk titles per player.");
+        final int[] landBlockedDimensions = serverConfiguration == null ? new int[0]
+            : serverConfiguration.get(LAND_CATEGORY, "landBlockedDimensions", new int[0],
+                "Dimension IDs where personal land cannot be claimed.").getIntList();
+        final String[] landReservedChunks = serverConfiguration == null ? new String[0]
+            : serverConfiguration.getStringList(
+                "landReservedChunks",
+                LAND_CATEGORY,
+                new String[0],
+                "Reserved local chunks in dimension:chunkX:chunkZ format.");
+        final boolean landAllowFakePlayers = serverConfiguration != null && serverConfiguration.getBoolean(
+            "landAllowFakePlayers",
+            LAND_CATEGORY,
+            false,
+                "When true, all fake players may modify claimed chunks. Keep false until per-title automation grants exist.");
+        final boolean warehouseEnabled = serverConfiguration != null && serverConfiguration.getBoolean(
+            "warehouseEnabled",
+            WAREHOUSE_CATEGORY,
+            false,
+            "Enables the personal AE2 Warehouse Drive ownership and audit runtime. Requires AE2 and the Warehouse Drive migration.");
+        final boolean itemPolicyEnabled = serverConfiguration != null && serverConfiguration.getBoolean(
+            "itemPolicyEnabled",
+            ITEM_POLICY_CATEGORY,
+            false,
+            "Enables server-authoritative item admission rules and denied-operation audit. Disabled by default.");
+        final String[] itemPolicyRules = serverConfiguration == null ? new String[0]
+            : serverConfiguration.getStringList(
+                "itemPolicyRules",
+                ITEM_POLICY_CATEGORY,
+                new String[0],
+                "Deny rules: rule-id|SCOPE,SCOPE|modid:item[:meta]. Valid scopes: MARKET_CUSTODY, CUSTOM_MARKET_ESCROW, BASE_VAULT, LAND_AUTOMATION.");
+        final String globalHubTarget = serverConfiguration == null ? "" : serverConfiguration.getString(
+            "globalHubTarget", GLOBAL_ENTRY_CATEGORY, "",
+            "Optional global Hub target: serverId|dimension|x|y|z|yaw|pitch. Empty keeps /spawn local.");
+        final String[] targetServerRtpProfiles = serverConfiguration == null ? new String[0]
+            : serverConfiguration.getStringList("targetServerRtpProfiles", GLOBAL_ENTRY_CATEGORY, new String[0],
+                "Target RTP profiles: serverId|dimension|centerX|fallbackY|centerZ|minDistance|maxDistance.");
 
         if (clientConfiguration.hasCategory(BANKING_CATEGORY)) {
             clientConfiguration.removeCategory(clientConfiguration.getCategory(BANKING_CATEGORY));
+        }
+        if (clientConfiguration.hasCategory(LAND_CATEGORY)) {
+            clientConfiguration.removeCategory(clientConfiguration.getCategory(LAND_CATEGORY));
+        }
+        if (clientConfiguration.hasCategory(ITEM_POLICY_CATEGORY)) {
+            clientConfiguration.removeCategory(clientConfiguration.getCategory(ITEM_POLICY_CATEGORY));
+        }
+        if (clientConfiguration.hasCategory(WAREHOUSE_CATEGORY)) {
+            clientConfiguration.removeCategory(clientConfiguration.getCategory(WAREHOUSE_CATEGORY));
+        }
+        if (clientConfiguration.hasCategory(GLOBAL_ENTRY_CATEGORY)) {
+            clientConfiguration.removeCategory(clientConfiguration.getCategory(GLOBAL_ENTRY_CATEGORY));
         }
         if (clientConfiguration.hasChanged()) {
             clientConfiguration.save();
@@ -145,7 +259,18 @@ public class ModConfiguration {
             bankingJdbcUrl,
             bankingJdbcUsername,
             bankingJdbcPassword,
-            bankingSourceServerId);
+            bankingSourceServerId,
+            landEnabled,
+            landProtectionMode,
+            landMaxClaimsPerPlayer,
+            landBlockedDimensions,
+            landReservedChunks,
+            landAllowFakePlayers,
+            warehouseEnabled,
+            itemPolicyEnabled,
+            itemPolicyRules,
+            globalHubTarget,
+            targetServerRtpProfiles);
     }
 
     private static float parseRatio(String value, float fallback) {
@@ -245,4 +370,42 @@ public class ModConfiguration {
     public String getBankingSourceServerId() {
         return bankingSourceServerId;
     }
+
+    public boolean isLandEnabled() {
+        return landEnabled;
+    }
+
+    public String getLandProtectionMode() {
+        return landProtectionMode;
+    }
+
+    public int getLandMaxClaimsPerPlayer() {
+        return landMaxClaimsPerPlayer;
+    }
+
+    public int[] getLandBlockedDimensions() {
+        return landBlockedDimensions.clone();
+    }
+
+    public String[] getLandReservedChunks() {
+        return landReservedChunks.clone();
+    }
+
+    public boolean isLandAllowFakePlayers() {
+        return landAllowFakePlayers;
+    }
+
+    public boolean isWarehouseEnabled() { return warehouseEnabled; }
+
+    public boolean isItemPolicyEnabled() {
+        return itemPolicyEnabled;
+    }
+
+    public String[] getItemPolicyRules() {
+        return itemPolicyRules.clone();
+    }
+
+    public String getGlobalHubTarget() { return globalHubTarget; }
+
+    public String[] getTargetServerRtpProfiles() { return targetServerRtpProfiles.clone(); }
 }

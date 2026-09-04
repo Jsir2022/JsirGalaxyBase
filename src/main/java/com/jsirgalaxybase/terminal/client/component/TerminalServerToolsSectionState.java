@@ -7,16 +7,27 @@ public final class TerminalServerToolsSectionState {
 
     public enum FocusField {
         NONE,
-        WARP
+        WARP,
+        HOME,
+        TPA_PLAYER,
+        TPA_SERVER
     }
 
     private String selectedWarpName;
+    private String selectedHomeName;
+    private String homeNameDraft;
+    private String tpaPlayerNameDraft;
+    private String tpaTargetServerIdDraft;
     private boolean hasPendingSelection;
     private FocusField focusedField;
     private boolean confirmTriggered;
 
     public TerminalServerToolsSectionState() {
         this.selectedWarpName = "";
+        this.selectedHomeName = "";
+        this.homeNameDraft = "home";
+        this.tpaPlayerNameDraft = "";
+        this.tpaTargetServerIdDraft = "";
         this.hasPendingSelection = false;
         this.focusedField = FocusField.NONE;
         this.confirmTriggered = false;
@@ -25,12 +36,19 @@ public final class TerminalServerToolsSectionState {
     public void applyModel(TerminalServerToolsSectionModel model) {
         if (model == null) {
             this.selectedWarpName = "";
+            this.selectedHomeName = "";
+            this.homeNameDraft = "home";
+            this.tpaPlayerNameDraft = "";
+            this.tpaTargetServerIdDraft = "";
             this.hasPendingSelection = false;
             this.focusedField = FocusField.NONE;
             this.confirmTriggered = false;
             return;
         }
         setSelectedWarpName(model.getSelectedWarpName());
+        setSelectedHomeName(model.getSelectedHomeName());
+        if (homeNameDraft.isEmpty()) homeNameDraft = selectedHomeName.isEmpty() ? "home" : selectedHomeName;
+        if (tpaTargetServerIdDraft.isEmpty()) tpaTargetServerIdDraft = model.getCurrentServerId();
         this.hasPendingSelection = false;
         this.focusedField = FocusField.NONE;
         this.confirmTriggered = false;
@@ -41,8 +59,20 @@ public final class TerminalServerToolsSectionState {
     }
 
     public void setSelectedWarpName(String selectedWarpName) {
-        this.selectedWarpName = sanitizeWarpName(selectedWarpName);
+        this.selectedWarpName = sanitizeName(selectedWarpName);
     }
+
+    public String getSelectedHomeName() { return selectedHomeName; }
+    public void setSelectedHomeName(String selectedHomeName) {
+        this.selectedHomeName = sanitizeName(selectedHomeName);
+    }
+    public boolean hasSelectedHome() { return !selectedHomeName.isEmpty(); }
+    public String getHomeNameDraft() { return homeNameDraft; }
+    public void setHomeNameDraft(String homeNameDraft) { this.homeNameDraft = sanitizeName(homeNameDraft); }
+    public String getTpaPlayerNameDraft() { return tpaPlayerNameDraft; }
+    public void setTpaPlayerNameDraft(String value) { this.tpaPlayerNameDraft = sanitizeName(value); }
+    public String getTpaTargetServerIdDraft() { return tpaTargetServerIdDraft; }
+    public void setTpaTargetServerIdDraft(String value) { this.tpaTargetServerIdDraft = sanitizeServerId(value); }
 
     public boolean hasPendingSelection() {
         return hasPendingSelection;
@@ -80,10 +110,36 @@ public final class TerminalServerToolsSectionState {
         return TerminalServerToolsActionPayload.empty();
     }
 
-    static String sanitizeWarpName(String value) {
+    public TerminalServerToolsActionPayload toHomePayload() {
+        return TerminalServerToolsActionPayload.forHome(selectedHomeName);
+    }
+
+    public TerminalServerToolsActionPayload toHomeDraftPayload() {
+        return TerminalServerToolsActionPayload.forHome(homeNameDraft);
+    }
+
+    public TerminalServerToolsActionPayload toTpaPayload() {
+        return TerminalServerToolsActionPayload.forTpa(tpaPlayerNameDraft, tpaTargetServerIdDraft);
+    }
+
+    static String sanitizeName(String value) {
         if (value == null) {
             return "";
         }
+        StringBuilder sanitized = new StringBuilder();
+        String trimmed = value.trim();
+        for (int i = 0; i < trimmed.length() && sanitized.length() < 64; i++) {
+            char current = trimmed.charAt(i);
+            if ((current >= 'A' && current <= 'Z') || (current >= 'a' && current <= 'z')
+                || (current >= '0' && current <= '9') || current == '_' || current == '-') {
+                sanitized.append(current);
+            }
+        }
+        return sanitized.toString();
+    }
+
+    static String sanitizeServerId(String value) {
+        if (value == null) return "";
         StringBuilder sanitized = new StringBuilder();
         String trimmed = value.trim();
         for (int i = 0; i < trimmed.length() && sanitized.length() < 64; i++) {

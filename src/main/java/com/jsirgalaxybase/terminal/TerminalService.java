@@ -11,20 +11,41 @@ import java.time.format.DateTimeFormatter;
 
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
+import net.minecraft.util.ChunkCoordinates;
+import net.minecraft.world.World;
 
 import com.jsirgalaxybase.GalaxyBase;
 import com.jsirgalaxybase.modules.cluster.domain.GatewayDispatchResult;
 import com.jsirgalaxybase.modules.cluster.domain.ServerDescriptor;
 import com.jsirgalaxybase.modules.cluster.domain.TransferTicket;
+import com.jsirgalaxybase.modules.cluster.domain.TeleportTarget;
 import com.jsirgalaxybase.modules.core.InstitutionCoreModule;
 import com.jsirgalaxybase.modules.core.vault.application.BaseVaultService;
 import com.jsirgalaxybase.modules.core.vault.domain.VaultSlot;
 import com.jsirgalaxybase.modules.core.vault.infrastructure.minecraft.BaseVaultGuiHandler;
+import com.jsirgalaxybase.modules.itempolicy.ItemPolicyModule;
+import com.jsirgalaxybase.modules.itempolicy.domain.ItemPolicyAuditRecord;
+import com.jsirgalaxybase.modules.itempolicy.domain.ItemPolicyRule;
+import com.jsirgalaxybase.modules.land.LandModule;
+import com.jsirgalaxybase.modules.warehouse.WarehouseModule;
+import com.jsirgalaxybase.modules.warehouse.application.TerminalWarehouseBayService;
+import com.jsirgalaxybase.modules.warehouse.application.TerminalWarehouseCellInspector;
+import com.jsirgalaxybase.modules.warehouse.domain.TerminalWarehouseBay;
+import com.jsirgalaxybase.modules.warehouse.domain.TerminalWarehouseBayReceipt;
+import com.jsirgalaxybase.modules.warehouse.domain.WarehouseDriveHealth;
+import com.jsirgalaxybase.modules.warehouse.domain.WarehouseDriveReceipt;
+import com.jsirgalaxybase.modules.warehouse.domain.WarehouseDriveRecord;
+import com.jsirgalaxybase.modules.warehouse.infrastructure.minecraft.WarehouseDriveHealthResolver;
+import com.jsirgalaxybase.modules.warehouse.infrastructure.minecraft.TerminalWarehouseBayGuiHandler;
+import com.jsirgalaxybase.modules.warehouse.infrastructure.minecraft.TerminalAssetCenterGuiHandler;
+import com.jsirgalaxybase.modules.warehouse.infrastructure.minecraft.TerminalAssetCenterTab;
 import com.jsirgalaxybase.modules.cluster.infrastructure.ClusterInfrastructure;
 import com.jsirgalaxybase.modules.servertools.ServerToolsModule;
 import com.jsirgalaxybase.modules.servertools.application.PlayerTeleportService;
+import com.jsirgalaxybase.modules.servertools.domain.PlayerHome;
 import com.jsirgalaxybase.modules.servertools.domain.ServerWarp;
 import com.jsirgalaxybase.modules.servertools.domain.TeleportDispatchPlan;
+import com.jsirgalaxybase.modules.servertools.domain.TpaRequest;
 import com.jsirgalaxybase.terminal.ui.TerminalBankSnapshot;
 import com.jsirgalaxybase.terminal.ui.TerminalBankSnapshotProvider;
 import com.jsirgalaxybase.terminal.ui.TerminalBankingService;
@@ -32,6 +53,7 @@ import com.jsirgalaxybase.terminal.ui.TerminalActionFeedback;
 import com.jsirgalaxybase.terminal.ui.TerminalHomeSnapshot;
 import com.jsirgalaxybase.terminal.ui.TerminalHomeSnapshotProvider;
 import com.jsirgalaxybase.terminal.ui.TerminalMarketSectionService;
+import com.jsirgalaxybase.terminal.ui.TerminalLandPageService;
 import com.jsirgalaxybase.terminal.ui.TerminalNotification;
 import com.jsirgalaxybase.terminal.ui.TerminalNotificationSeverity;
 import com.jsirgalaxybase.terminal.ui.TerminalPage;
@@ -47,6 +69,8 @@ public final class TerminalService {
     static ServerToolsRuntimeProvider serverToolsRuntimeProvider = new DefaultServerToolsRuntimeProvider();
     static final TerminalExchangeQuoteConfirmationGate exchangeQuoteConfirmationGate =
         new TerminalExchangeQuoteConfirmationGate();
+    static final TerminalLandPageService landPageService = new TerminalLandPageService();
+    static final TerminalPlayerNotificationCenter notificationCenter = new TerminalPlayerNotificationCenter();
 
     private TerminalService() {}
 
@@ -64,9 +88,17 @@ public final class TerminalService {
             return null;
         }
         if (TerminalActionType.fromId(actionType) == TerminalActionType.VAULT_OPEN
-            && TerminalPage.fromId(pageId) == TerminalPage.VAULT) {
-            if (!BaseVaultGuiHandler.openPersonalVault(player)) {
+            && (TerminalPage.fromId(pageId) == TerminalPage.VAULT || TerminalPage.fromId(pageId) == TerminalPage.WAREHOUSE)) {
+            if (!TerminalAssetCenterGuiHandler.open(player, TerminalAssetCenterTab.STORAGE)) {
                 GalaxyBase.LOG.warn("Base Vault GUI was requested before its server runtime was ready for {}",
+                    player.getCommandSenderName());
+            }
+            return null;
+        }
+        if (TerminalActionType.fromId(actionType) == TerminalActionType.WAREHOUSE_OPEN_BAY
+            && TerminalPage.fromId(pageId) == TerminalPage.WAREHOUSE) {
+            if (!TerminalAssetCenterGuiHandler.open(player, TerminalAssetCenterTab.STORAGE)) {
+                GalaxyBase.LOG.warn("Terminal Warehouse Bay GUI was requested before its server runtime was ready for {}",
                     player.getCommandSenderName());
             }
             return null;
@@ -85,6 +117,10 @@ public final class TerminalService {
             payload);
         BankActionContext bankContext = buildBankActionContext(player, selectedPage, actionType, payload);
         ServerToolsActionContext serverToolsContext = buildServerToolsActionContext(player, selectedPage, actionType, payload);
+        LandActionContext landContext = buildLandActionContext(player, selectedPage, actionType, payload);
+        if (player == null) notificationCenter.clearAnonymousForTestOrPreview();
+        List<TerminalOpenApproval.NotificationEntry> notifications = notificationCenter.recordAndPage(player,
+            createNotifications(player, selectedPage, actionType, bankContext, marketContext, serverToolsContext));
         return new TerminalOpenApproval(
             normalizedPageId,
             "银河终端 / " + (playerName == null || playerName.trim().isEmpty() ? "访客" : playerName),
@@ -96,8 +132,8 @@ public final class TerminalService {
                 "贡献",
                 String.valueOf(snapshot == null ? 0 : snapshot.getContribution())),
             createTopLevelNavItems(normalizedPageId),
-            createPageSnapshots(player, snapshot, bankContext, marketContext, serverToolsContext, selectedPage),
-            createNotifications(selectedPage, actionType, bankContext, marketContext, serverToolsContext),
+            createPageSnapshots(player, snapshot, bankContext, marketContext, serverToolsContext, landContext, selectedPage),
+            notifications,
             normalizedSessionToken);
     }
 
@@ -350,12 +386,128 @@ public final class TerminalService {
                     actionFeedback = serverToolsPageFacade.confirmWarp((EntityPlayerMP) player,
                         serverToolsPayload.getWarpName());
                 }
+            } else if (actionType == TerminalActionType.SERVER_TOOLS_CONFIRM_QUICK) {
+                if (!(player instanceof EntityPlayerMP)) {
+                    actionFeedback = new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                        "传送已拒绝",
+                        "只有服务端在线玩家可以从终端确认传送。",
+                        TerminalNotificationSeverity.ERROR.name());
+                } else if (!serverToolsPayload.hasQuickAction()) {
+                    actionFeedback = new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                        "传送已拒绝",
+                        "请选择一个快捷传送动作。",
+                        TerminalNotificationSeverity.ERROR.name());
+                } else {
+                    actionFeedback = serverToolsPageFacade.confirmQuickAction((EntityPlayerMP) player,
+                        serverToolsPayload.getQuickAction());
+                }
+            } else if (actionType == TerminalActionType.SERVER_TOOLS_SELECT_HOME) {
+                actionFeedback = new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                    "已选择 Home", serverToolsPayload.hasHomeName()
+                        ? "当前选中: " + serverToolsPayload.getHomeName() : "当前未选择 Home。",
+                    TerminalNotificationSeverity.INFO.name());
+            } else if (actionType == TerminalActionType.SERVER_TOOLS_CONFIRM_HOME
+                || actionType == TerminalActionType.SERVER_TOOLS_SET_HOME
+                || actionType == TerminalActionType.SERVER_TOOLS_DELETE_HOME) {
+                if (!(player instanceof EntityPlayerMP)) {
+                    actionFeedback = new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                        "Home 操作已拒绝", "只有服务端在线玩家可以管理个人 Home。",
+                        TerminalNotificationSeverity.ERROR.name());
+                } else if (!serverToolsPayload.hasHomeName()) {
+                    actionFeedback = new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                        "Home 操作已拒绝", "请先输入或选择一个 Home 名称。",
+                        TerminalNotificationSeverity.ERROR.name());
+                } else if (actionType == TerminalActionType.SERVER_TOOLS_CONFIRM_HOME) {
+                    actionFeedback = serverToolsPageFacade.confirmHome((EntityPlayerMP) player,
+                        serverToolsPayload.getHomeName());
+                } else if (actionType == TerminalActionType.SERVER_TOOLS_SET_HOME) {
+                    actionFeedback = serverToolsPageFacade.setHome((EntityPlayerMP) player,
+                        serverToolsPayload.getHomeName());
+                } else {
+                    actionFeedback = serverToolsPageFacade.deleteHome((EntityPlayerMP) player,
+                        serverToolsPayload.getHomeName());
+                }
+            } else if (actionType == TerminalActionType.SERVER_TOOLS_TPA_REQUEST
+                || actionType == TerminalActionType.SERVER_TOOLS_TPA_ACCEPT
+                || actionType == TerminalActionType.SERVER_TOOLS_TPA_DENY
+                || actionType == TerminalActionType.SERVER_TOOLS_TPA_CANCEL) {
+                if (!(player instanceof EntityPlayerMP)) {
+                    actionFeedback = new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                        "TPA 操作已拒绝", "只有服务端在线玩家可以管理 TPA 请求。",
+                        TerminalNotificationSeverity.ERROR.name());
+                } else if (!serverToolsPayload.hasTpaPlayerName()) {
+                    actionFeedback = new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                        "TPA 操作已拒绝", "请先输入或选择另一位玩家。", TerminalNotificationSeverity.ERROR.name());
+                } else if (actionType == TerminalActionType.SERVER_TOOLS_TPA_REQUEST
+                    && !serverToolsPayload.hasTpaTargetServerId()) {
+                    actionFeedback = new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                        "TPA 操作已拒绝", "请指定目标所在服务器。", TerminalNotificationSeverity.ERROR.name());
+                } else if (actionType == TerminalActionType.SERVER_TOOLS_TPA_REQUEST) {
+                    actionFeedback = serverToolsPageFacade.createTpa((EntityPlayerMP) player,
+                        serverToolsPayload.getTpaPlayerName(), serverToolsPayload.getTpaTargetServerId());
+                } else if (actionType == TerminalActionType.SERVER_TOOLS_TPA_ACCEPT) {
+                    actionFeedback = serverToolsPageFacade.acceptTpa((EntityPlayerMP) player,
+                        serverToolsPayload.getTpaPlayerName());
+                } else if (actionType == TerminalActionType.SERVER_TOOLS_TPA_DENY) {
+                    actionFeedback = serverToolsPageFacade.denyTpa((EntityPlayerMP) player,
+                        serverToolsPayload.getTpaPlayerName());
+                } else {
+                    actionFeedback = serverToolsPageFacade.cancelTpa((EntityPlayerMP) player,
+                        serverToolsPayload.getTpaPlayerName(), serverToolsPayload.getTpaTargetServerId());
+                }
             }
         }
 
+        TerminalServerToolsActionPayload snapshotPayload = serverToolsPayload;
+        if (actionType == TerminalActionType.SERVER_TOOLS_DELETE_HOME
+            && actionFeedback != null
+            && TerminalNotificationSeverity.SUCCESS.name().equals(actionFeedback.getSeverityName())) {
+            // Do not leave the client focused on a title that has just been removed.
+            snapshotPayload = TerminalServerToolsActionPayload.empty();
+        }
         TerminalServerToolsSectionSnapshot latestSnapshot =
-            serverToolsPageFacade.createSnapshot(player, serverToolsPayload, actionFeedback);
-        return new ServerToolsActionContext(latestSnapshot, serverToolsPayload, actionFeedback);
+            serverToolsPageFacade.createSnapshot(player, snapshotPayload, actionFeedback);
+        return new ServerToolsActionContext(latestSnapshot, snapshotPayload, actionFeedback);
+    }
+
+    private static LandActionContext buildLandActionContext(EntityPlayer player, TerminalPage selectedPage,
+        TerminalActionType actionType, String payload) {
+        TerminalLandActionPayload landPayload = TerminalLandActionPayload.decode(payload);
+        if (selectedPage != TerminalPage.PROPERTY) {
+            return new LandActionContext(TerminalLandSectionSnapshot.unavailable(), landPayload);
+        }
+        LandModule module = resolveLandModule();
+        if (module == null || !module.isRuntimeAvailable() || player == null || player.worldObj == null) {
+            return new LandActionContext(TerminalLandSectionSnapshot.unavailable(), landPayload);
+        }
+        String playerRef = player.getUniqueID() == null ? "" : player.getUniqueID().toString();
+        int chunkX = ((int) Math.floor(player.posX)) >> 4;
+        int chunkZ = ((int) Math.floor(player.posZ)) >> 4;
+        TerminalLandSectionSnapshot snapshot = landPageService.createSnapshot(module.getPersonalLandService(),
+            module.getLocalServerId(), module.getProtectionRuntime().getMode().name(), module.getMaxClaimsPerPlayer(),
+            playerRef, player.worldObj.provider.dimensionId, chunkX, chunkZ, actionType, landPayload);
+        return new LandActionContext(snapshot, landPayload);
+    }
+
+    private static LandModule resolveLandModule() {
+        if (GalaxyBase.proxy == null || GalaxyBase.proxy.getModuleManager() == null) return null;
+        return GalaxyBase.proxy.getModuleManager().findModule(LandModule.class);
+    }
+
+    private static ItemPolicyModule resolveItemPolicyModule() {
+        if (GalaxyBase.proxy == null || GalaxyBase.proxy.getModuleManager() == null) return null;
+        return GalaxyBase.proxy.getModuleManager().findModule(ItemPolicyModule.class);
+    }
+
+    private static WarehouseModule resolveWarehouseModule() {
+        if (GalaxyBase.proxy == null || GalaxyBase.proxy.getModuleManager() == null) return null;
+        return GalaxyBase.proxy.getModuleManager().findModule(WarehouseModule.class);
+    }
+
+    private static String resolveInstitutionServerId() {
+        if (GalaxyBase.proxy == null || GalaxyBase.proxy.getModuleManager() == null) return "";
+        InstitutionCoreModule module = GalaxyBase.proxy.getModuleManager().findModule(InstitutionCoreModule.class);
+        return module == null ? "" : safeText(module.getBankingSourceServerId(), "");
     }
 
     private static boolean canOpenTerminal(EntityPlayerMP player) {
@@ -385,9 +537,12 @@ public final class TerminalService {
             TerminalPage.CAREER,
             TerminalPage.PUBLIC_SERVICE,
             TerminalPage.MARKET,
+            TerminalPage.PROPERTY,
             TerminalPage.SERVER_TOOLS,
             TerminalPage.BANK,
-            TerminalPage.VAULT };
+            TerminalPage.NOTIFICATIONS,
+            TerminalPage.ITEM_POLICY,
+            TerminalPage.WAREHOUSE };
         for (TerminalPage page : pages) {
             items.add(new TerminalOpenApproval.NavItem(
                 page.getId(),
@@ -401,7 +556,7 @@ public final class TerminalService {
 
     private static List<TerminalOpenApproval.PageSnapshot> createPageSnapshots(EntityPlayer player,
         TerminalHomeSnapshot snapshot, BankActionContext bankContext, MarketActionContext marketContext,
-        ServerToolsActionContext serverToolsContext, TerminalPage selectedPage) {
+        ServerToolsActionContext serverToolsContext, LandActionContext landContext, TerminalPage selectedPage) {
         List<TerminalOpenApproval.PageSnapshot> pageSnapshots = new ArrayList<TerminalOpenApproval.PageSnapshot>();
         pageSnapshots.add(createHomePageSnapshot(snapshot));
         pageSnapshots.add(createCareerPageSnapshot(player));
@@ -409,8 +564,127 @@ public final class TerminalService {
         pageSnapshots.add(createMarketPageSnapshot(selectedPage, marketContext));
         pageSnapshots.add(createBankPageSnapshot(bankContext));
         pageSnapshots.add(createServerToolsPageSnapshot(serverToolsContext));
+        pageSnapshots.add(createLandPageSnapshot(landContext));
         pageSnapshots.add(createVaultPageSnapshot(player));
+        pageSnapshots.add(createNotificationCenterPageSnapshot(player));
+        pageSnapshots.add(createItemPolicyPageSnapshot(player));
+        pageSnapshots.add(createWarehousePageSnapshot(player));
         return pageSnapshots;
+    }
+
+    private static TerminalOpenApproval.PageSnapshot createNotificationCenterPageSnapshot(EntityPlayer player) {
+        List<TerminalOpenApproval.Section> sections = new ArrayList<TerminalOpenApproval.Section>();
+        TerminalNotificationCenterSnapshot centerSnapshot = notificationCenter.snapshot(player);
+        sections.add(new TerminalOpenApproval.Section("notification_center_runtime", "通知中心",
+            centerSnapshot.getServiceState(), "可按来源和等级筛选；点击有定位目标的记录可进入对应工作台。"));
+        return new TerminalOpenApproval.PageSnapshot(TerminalPage.NOTIFICATIONS.getId(),
+            TerminalPage.NOTIFICATIONS.getTitle(), TerminalPage.NOTIFICATIONS.getLead(), sections,
+            null, null, null, null, null, null, centerSnapshot);
+    }
+
+    /**
+     * A read-only, actor-scoped diagnosis surface. It deliberately never
+     * scans inventories, changes items, or exposes another player's records.
+     */
+    private static TerminalOpenApproval.PageSnapshot createItemPolicyPageSnapshot(EntityPlayer player) {
+        List<TerminalOpenApproval.Section> sections = new ArrayList<TerminalOpenApproval.Section>();
+        ItemPolicyModule module = resolveItemPolicyModule();
+        if (module == null || !module.isRuntimeAvailable()) {
+            sections.add(new TerminalOpenApproval.Section("item_policy_disabled", "物品准入策略未启用",
+                "当前服务器未启用物品准入策略。", "不会扫描、删除或修改你的既有物品。"));
+        } else {
+            List<ItemPolicyRule> rules = module.getConfiguredRules();
+            sections.add(new TerminalOpenApproval.Section("item_policy_runtime", "当前规则",
+                "已启用 " + rules.size() + " 条拒绝规则。", "规则只在正式资产入口执行。"));
+            for (ItemPolicyRule rule : rules) {
+                String meta = rule.getMeta() == null ? "任意 meta" : "meta " + rule.getMeta();
+                sections.add(new TerminalOpenApproval.Section("item_policy_rule_" + rule.getRuleId(),
+                    "规则：" + rule.getRuleId(), rule.getRegistryName() + " / " + meta,
+                    "适用范围：" + rule.getScopes().toString()));
+            }
+            String actor = playerRef(player);
+            if (actor.isEmpty()) {
+                sections.add(new TerminalOpenApproval.Section("item_policy_audit_unavailable", "最近拒绝记录",
+                    "当前没有服务端玩家会话。", "请在服务器内打开终端后查看自己的记录。"));
+            } else {
+                try {
+                    List<ItemPolicyAuditRecord> records = module.getAuditQuery().listRecentForActor(
+                        resolveInstitutionServerId(), actor, 12);
+                    if (records.isEmpty()) {
+                        sections.add(new TerminalOpenApproval.Section("item_policy_audit_empty", "最近拒绝记录",
+                            "没有你的拒绝记录。", "系统不会显示其他玩家、UUID 或其物品信息。"));
+                    } else {
+                        for (ItemPolicyAuditRecord record : records) {
+                            sections.add(new TerminalOpenApproval.Section("item_policy_denied_" + record.getCreatedAt().toEpochMilli(),
+                                "已拒绝：" + record.getRegistryName() + "@" + record.getMeta(),
+                                record.getScope() + " / " + record.getOperation(),
+                                "原因规则：" + record.getRuleId() + "；时间：" + SERVER_TOOLS_TIME_FORMATTER.format(record.getCreatedAt())));
+                        }
+                    }
+                } catch (RuntimeException exception) {
+                    GalaxyBase.LOG.warn("Unable to query item-policy terminal diagnostics", exception);
+                    sections.add(new TerminalOpenApproval.Section("item_policy_audit_runtime", "最近拒绝记录暂不可用",
+                        "审计数据库当前不可读取。", "策略仍按服务器配置执行；请稍后刷新或联系维护者检查数据库。"));
+                }
+            }
+        }
+        return new TerminalOpenApproval.PageSnapshot(TerminalPage.ITEM_POLICY.getId(),
+            TerminalPage.ITEM_POLICY.getTitle(), TerminalPage.ITEM_POLICY.getLead(), sections);
+    }
+
+    private static TerminalOpenApproval.PageSnapshot createWarehousePageSnapshot(EntityPlayer player) {
+        List<TerminalOpenApproval.Section> sections = new ArrayList<TerminalOpenApproval.Section>();
+        WarehouseModule module = resolveWarehouseModule();
+        if (!(player instanceof EntityPlayerMP)) {
+            sections.add(new TerminalOpenApproval.Section("warehouse_unavailable", "银河仓储", "当前没有服务端仓储会话。",
+                "请在已连接服务器内刷新；本页不连接外部 AE 网络。"));
+        } else if (module == null || !module.isRuntimeAvailable() || module.getTerminalBayService() == null) {
+            sections.add(new TerminalOpenApproval.Section("warehouse_runtime_unavailable", "银河仓储未启用",
+                "个人存储单元 Bay 当前未就绪。", "管理员启用 warehouseEnabled 后必须先应用对应 PostgreSQL migration；Base Vault 保持独立可用。"));
+        } else {
+            String owner = playerRef(player);
+            BaseVaultService vaultService = resolveBaseVaultService();
+            if (vaultService != null) {
+                BaseVaultService.VaultView view = vaultService.viewPersonalVault(owner); int occupied = 0; long items = 0L;
+                for (VaultSlot slot : view.getSlots()) if (slot != null && slot.getStack() != null && slot.getStack().stackSize > 0) { occupied++; items += slot.getStack().stackSize; }
+                sections.add(new TerminalOpenApproval.Section("warehouse_base_vault", "Base Vault", "占用 " + occupied + " / " + view.getAccount().getSlotCount() + " 格 | 实体 " + items,
+                    "独立的跨服资产账本；不会暴露为 AE2 存储，也不会被 Cell 复制。"));
+            }
+            TerminalWarehouseBayService bayService = module.getTerminalBayService(); TerminalWarehouseBay bay = bayService.view(owner);
+            if (!bay.hasCell()) {
+                sections.add(new TerminalOpenApproval.Section("warehouse_bay", "AE2 存储单元", "Bay 为空 · 0 / 1",
+                    "点击“插入存储单元”后从背包放入一枚真实 AE2 Cell；不需要放置任何方块。"));
+            } else {
+                TerminalWarehouseCellInspector.CellFacts facts = TerminalWarehouseCellInspector.inspect(bay.getCell());
+                String name = bay.getCell().getDisplayName();
+                sections.add(new TerminalOpenApproval.Section("warehouse_bay", "AE2 存储单元 · " + name,
+                    "已插入 · " + facts.getUsedBytes() + " / " + facts.getTotalBytes() + " Bytes | 物品 " + facts.getStoredItems(),
+                    "类型 " + facts.getStoredTypes() + " / " + facts.getTotalTypes() + " | Bay 版本 " + bay.getVersion()
+                        + "。容量与内容由 Cell 决定；无频道、供电或外部 ME 网络状态。"));
+            }
+            List<TerminalWarehouseBayReceipt> recent = bayService.listRecent(owner, 6);
+            if (recent.isEmpty()) {
+                sections.add(new TerminalOpenApproval.Section("warehouse_audit_empty", "最近操作", "暂无个人存储单元操作审计。",
+                    "插入、取出与版本冲突都会由服务器记录；Cell 内容不复制到操作日志。"));
+            } else {
+                for (TerminalWarehouseBayReceipt receipt : recent) {
+                    sections.add(new TerminalOpenApproval.Section("warehouse_audit_" + receipt.getRequestId(), "审计：存储单元变更",
+                        receipt.getResult().name() + " | 版本 " + receipt.getBefore().getVersion() + " → " + receipt.getAfter().getVersion(), receipt.getDetail()));
+                }
+            }
+        }
+        return new TerminalOpenApproval.PageSnapshot(TerminalPage.WAREHOUSE.getId(), TerminalPage.WAREHOUSE.getTitle(),
+            TerminalPage.WAREHOUSE.getLead(), sections);
+    }
+
+    private static TerminalOpenApproval.PageSnapshot createLandPageSnapshot(LandActionContext context) {
+        TerminalLandSectionSnapshot snapshot = context == null || context.snapshot == null
+            ? TerminalLandSectionSnapshot.unavailable() : context.snapshot;
+        List<TerminalOpenApproval.Section> sections = new ArrayList<TerminalOpenApproval.Section>();
+        sections.add(new TerminalOpenApproval.Section("property_runtime", "个人地产",
+            snapshot.getServiceState(), snapshot.getServerId() + " / " + snapshot.getProtectionMode()));
+        return new TerminalOpenApproval.PageSnapshot(TerminalPage.PROPERTY.getId(), TerminalPage.PROPERTY.getTitle(),
+            TerminalPage.PROPERTY.getLead(), sections, null, null, null, null, null, snapshot);
     }
 
     private static TerminalOpenApproval.PageSnapshot createVaultPageSnapshot(EntityPlayer player) {
@@ -708,7 +982,7 @@ public final class TerminalService {
         return base + " | " + bankDetail;
     }
 
-    private static List<TerminalOpenApproval.NotificationEntry> createNotifications(TerminalPage selectedPage,
+    private static List<TerminalOpenApproval.NotificationEntry> createNotifications(EntityPlayer player, TerminalPage selectedPage,
         TerminalActionType actionType, BankActionContext bankContext, MarketActionContext marketContext,
         ServerToolsActionContext serverToolsContext) {
         List<TerminalOpenApproval.NotificationEntry> notifications = new ArrayList<TerminalOpenApproval.NotificationEntry>();
@@ -717,7 +991,10 @@ public final class TerminalService {
                 notifications.add(new TerminalOpenApproval.NotificationEntry(
                     marketContext.actionResult.getTitle(),
                     marketContext.actionResult.getBody(),
-                    marketContext.actionResult.getSeverity().name()));
+                    marketContext.actionResult.getSeverity().name(),
+                    isRecoveryFeedback(marketContext.actionResult.getTitle(), marketContext.actionResult.getBody())
+                        ? "market-recovery" : "market",
+                    TerminalPage.MARKET_ACCOUNT_CENTER.getId(), ""));
             } else if (actionType == TerminalActionType.SELECT_PAGE) {
                 notifications.add(new TerminalOpenApproval.NotificationEntry(
                     "已切换市场分区",
@@ -737,7 +1014,8 @@ public final class TerminalService {
                 notifications.add(new TerminalOpenApproval.NotificationEntry(
                     serverToolsContext.actionFeedback.getTitle(),
                     serverToolsContext.actionFeedback.getBody(),
-                    serverToolsContext.actionFeedback.getSeverityName()));
+                    serverToolsContext.actionFeedback.getSeverityName(),
+                    "transfer-ticket", TerminalPage.SERVER_TOOLS.getId(), ""));
             } else if (actionType == TerminalActionType.SELECT_PAGE) {
                 notifications.add(new TerminalOpenApproval.NotificationEntry(
                     "已切换传送分区",
@@ -769,6 +1047,19 @@ public final class TerminalService {
             return notifications;
         }
 
+        if (selectedPage == TerminalPage.PROPERTY) {
+            LandModule land = resolveLandModule();
+            String playerRef = player == null || player.getUniqueID() == null ? "" : player.getUniqueID().toString();
+            com.jsirgalaxybase.modules.land.application.LandProtectionRuntime.ShadowNotice shadow =
+                land == null || land.getProtectionRuntime() == null ? null
+                    : land.getProtectionRuntime().getLatestShadowNotice(playerRef);
+            if (shadow != null) {
+                notifications.add(new TerminalOpenApproval.NotificationEntry("保护观察记录",
+                    "SHADOW 模式记录到 " + shadow.getAction() + "；当前未取消动作。区块 " + shadow.getChunk(),
+                    TerminalNotificationSeverity.WARNING.name(), "land-shadow", TerminalPage.PROPERTY.getId(), ""));
+            }
+        }
+
         if (actionType == TerminalActionType.SELECT_PAGE) {
             notifications.add(new TerminalOpenApproval.NotificationEntry(
                 "已切换分区",
@@ -785,6 +1076,12 @@ public final class TerminalService {
             "当前页面数据来自服务器快照，刷新后会保留最新有效响应。",
             TerminalNotificationSeverity.INFO.name()));
         return notifications;
+    }
+
+    private static boolean isRecoveryFeedback(String title, String body) {
+        String value = ((title == null ? "" : title) + " " + (body == null ? "" : body)).toLowerCase(Locale.ROOT);
+        return value.contains("恢复") || value.contains("交付") || value.contains("收货") || value.contains("custody")
+            || value.contains("recovery");
     }
 
     private static TerminalBankSectionSnapshot.ActionFeedback buildBankActionFeedback(TerminalBankSnapshot snapshot,
@@ -902,6 +1199,39 @@ public final class TerminalService {
             TerminalServerToolsSectionSnapshot.ActionFeedback actionFeedback);
 
         TerminalServerToolsSectionSnapshot.ActionFeedback confirmWarp(EntityPlayerMP player, String warpName);
+
+        TerminalServerToolsSectionSnapshot.ActionFeedback confirmQuickAction(EntityPlayerMP player, String quickAction);
+
+        default TerminalServerToolsSectionSnapshot.ActionFeedback confirmHome(EntityPlayerMP player, String homeName) {
+            return unsupportedHomeFeedback();
+        }
+
+        default TerminalServerToolsSectionSnapshot.ActionFeedback setHome(EntityPlayerMP player, String homeName) {
+            return unsupportedHomeFeedback();
+        }
+
+        default TerminalServerToolsSectionSnapshot.ActionFeedback deleteHome(EntityPlayerMP player, String homeName) {
+            return unsupportedHomeFeedback();
+        }
+
+        default TerminalServerToolsSectionSnapshot.ActionFeedback createTpa(EntityPlayerMP player,
+            String targetPlayerName, String targetServerId) { return unsupportedTpaFeedback(); }
+        default TerminalServerToolsSectionSnapshot.ActionFeedback acceptTpa(EntityPlayerMP player,
+            String requesterPlayerName) { return unsupportedTpaFeedback(); }
+        default TerminalServerToolsSectionSnapshot.ActionFeedback denyTpa(EntityPlayerMP player,
+            String requesterPlayerName) { return unsupportedTpaFeedback(); }
+        default TerminalServerToolsSectionSnapshot.ActionFeedback cancelTpa(EntityPlayerMP player,
+            String targetPlayerName, String targetServerId) { return unsupportedTpaFeedback(); }
+
+        default TerminalServerToolsSectionSnapshot.ActionFeedback unsupportedTpaFeedback() {
+            return new TerminalServerToolsSectionSnapshot.ActionFeedback("TPA 操作不可用",
+                "当前 ServerTools 运行时不支持 TPA 请求。", TerminalNotificationSeverity.WARNING.name());
+        }
+
+        default TerminalServerToolsSectionSnapshot.ActionFeedback unsupportedHomeFeedback() {
+            return new TerminalServerToolsSectionSnapshot.ActionFeedback("Home 操作不可用",
+                "当前 ServerTools 运行时不支持个人 Home 管理。", TerminalNotificationSeverity.WARNING.name());
+        }
     }
 
     static interface ServerToolsRuntimeProvider {
@@ -921,7 +1251,53 @@ public final class TerminalService {
 
         List<TransferTicket> findRecentTickets(String playerUuid, int limit);
 
+        default List<PlayerHome> listHomes(String playerUuid) {
+            return new ArrayList<PlayerHome>();
+        }
+
+        default List<TpaRequest> listOutgoingTpa(EntityPlayerMP player, int limit) {
+            return new ArrayList<TpaRequest>();
+        }
+
+        default List<TpaRequest> listIncomingTpa(EntityPlayerMP player, int limit) {
+            return new ArrayList<TpaRequest>();
+        }
+
+        default TpaRequest createTpa(EntityPlayerMP player, String targetPlayerName, String targetServerId) {
+            throw new UnsupportedOperationException("TPA is not supported by this runtime");
+        }
+
+        default TpaRequest acceptTpa(EntityPlayerMP player, String requesterPlayerName) {
+            throw new UnsupportedOperationException("TPA is not supported by this runtime");
+        }
+
+        default TpaRequest denyTpa(EntityPlayerMP player, String requesterPlayerName) {
+            throw new UnsupportedOperationException("TPA is not supported by this runtime");
+        }
+
+        default TpaRequest cancelTpa(EntityPlayerMP player, String targetPlayerName, String targetServerId) {
+            throw new UnsupportedOperationException("TPA is not supported by this runtime");
+        }
+
         TeleportDispatchPlan prepareWarpTeleport(EntityPlayerMP player, String warpName);
+
+        TeleportDispatchPlan prepareHomeTeleport(EntityPlayerMP player);
+
+        default TeleportDispatchPlan prepareHomeTeleport(EntityPlayerMP player, String homeName) {
+            return prepareHomeTeleport(player);
+        }
+
+        default PlayerHome setHome(EntityPlayerMP player, String homeName) {
+            throw new UnsupportedOperationException("personal Home management is not supported by this runtime");
+        }
+
+        default boolean deleteHome(EntityPlayerMP player, String homeName) {
+            throw new UnsupportedOperationException("personal Home management is not supported by this runtime");
+        }
+
+        TeleportDispatchPlan prepareBackTeleport(EntityPlayerMP player);
+
+        TeleportDispatchPlan prepareSpawnTeleport(EntityPlayerMP player);
 
         GatewayDispatchResult dispatchTeleport(EntityPlayerMP player, TeleportDispatchPlan dispatchPlan);
 
@@ -1047,8 +1423,17 @@ public final class TerminalService {
             List<ServerWarp> warps = runtime.listWarps();
             List<TransferTicket> recentTickets = player == null ? new ArrayList<TransferTicket>()
                 : runtime.findRecentTickets(player.getUniqueID().toString(), 3);
+            List<PlayerHome> homes = player == null ? new ArrayList<PlayerHome>()
+                : runtime.listHomes(player.getUniqueID().toString());
+            List<TpaRequest> outgoingTpa = player instanceof EntityPlayerMP
+                ? runtime.listOutgoingTpa((EntityPlayerMP) player, 10) : new ArrayList<TpaRequest>();
+            List<TpaRequest> incomingTpa = player instanceof EntityPlayerMP
+                ? runtime.listIncomingTpa((EntityPlayerMP) player, 10) : new ArrayList<TpaRequest>();
+            TpaViewLists tpaViews = TpaViewLists.from(outgoingTpa, incomingTpa);
             String selectedWarpName = payload == null ? "" : payload.getWarpName();
             ServerWarp selectedWarp = findWarp(warps, selectedWarpName);
+            String selectedHomeName = payload == null ? "" : payload.getHomeName();
+            PlayerHome selectedHome = findHome(homes, selectedHomeName);
             return new TerminalServerToolsSectionSnapshot(
                 "ServerTools warp runtime online",
                 normalize(runtime.getLocalServerId(), "unknown"),
@@ -1059,6 +1444,13 @@ public final class TerminalService {
                 toWarpSubtitles(warps),
                 toWarpStateLabels(warps),
                 toRecentTransferLines(recentTickets),
+                toHomeLines(homes),
+                toHomeNames(homes),
+                toHomeSubtitles(homes),
+                tpaViews.directions,
+                tpaViews.counterpartyNames,
+                tpaViews.targetServerIds,
+                tpaViews.statusLabels,
                 selectedWarpName,
                 selectedWarp == null ? "未选择 warp" : displayWarpTitle(selectedWarp),
                 selectedWarp == null ? "当前没有可查看的 warp 详情。" : describeWarp(selectedWarp),
@@ -1066,6 +1458,10 @@ public final class TerminalService {
                 selectedWarp == null ? "--" : describeWarpTargetLocation(selectedWarp),
                 selectedWarp == null ? "当前没有额外传送说明。" : normalize(selectedWarp.getDescription(), "当前没有额外传送说明。"),
                 selectedWarp != null && selectedWarp.isEnabled(),
+                selectedHomeName,
+                selectedHome == null ? "--" : describeHomeTargetServer(selectedHome),
+                selectedHome == null ? "--" : describeHomeTargetLocation(selectedHome),
+                selectedHome == null ? "当前没有可查看的个人 Home。" : describeHome(selectedHome),
                 resolveRecentSourceServerId(recentTickets),
                 resolveRecentTargetServerId(recentTickets),
                 resolveRecentTransferStatus(recentTickets),
@@ -1096,6 +1492,148 @@ public final class TerminalService {
                     exception.getMessage() == null ? "Teleport failed" : exception.getMessage(),
                     TerminalNotificationSeverity.ERROR.name());
             }
+        }
+
+        @Override
+        public TerminalServerToolsSectionSnapshot.ActionFeedback confirmQuickAction(EntityPlayerMP player,
+            String quickAction) {
+            ServerToolsRuntimeBridge runtime = serverToolsRuntimeProvider.resolve();
+            if (runtime == null || !runtime.isRuntimeAvailable()) {
+                return new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                    "传送失败",
+                    "ServerTools runtime 不可用，请检查 dedicated server 启动日志与 PostgreSQL / Cluster 配置。",
+                    TerminalNotificationSeverity.ERROR.name());
+            }
+            try {
+                String action = quickAction == null ? "" : quickAction.trim().toLowerCase(Locale.ROOT);
+                TeleportDispatchPlan dispatchPlan;
+                String actionLabel;
+                if ("home".equals(action)) {
+                    dispatchPlan = runtime.prepareHomeTeleport(player);
+                    actionLabel = "默认家园";
+                } else if ("back".equals(action)) {
+                    dispatchPlan = runtime.prepareBackTeleport(player);
+                    actionLabel = "返回上一位置";
+                } else if ("spawn".equals(action)) {
+                    dispatchPlan = runtime.prepareSpawnTeleport(player);
+                    actionLabel = "当前服出生点";
+                } else {
+                    return new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                        "传送已拒绝", "未知快捷传送动作。", TerminalNotificationSeverity.ERROR.name());
+                }
+                GatewayDispatchResult result = runtime.dispatchTeleport(resolveLiveSubject(runtime, dispatchPlan),
+                    dispatchPlan);
+                return toActionFeedback(result, actionLabel);
+            } catch (RuntimeException exception) {
+                return new TerminalServerToolsSectionSnapshot.ActionFeedback(
+                    "传送失败",
+                    exception.getMessage() == null ? "Teleport failed" : exception.getMessage(),
+                    TerminalNotificationSeverity.ERROR.name());
+            }
+        }
+
+        @Override
+        public TerminalServerToolsSectionSnapshot.ActionFeedback confirmHome(EntityPlayerMP player, String homeName) {
+            ServerToolsRuntimeBridge runtime = serverToolsRuntimeProvider.resolve();
+            if (runtime == null || !runtime.isRuntimeAvailable()) return runtimeUnavailableFeedback();
+            try {
+                TeleportDispatchPlan plan = runtime.prepareHomeTeleport(player, homeName);
+                return toActionFeedback(runtime.dispatchTeleport(resolveLiveSubject(runtime, plan), plan), "Home " + homeName);
+            } catch (RuntimeException exception) {
+                return failureFeedback("Home 传送失败", exception);
+            }
+        }
+
+        @Override
+        public TerminalServerToolsSectionSnapshot.ActionFeedback setHome(EntityPlayerMP player, String homeName) {
+            ServerToolsRuntimeBridge runtime = serverToolsRuntimeProvider.resolve();
+            if (runtime == null || !runtime.isRuntimeAvailable()) return runtimeUnavailableFeedback();
+            try {
+                PlayerHome home = runtime.setHome(player, homeName);
+                return new TerminalServerToolsSectionSnapshot.ActionFeedback("Home 已设定",
+                    "已将 " + home.getHomeName() + " 保存到 " + describeHomeTargetServer(home) + "。",
+                    TerminalNotificationSeverity.SUCCESS.name());
+            } catch (RuntimeException exception) {
+                return failureFeedback("Home 设定失败", exception);
+            }
+        }
+
+        @Override
+        public TerminalServerToolsSectionSnapshot.ActionFeedback deleteHome(EntityPlayerMP player, String homeName) {
+            ServerToolsRuntimeBridge runtime = serverToolsRuntimeProvider.resolve();
+            if (runtime == null || !runtime.isRuntimeAvailable()) return runtimeUnavailableFeedback();
+            try {
+                if (!runtime.deleteHome(player, homeName)) {
+                    return new TerminalServerToolsSectionSnapshot.ActionFeedback("Home 未删除",
+                        "未找到个人 Home: " + homeName + "。", TerminalNotificationSeverity.WARNING.name());
+                }
+                return new TerminalServerToolsSectionSnapshot.ActionFeedback("Home 已删除",
+                    "已删除个人 Home: " + homeName + "。", TerminalNotificationSeverity.SUCCESS.name());
+            } catch (RuntimeException exception) {
+                return failureFeedback("Home 删除失败", exception);
+            }
+        }
+
+        @Override
+        public TerminalServerToolsSectionSnapshot.ActionFeedback createTpa(EntityPlayerMP player,
+            String targetPlayerName, String targetServerId) {
+            ServerToolsRuntimeBridge runtime = serverToolsRuntimeProvider.resolve();
+            if (runtime == null || !runtime.isRuntimeAvailable()) return runtimeUnavailableFeedback();
+            try {
+                TpaRequest request = runtime.createTpa(player, targetPlayerName, targetServerId);
+                return new TerminalServerToolsSectionSnapshot.ActionFeedback("TPA 请求已发送",
+                    "已向 " + request.getTargetPlayerName() + "（" + request.getTargetServerId()
+                        + "）发出请求，30 秒内等待对方确认。",
+                    TerminalNotificationSeverity.SUCCESS.name());
+            } catch (RuntimeException exception) {
+                return failureFeedback("TPA 请求失败", exception);
+            }
+        }
+
+        @Override
+        public TerminalServerToolsSectionSnapshot.ActionFeedback acceptTpa(EntityPlayerMP player,
+            String requesterPlayerName) {
+            return completeTpa(player, requesterPlayerName, "", "接受", new TpaCompletion() {
+                @Override public TpaRequest complete(ServerToolsRuntimeBridge runtime, EntityPlayerMP actor,
+                    String otherPlayer, String serverId) { return runtime.acceptTpa(actor, otherPlayer); }
+            });
+        }
+
+        @Override
+        public TerminalServerToolsSectionSnapshot.ActionFeedback denyTpa(EntityPlayerMP player,
+            String requesterPlayerName) {
+            return completeTpa(player, requesterPlayerName, "", "已拒绝", new TpaCompletion() {
+                @Override public TpaRequest complete(ServerToolsRuntimeBridge runtime, EntityPlayerMP actor,
+                    String otherPlayer, String serverId) { return runtime.denyTpa(actor, otherPlayer); }
+            });
+        }
+
+        @Override
+        public TerminalServerToolsSectionSnapshot.ActionFeedback cancelTpa(EntityPlayerMP player,
+            String targetPlayerName, String targetServerId) {
+            return completeTpa(player, targetPlayerName, targetServerId, "已取消", new TpaCompletion() {
+                @Override public TpaRequest complete(ServerToolsRuntimeBridge runtime, EntityPlayerMP actor,
+                    String otherPlayer, String serverId) { return runtime.cancelTpa(actor, otherPlayer, serverId); }
+            });
+        }
+
+        private static TerminalServerToolsSectionSnapshot.ActionFeedback completeTpa(EntityPlayerMP player,
+            String otherPlayer, String targetServerId, String action, TpaCompletion completion) {
+            ServerToolsRuntimeBridge runtime = serverToolsRuntimeProvider.resolve();
+            if (runtime == null || !runtime.isRuntimeAvailable()) return runtimeUnavailableFeedback();
+            try {
+                TpaRequest request = completion.complete(runtime, player, otherPlayer, targetServerId);
+                return new TerminalServerToolsSectionSnapshot.ActionFeedback("TPA " + action,
+                    "与 " + (request == null ? otherPlayer : request.getRequesterPlayerName()) + " 的请求状态已更新。",
+                    TerminalNotificationSeverity.SUCCESS.name());
+            } catch (RuntimeException exception) {
+                return failureFeedback("TPA 操作失败", exception);
+            }
+        }
+
+        private interface TpaCompletion {
+            TpaRequest complete(ServerToolsRuntimeBridge runtime, EntityPlayerMP actor, String otherPlayer,
+                String serverId);
         }
 
         private static TerminalServerToolsSectionSnapshot unavailableSnapshot(
@@ -1220,6 +1758,56 @@ public final class TerminalService {
             return lines;
         }
 
+        private static List<String> toHomeLines(List<PlayerHome> homes) {
+            List<String> lines = new ArrayList<String>();
+            for (PlayerHome home : homes) {
+                if (home != null) lines.add(home.getHomeName() + " | " + describeHomeTargetServer(home));
+            }
+            if (lines.isEmpty()) lines.add("当前没有已设定的 Home。");
+            return lines;
+        }
+
+        private static List<String> toHomeNames(List<PlayerHome> homes) {
+            List<String> names = new ArrayList<String>();
+            for (PlayerHome home : homes) if (home != null) names.add(home.getHomeName());
+            if (names.isEmpty()) names.add("");
+            return names;
+        }
+
+        private static List<String> toHomeSubtitles(List<PlayerHome> homes) {
+            List<String> subtitles = new ArrayList<String>();
+            for (PlayerHome home : homes) if (home != null) subtitles.add(describeHomeTargetLocation(home));
+            if (subtitles.isEmpty()) subtitles.add("可在当前位置设定第一个 Home。");
+            return subtitles;
+        }
+
+        /** A terminal-safe projection: only the current user's counterpart, server and state are exposed. */
+        private static final class TpaViewLists {
+            private final List<String> directions = new ArrayList<String>();
+            private final List<String> counterpartyNames = new ArrayList<String>();
+            private final List<String> targetServerIds = new ArrayList<String>();
+            private final List<String> statusLabels = new ArrayList<String>();
+
+            private static TpaViewLists from(List<TpaRequest> outgoing, List<TpaRequest> incoming) {
+                TpaViewLists views = new TpaViewLists();
+                views.append(outgoing, "OUTGOING");
+                views.append(incoming, "INCOMING");
+                return views;
+            }
+
+            private void append(List<TpaRequest> requests, String direction) {
+                if (requests == null) return;
+                for (TpaRequest request : requests) {
+                    if (request == null || request.getStatus() == null) continue;
+                    directions.add(direction);
+                    counterpartyNames.add("INCOMING".equals(direction) ? request.getRequesterPlayerName()
+                        : request.getTargetPlayerName());
+                    targetServerIds.add(normalize(request.getTargetServerId(), "--"));
+                    statusLabels.add(request.getStatus().name());
+                }
+            }
+        }
+
         private static String formatTicketLine(TransferTicket ticket) {
             String timestamp = formatInstant(ticket.getUpdatedAt());
             String statusMessage = normalize(ticket.getStatusMessage(), "无额外状态说明");
@@ -1237,6 +1825,42 @@ public final class TerminalService {
                 }
             }
             return null;
+        }
+
+        private static PlayerHome findHome(List<PlayerHome> homes, String homeName) {
+            if (homeName == null || homeName.trim().isEmpty()) return null;
+            for (PlayerHome home : homes) {
+                if (home != null && home.getHomeName().equalsIgnoreCase(homeName.trim())) return home;
+            }
+            return null;
+        }
+
+        private static String describeHomeTargetServer(PlayerHome home) {
+            return home == null || home.getTarget() == null ? "--" : normalize(home.getTarget().getServerId(), "--");
+        }
+
+        private static String describeHomeTargetLocation(PlayerHome home) {
+            if (home == null || home.getTarget() == null) return "--";
+            return "dim " + home.getTarget().getDimensionId() + " / " + Math.round(home.getTarget().getX())
+                + ", " + Math.round(home.getTarget().getY()) + ", " + Math.round(home.getTarget().getZ());
+        }
+
+        private static String describeHome(PlayerHome home) {
+            return "Home " + home.getHomeName() + " -> " + describeHomeTargetServer(home) + " / "
+                + describeHomeTargetLocation(home);
+        }
+
+        private static TerminalServerToolsSectionSnapshot.ActionFeedback runtimeUnavailableFeedback() {
+            return new TerminalServerToolsSectionSnapshot.ActionFeedback("Home 操作失败",
+                "ServerTools runtime 不可用，请检查 dedicated server 启动日志与 PostgreSQL / Cluster 配置。",
+                TerminalNotificationSeverity.ERROR.name());
+        }
+
+        private static TerminalServerToolsSectionSnapshot.ActionFeedback failureFeedback(String title,
+            RuntimeException exception) {
+            return new TerminalServerToolsSectionSnapshot.ActionFeedback(title,
+                exception.getMessage() == null ? "ServerTools 操作失败。" : exception.getMessage(),
+                TerminalNotificationSeverity.ERROR.name());
         }
 
         private static String displayWarpTitle(ServerWarp warp) {
@@ -1397,11 +2021,109 @@ public final class TerminalService {
         }
 
         @Override
+        public List<PlayerHome> listHomes(String playerUuid) {
+            if (module == null || module.getPlayerTeleportService() == null || playerUuid == null || playerUuid.trim().isEmpty()) {
+                return new ArrayList<PlayerHome>();
+            }
+            try {
+                return module.getPlayerTeleportService().listHomes(playerUuid);
+            } catch (RuntimeException ignored) {
+                return new ArrayList<PlayerHome>();
+            }
+        }
+
+        @Override
+        public List<TpaRequest> listOutgoingTpa(EntityPlayerMP player, int limit) {
+            if (module == null || module.getPlayerTeleportService() == null || player == null) {
+                return new ArrayList<TpaRequest>();
+            }
+            return module.getPlayerTeleportService().listRecentTpaRequestsForRequester(module.getLocalServerId(),
+                player.getUniqueID().toString(), limit);
+        }
+
+        @Override
+        public List<TpaRequest> listIncomingTpa(EntityPlayerMP player, int limit) {
+            if (module == null || module.getPlayerTeleportService() == null || player == null) {
+                return new ArrayList<TpaRequest>();
+            }
+            return module.getPlayerTeleportService().listRecentTpaRequestsForTarget(module.getLocalServerId(),
+                player.getCommandSenderName(), limit);
+        }
+
+        @Override
+        public TpaRequest createTpa(EntityPlayerMP player, String targetPlayerName, String targetServerId) {
+            return module.getPlayerTeleportService().createTpaRequest(module.captureActor(player),
+                PlayerTeleportService.newRequestId("terminal-tpa"), targetPlayerName, targetServerId, Instant.now());
+        }
+
+        @Override
+        public TpaRequest acceptTpa(EntityPlayerMP player, String requesterPlayerName) {
+            return module.getPlayerTeleportService().acceptTpa(module.captureActor(player), requesterPlayerName,
+                Instant.now());
+        }
+
+        @Override
+        public TpaRequest denyTpa(EntityPlayerMP player, String requesterPlayerName) {
+            return module.getPlayerTeleportService().declineTpa(module.captureActor(player), requesterPlayerName,
+                Instant.now());
+        }
+
+        @Override
+        public TpaRequest cancelTpa(EntityPlayerMP player, String targetPlayerName, String targetServerId) {
+            return module.getPlayerTeleportService().cancelTpa(module.captureActor(player), targetPlayerName,
+                targetServerId, Instant.now());
+        }
+
+        @Override
         public TeleportDispatchPlan prepareWarpTeleport(EntityPlayerMP player, String warpName) {
             return module.getPlayerTeleportService().prepareWarpTeleport(
                 module.captureActor(player),
                 PlayerTeleportService.newRequestId("terminal-warp"),
                 warpName);
+        }
+
+        @Override
+        public TeleportDispatchPlan prepareHomeTeleport(EntityPlayerMP player) {
+            return prepareHomeTeleport(player, "home");
+        }
+
+        @Override
+        public TeleportDispatchPlan prepareHomeTeleport(EntityPlayerMP player, String homeName) {
+            return module.getPlayerTeleportService().prepareHomeTeleport(module.captureActor(player),
+                PlayerTeleportService.newRequestId("terminal-home"), homeName);
+        }
+
+        @Override
+        public PlayerHome setHome(EntityPlayerMP player, String homeName) {
+            return module.getPlayerTeleportService().setHome(module.captureActor(player), homeName);
+        }
+
+        @Override
+        public boolean deleteHome(EntityPlayerMP player, String homeName) {
+            return module.getPlayerTeleportService().deleteHome(player.getUniqueID().toString(), homeName);
+        }
+
+        @Override
+        public TeleportDispatchPlan prepareBackTeleport(EntityPlayerMP player) {
+            return module.getPlayerTeleportService().prepareBackTeleport(module.captureActor(player),
+                PlayerTeleportService.newRequestId("terminal-back"));
+        }
+
+        @Override
+        public TeleportDispatchPlan prepareSpawnTeleport(EntityPlayerMP player) {
+            World world = player == null ? null : player.worldObj;
+            if (world == null) {
+                throw new IllegalStateException("Current world is unavailable");
+            }
+            ChunkCoordinates spawn = world.getSpawnPoint();
+            int y = spawn.posY;
+            while (world.getBlock(spawn.posX, y, spawn.posZ).isNormalCube()) {
+                y += 2;
+            }
+            TeleportTarget target = new TeleportTarget(module.getLocalServerId(), world.provider.dimensionId,
+                spawn.posX + 0.5D, y + 0.1D, spawn.posZ + 0.5D, 0.0F, 0.0F);
+            return module.getPlayerTeleportService().prepareSpawnTeleport(module.captureActor(player),
+                PlayerTeleportService.newRequestId("terminal-spawn"), target);
         }
 
         @Override
@@ -1463,6 +2185,17 @@ public final class TerminalService {
             this.snapshot = snapshot == null ? TerminalServerToolsSectionSnapshot.placeholder() : snapshot;
             this.payload = payload == null ? TerminalServerToolsActionPayload.empty() : payload;
             this.actionFeedback = actionFeedback;
+        }
+    }
+
+    private static final class LandActionContext {
+
+        private final TerminalLandSectionSnapshot snapshot;
+        private final TerminalLandActionPayload payload;
+
+        private LandActionContext(TerminalLandSectionSnapshot snapshot, TerminalLandActionPayload payload) {
+            this.snapshot = snapshot == null ? TerminalLandSectionSnapshot.unavailable() : snapshot;
+            this.payload = payload == null ? TerminalLandActionPayload.empty() : payload;
         }
     }
 }

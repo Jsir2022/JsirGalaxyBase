@@ -1,0 +1,148 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="840" viewBox="0 0 1680 840">
+  <defs>
+    <pattern id="terrain" width="64" height="64" patternUnits="userSpaceOnUse">
+      <rect width="64" height="64" fill="#6fae43"/>
+      <path d="M0 18h22v10h18v12h24M8 58h18V46h16V32h22" fill="none" stroke="#4c8d36" stroke-width="4" opacity=".65"/>
+      <path d="M4 8h9v7H4zm38 43h13v7H42z" fill="#88c956" opacity=".85"/>
+    </pattern>
+    <pattern id="unknown" width="16" height="16" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="16" height="16" fill="#17242d"/>
+      <rect width="4" height="16" fill="#263b49"/>
+    </pattern>
+    <filter id="shadow"><feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#000" flood-opacity=".45"/></filter>
+    <style>
+      .ui{font-family:'Noto Sans CJK SC','Microsoft YaHei',sans-serif;fill:#d5e4ef}
+      .pixel{font-family:'Noto Sans Mono CJK SC','Microsoft YaHei Mono',monospace;fill:#d5e4ef}
+      .muted{fill:#91a8b8}.blue{fill:#77bff2}.gold{fill:#ffc94f}.green{fill:#67dfa9}.red{fill:#ff8572}
+      .line{stroke:#49667a;stroke-width:2}.thin{stroke:#3a5567;stroke-width:1}
+    </style>
+  </defs>
+
+  <rect width="1680" height="840" fill="#0b141c"/>
+  <rect x="8" y="8" width="1664" height="44" fill="#263a49" stroke="#7899b0" stroke-width="2"/>
+  <text class="ui" x="38" y="39" font-size="25">地产 / 个人地产 / 附近地图</text>
+  <text class="pixel muted" x="1195" y="39" font-size="20">贡献 1280</text>
+  <g transform="translate(1408 16)" class="line" fill="#315f83">
+    <rect width="42" height="28"/><rect x="48" width="42" height="28"/><rect x="96" width="42" height="28"/><rect x="144" width="42" height="28"/><rect x="192" width="42" height="28"/>
+  </g>
+
+  <rect x="8" y="60" width="246" height="772" fill="#152532" stroke="#4c687a" stroke-width="2"/>
+  <g class="ui" font-size="25">
+    <g><rect x="10" y="64" width="242" height="64" fill="#101c26" stroke="#3b5567"/><text x="80" y="105">首页</text></g>
+    <g><rect x="10" y="134" width="242" height="64" fill="#101c26" stroke="#3b5567"/><text x="80" y="175">职业</text></g>
+    <g><rect x="10" y="204" width="242" height="64" fill="#101c26" stroke="#3b5567"/><text x="80" y="245">公共</text></g>
+    <g><rect x="10" y="274" width="242" height="64" fill="#101c26" stroke="#3b5567"/><text x="80" y="315">市场</text></g>
+    <g><rect x="10" y="344" width="242" height="64" fill="#23455d" stroke="#6e98b5" stroke-width="2"/><rect x="10" y="344" width="8" height="64" fill="#358fd1"/><text x="80" y="385">地产</text></g>
+    <g><rect x="10" y="414" width="242" height="64" fill="#101c26" stroke="#3b5567"/><text x="80" y="455">传送</text></g>
+    <g><rect x="10" y="484" width="242" height="64" fill="#101c26" stroke="#3b5567"/><text x="80" y="525">银行</text></g>
+    <g><rect x="10" y="554" width="242" height="64" fill="#101c26" stroke="#3b5567"/><text x="80" y="595">仓库</text></g>
+  </g>
+
+  <rect x="266" y="60" width="1406" height="772" fill="#1b2d39" stroke="#4c687a" stroke-width="2"/>
+  <rect x="278" y="70" width="1382" height="54" rx="3" fill="#13212c"/>
+  <text class="ui" x="298" y="104" font-size="21">galaxy_gtnh_lobby</text>
+  <g class="ui" font-size="17">
+    <rect x="510" y="82" width="82" height="28" rx="14" fill="#29475c"/><text x="528" y="102">维度 0</text>
+    <rect x="603" y="82" width="128" height="28" rx="14" fill="#29475c"/><text x="620" y="102">区块 [62,-97]</text>
+    <rect x="742" y="82" width="102" height="28" rx="14" fill="#5a4820"/><text class="gold" x="761" y="102">SHADOW</text>
+    <rect x="855" y="82" width="104" height="28" rx="14" fill="#29475c"/><text x="874" y="102">产权 0/4</text>
+  </g>
+
+  <g class="ui" font-size="19">
+    <rect x="278" y="132" width="138" height="38" fill="#356991" stroke="#8ab2ce" stroke-width="2"/><text x="302" y="158">附近地图</text>
+    <rect x="422" y="132" width="138" height="38" fill="#1a3040" stroke="#4b6a7e"/><text x="451" y="158">我的地皮</text>
+    <text class="muted" x="590" y="157" font-size="16">左键选择 · 拖拽平移 · 滚轮缩放 · 右键打开操作菜单</text>
+  </g>
+
+  <!-- Map takes the dominant area. -->
+  <rect x="278" y="178" width="1028" height="638" fill="#0c151c" stroke="#7899b0" stroke-width="3"/>
+  <rect x="284" y="184" width="1016" height="626" fill="url(#terrain)"/>
+  <rect x="284" y="184" width="1016" height="626" fill="#8ac74b" opacity=".18"/>
+  <path d="M284 598C410 528 485 650 622 560s232-12 344-84 206-24 334-94v428H284z" fill="#557e3a" opacity=".38"/>
+  <path d="M284 512c190-56 260 30 414-38s271-15 404-94 141-22 198-2" fill="none" stroke="#59a9d5" stroke-width="13" opacity=".75"/>
+  <path d="M284 512c190-56 260 30 414-38s271-15 404-94 141-22 198-2" fill="none" stroke="#94d8ed" stroke-width="3" opacity=".7"/>
+
+  <!-- Sparse ownership overlays, much lighter grid than before. -->
+  <rect x="896" y="435" width="74" height="74" fill="#54d6b0" opacity=".42" stroke="#b7ffeb" stroke-width="3"/>
+  <rect x="970" y="435" width="74" height="74" fill="#54d6b0" opacity=".42" stroke="#b7ffeb" stroke-width="3"/>
+  <rect x="1044" y="435" width="74" height="74" fill="#ec735b" opacity=".40" stroke="#ffb09e" stroke-width="3"/>
+  <path d="M1118 435h74v74h-74z" fill="#736fd6" opacity=".52" stroke="#c2c0ff" stroke-width="3"/>
+  <path d="M1120 500l62-62m-44 70l52-52m-70 32l50-50" stroke="#c2c0ff" stroke-width="3" opacity=".7"/>
+
+  <!-- Selected chunk. -->
+  <rect x="674" y="361" width="74" height="74" fill="#ffce45" opacity=".14" stroke="#ffd34f" stroke-width="5"/>
+  <path d="M674 374v-13h13m48 0h13v13m0 48v13h-13m-48 0h-13v-13" fill="none" stroke="#fff3b0" stroke-width="3"/>
+
+  <!-- SU-inspired compact map controls. -->
+  <g transform="translate(298 198)" filter="url(#shadow)">
+    <rect width="48" height="246" rx="5" fill="#122430" stroke="#7598ae" stroke-width="2"/>
+    <g class="ui" font-size="27" text-anchor="middle">
+      <rect x="5" y="5" width="38" height="38" rx="4" fill="#315f83"/><text x="24" y="33">＋</text>
+      <rect x="5" y="53" width="38" height="38" rx="4" fill="#315f83"/><text x="24" y="80">−</text>
+      <rect x="5" y="101" width="38" height="38" rx="4" fill="#315f83"/><text x="24" y="128" font-size="20">⌖</text>
+      <rect x="5" y="149" width="38" height="38" rx="4" fill="#315f83"/><text x="24" y="176" font-size="21">↻</text>
+      <rect x="5" y="197" width="38" height="38" rx="4" fill="#315f83"/><text x="24" y="224" font-size="19">图</text>
+    </g>
+  </g>
+
+  <!-- Player marker: large pin with avatar and direction. -->
+  <g transform="translate(605 532)" filter="url(#shadow)">
+    <path d="M0 0c0-24 19-43 43-43S86-24 86 0c0 30-43 66-43 66S0 30 0 0z" fill="#238ed0" stroke="#d5f3ff" stroke-width="3"/>
+    <path d="M43 66l-9 18 18-13z" fill="#77d8ff" stroke="#d5f3ff" stroke-width="2"/>
+    <rect x="20" y="-25" width="46" height="46" fill="#2a201e" stroke="#d5f3ff" stroke-width="2"/>
+    <rect x="25" y="-20" width="36" height="36" fill="#dba173"/>
+    <rect x="25" y="-20" width="36" height="10" fill="#3b251d"/>
+    <rect x="31" y="-3" width="6" height="6" fill="#213c55"/><rect x="49" y="-3" width="6" height="6" fill="#213c55"/>
+    <rect x="38" y="8" width="10" height="3" fill="#9b5a45"/>
+  </g>
+  <text class="ui" x="695" y="598" font-size="17" fill="#ffffff">你 · 朝东南</text>
+
+  <!-- Rich hover card. -->
+  <g transform="translate(754 208)" filter="url(#shadow)">
+    <rect width="382" height="194" rx="5" fill="#13232e" stroke="#91afc2" stroke-width="2"/>
+    <rect width="7" height="194" fill="#ffd34f"/>
+    <text class="ui" x="24" y="34" font-size="22">区块 [62, -97]</text>
+    <text class="green ui" x="266" y="34" font-size="17">可认领</text>
+    <line x1="22" y1="48" x2="360" y2="48" class="thin"/>
+    <text class="ui muted" x="24" y="75" font-size="16">方块范围</text><text class="pixel" x="132" y="75" font-size="16">X 992–1007  /  Z -1552–-1537</text>
+    <text class="ui muted" x="24" y="101" font-size="16">位置</text><text class="ui" x="132" y="101" font-size="16">距玩家 0 区块 · 平原 · 已加载</text>
+    <text class="ui muted" x="24" y="127" font-size="16">产权</text><text class="ui" x="132" y="127" font-size="16">未认领 · 非保留区</text>
+    <text class="ui muted" x="24" y="153" font-size="16">认领费用</text><text class="gold ui" x="132" y="153" font-size="17">12,800 GT</text>
+    <text class="ui muted" x="24" y="179" font-size="16">参考地价</text><text class="ui" x="132" y="179" font-size="16">15,600 GT</text><text class="muted ui" x="248" y="179" font-size="14">（规划数据）</text>
+  </g>
+
+  <!-- Bottom map status and legend. -->
+  <g transform="translate(298 764)" class="ui" font-size="15">
+    <rect width="982" height="34" rx="4" fill="#10202a" opacity=".94"/>
+    <circle cx="18" cy="17" r="6" fill="#50d6b1"/><text x="31" y="22">我的产权</text>
+    <circle cx="132" cy="17" r="6" fill="#ec735b"/><text x="145" y="22">他人产权</text>
+    <circle cx="251" cy="17" r="6" fill="#817ee3"/><text x="264" y="22">保留区</text>
+    <rect x="350" y="10" width="13" height="13" fill="none" stroke="#ffd34f" stroke-width="2"/><text x="372" y="22">当前选择</text>
+    <text class="muted" x="694" y="22">中等 · 15×15 · 鼠标所在 [62,-97]</text>
+  </g>
+
+  <!-- Compact inspector. -->
+  <g transform="translate(1318 178)">
+    <rect width="342" height="638" rx="5" fill="#13232e" stroke="#7899b0" stroke-width="2"/>
+    <text class="ui" x="22" y="42" font-size="22">选中区块</text>
+    <text class="pixel" x="22" y="76" font-size="25">[62, -97]</text>
+    <rect x="230" y="51" width="88" height="30" rx="15" fill="#245a43"/><text class="green ui" x="250" y="72" font-size="16">可认领</text>
+    <line x1="20" y1="96" x2="322" y2="96" class="thin"/>
+    <text class="muted ui" x="22" y="130" font-size="16">产权状态</text><text class="ui" x="170" y="130" font-size="16">未认领</text>
+    <text class="muted ui" x="22" y="162" font-size="16">所有者</text><text class="ui" x="170" y="162" font-size="16">—</text>
+    <text class="muted ui" x="22" y="194" font-size="16">保护状态</text><text class="gold ui" x="170" y="194" font-size="16">SHADOW</text>
+    <text class="muted ui" x="22" y="226" font-size="16">地形状态</text><text class="ui" x="170" y="226" font-size="16">平原 · 已加载</text>
+    <text class="muted ui" x="22" y="258" font-size="16">距玩家</text><text class="ui" x="170" y="258" font-size="16">0 区块</text>
+    <line x1="20" y1="280" x2="322" y2="280" class="thin"/>
+    <text class="ui" x="22" y="316" font-size="18">费用与市场</text>
+    <text class="muted ui" x="22" y="350" font-size="16">认领费用</text><text class="gold pixel" x="170" y="350" font-size="18">12,800 GT</text>
+    <text class="muted ui" x="22" y="382" font-size="16">系统参考地价</text><text class="pixel" x="170" y="382" font-size="17">15,600 GT</text>
+    <text class="muted ui" x="22" y="414" font-size="16">地产挂牌</text><text class="ui" x="170" y="414" font-size="16">未挂牌</text>
+    <text class="muted ui" x="22" y="446" font-size="16">最近过户价</text><text class="ui" x="170" y="446" font-size="16">—</text>
+    <rect x="20" y="476" width="302" height="62" rx="4" fill="#1b3140"/>
+    <text class="ui" x="34" y="502" font-size="15">认领后计入个人产权配额</text>
+    <text class="muted ui" x="34" y="526" font-size="14">当前 0/4 · 操作将二次确认</text>
+    <rect x="20" y="562" width="302" height="54" rx="4" fill="#367458" stroke="#82d7ae" stroke-width="2"/>
+    <text class="ui" x="124" y="596" font-size="23">认领地皮</text>
+  </g>
+</svg>

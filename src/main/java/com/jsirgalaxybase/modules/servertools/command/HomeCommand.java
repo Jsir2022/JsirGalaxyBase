@@ -39,7 +39,7 @@ public class HomeCommand extends AbstractServerToolsCommand {
             if (args.length > 0 && "list".equalsIgnoreCase(args[0])) {
                 List<PlayerHome> homes = service.listHomes(player.getUniqueID().toString());
                 if (homes.isEmpty()) {
-                    send(sender, "No homes set.");
+                    sendKey(sender, "jsirgalaxybase.servertools.home.empty");
                     return;
                 }
                 StringBuilder builder = new StringBuilder();
@@ -49,23 +49,23 @@ public class HomeCommand extends AbstractServerToolsCommand {
                     }
                     builder.append(homes.get(i).getHomeName());
                 }
-                send(sender, "Homes: " + builder.toString());
+                sendKey(sender, "jsirgalaxybase.servertools.home.list", builder.toString());
                 return;
             }
             if (args.length > 0 && "set".equalsIgnoreCase(args[0])) {
                 String homeName = args.length > 1 ? args[1] : "home";
                 PlayerHome home = service.setHome(module.captureActor(player), homeName);
-                send(sender, "Home saved: " + home.getHomeName() + " -> " + home.getTarget().getServerId() + "/"
-                    + home.getTarget().getDimensionId());
+                sendKey(sender, "jsirgalaxybase.servertools.home.saved", home.getHomeName(),
+                    home.getTarget().getServerId(), Integer.valueOf(home.getTarget().getDimensionId()));
                 return;
             }
             if (args.length > 0 && ("delete".equalsIgnoreCase(args[0]) || "del".equalsIgnoreCase(args[0]))) {
                 String homeName = args.length > 1 ? args[1] : "home";
                 if (service.deleteHome(player.getUniqueID().toString(), homeName)) {
-                    send(sender, "Home deleted: " + homeName.toLowerCase());
+                    sendKey(sender, "jsirgalaxybase.servertools.home.deleted", homeName.toLowerCase());
                     return;
                 }
-                send(sender, "Home not found: " + homeName);
+                sendKey(sender, "jsirgalaxybase.servertools.home.not_found", homeName);
                 return;
             }
 
@@ -73,7 +73,7 @@ public class HomeCommand extends AbstractServerToolsCommand {
             TeleportDispatchPlan dispatchPlan = service.prepareHomeTeleport(module.captureActor(player),
                 PlayerTeleportService.newRequestId("home"), homeName);
             GatewayDispatchResult result = module.dispatchTeleport(resolveLiveSubject(dispatchPlan), dispatchPlan);
-            sendDispatchResult(sender, result, "Teleported to home: " + homeName.toLowerCase());
+            sendDispatchResult(sender, result, "jsirgalaxybase.servertools.home.teleported", homeName.toLowerCase());
         } catch (RuntimeException exception) {
             handleServiceError(sender, exception);
         }

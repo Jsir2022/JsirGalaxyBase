@@ -11,12 +11,16 @@ public enum TerminalPage {
     MARKET_EXCHANGE("market_exchange", 6, "汇率", "汇率市场页", "汇率市场", "quote / exchange 兼容入口与规则边界说明"),
     MARKET_ACCOUNT_CENTER("market_account_center", 14, "订单", "订单与资产", "订单与资产中心", "当前委托、成交、交付异常与历史记录"),
     SERVER_TOOLS("server_tools", 7, "传送", "群组服", "群组服传送", "展示服务器目录、系统 warp 与最近传送反馈"),
+    PROPERTY("property", 15, "地产", "个人地皮", "个人地产", "附近地皮、我的产权与保护状态"),
     BANK("bank", 8, "银行", "银行页", "银河银行", "个人账户、公开储备与子页入口"),
     BANK_ACCOUNT("bank_account", 9, "账户", "账户页", "个人账户信息", "余额、账户状态与开户策略"),
     BANK_TRANSFER("bank_transfer", 10, "转账", "转账页", "转账服务", "转账规则与后续正式操作入口"),
     BANK_EXCHANGE("bank_exchange", 11, "exchange", "公开页", "Exchange 公开页", "兑换储备余额与近期公开账本"),
     BANK_LEDGER("bank_ledger", 12, "流水", "流水页", "个人流水", "个人最近账本变化与空状态提示"),
-    VAULT("vault", 13, "仓库", "保险箱", "Base Vault", "跨服持久的有限实体保险箱");
+    VAULT("vault", 13, "仓库", "保险箱", "Base Vault", "跨服持久的有限实体保险箱"),
+    NOTIFICATIONS("notifications", 16, "通知", "消息中心", "通知中心", "重要操作、异常与可定位回执"),
+    ITEM_POLICY("item_policy", 17, "准入", "物品策略", "物品准入策略", "当前规则与个人拒绝审计"),
+    WAREHOUSE("warehouse", 18, "资产", "银河仓储", "银河资产中心", "Base Vault 与个人 AE2 存储单元");
 
     final String id;
     final int index;

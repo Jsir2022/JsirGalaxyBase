@@ -17,6 +17,13 @@ public final class TerminalServerToolsSectionSnapshot {
     private final List<String> warpSubtitles;
     private final List<String> warpStateLabels;
     private final List<String> recentTransferLines;
+    private final List<String> homeLines;
+    private final List<String> homeNames;
+    private final List<String> homeSubtitles;
+    private final List<String> tpaDirections;
+    private final List<String> tpaCounterpartyNames;
+    private final List<String> tpaTargetServerIds;
+    private final List<String> tpaStatusLabels;
     private final String selectedWarpName;
     private final String selectedWarpTitle;
     private final String selectedWarpDetail;
@@ -24,6 +31,10 @@ public final class TerminalServerToolsSectionSnapshot {
     private final String selectedTargetLocation;
     private final String selectedWarpDescription;
     private final boolean selectedWarpEnabled;
+    private final String selectedHomeName;
+    private final String selectedHomeTargetServerId;
+    private final String selectedHomeTargetLocation;
+    private final String selectedHomeDescription;
     private final String recentSourceServerId;
     private final String recentTargetServerId;
     private final String recentTransferStatus;
@@ -41,6 +52,44 @@ public final class TerminalServerToolsSectionSnapshot {
         String recentSourceServerId, String recentTargetServerId, String recentTransferStatus,
         String recentTransferTime, String recentTransferSummary,
         ActionFeedback actionFeedback) {
+        this(serviceState, currentServerId, serverLines, serverIds, warpLines, warpNames, warpSubtitles,
+            warpStateLabels, recentTransferLines, null, null, null, selectedWarpName, selectedWarpTitle,
+            selectedWarpDetail, selectedTargetServerId, selectedTargetLocation, selectedWarpDescription,
+            selectedWarpEnabled, "", "--", "--", "当前没有可查看的个人 Home。", recentSourceServerId,
+            recentTargetServerId, recentTransferStatus, recentTransferTime, recentTransferSummary, actionFeedback);
+    }
+
+    public TerminalServerToolsSectionSnapshot(String serviceState, String currentServerId,
+        List<String> serverLines, List<String> serverIds, List<String> warpLines, List<String> warpNames,
+        List<String> warpSubtitles, List<String> warpStateLabels, List<String> recentTransferLines,
+        List<String> homeLines, List<String> homeNames, List<String> homeSubtitles,
+        String selectedWarpName, String selectedWarpTitle, String selectedWarpDetail,
+        String selectedTargetServerId, String selectedTargetLocation, String selectedWarpDescription,
+        boolean selectedWarpEnabled, String selectedHomeName, String selectedHomeTargetServerId,
+        String selectedHomeTargetLocation, String selectedHomeDescription,
+        String recentSourceServerId, String recentTargetServerId, String recentTransferStatus,
+        String recentTransferTime, String recentTransferSummary, ActionFeedback actionFeedback) {
+        this(serviceState, currentServerId, serverLines, serverIds, warpLines, warpNames, warpSubtitles,
+            warpStateLabels, recentTransferLines, homeLines, homeNames, homeSubtitles,
+            null, null, null, null,
+            selectedWarpName, selectedWarpTitle, selectedWarpDetail, selectedTargetServerId, selectedTargetLocation,
+            selectedWarpDescription, selectedWarpEnabled, selectedHomeName, selectedHomeTargetServerId,
+            selectedHomeTargetLocation, selectedHomeDescription, recentSourceServerId, recentTargetServerId,
+            recentTransferStatus, recentTransferTime, recentTransferSummary, actionFeedback);
+    }
+
+    public TerminalServerToolsSectionSnapshot(String serviceState, String currentServerId,
+        List<String> serverLines, List<String> serverIds, List<String> warpLines, List<String> warpNames,
+        List<String> warpSubtitles, List<String> warpStateLabels, List<String> recentTransferLines,
+        List<String> homeLines, List<String> homeNames, List<String> homeSubtitles,
+        List<String> tpaDirections, List<String> tpaCounterpartyNames, List<String> tpaTargetServerIds,
+        List<String> tpaStatusLabels,
+        String selectedWarpName, String selectedWarpTitle, String selectedWarpDetail,
+        String selectedTargetServerId, String selectedTargetLocation, String selectedWarpDescription,
+        boolean selectedWarpEnabled, String selectedHomeName, String selectedHomeTargetServerId,
+        String selectedHomeTargetLocation, String selectedHomeDescription,
+        String recentSourceServerId, String recentTargetServerId, String recentTransferStatus,
+        String recentTransferTime, String recentTransferSummary, ActionFeedback actionFeedback) {
         this.serviceState = normalize(serviceState, "ServerTools runtime unavailable");
         this.currentServerId = normalize(currentServerId, "unknown");
         this.serverLines = freeze(serverLines, Collections.singletonList("服务器目录不可用。"));
@@ -50,6 +99,13 @@ public final class TerminalServerToolsSectionSnapshot {
         this.warpSubtitles = freeze(warpSubtitles, Collections.singletonList("当前没有额外说明。"));
         this.warpStateLabels = freeze(warpStateLabels, Collections.singletonList("不可用"));
         this.recentTransferLines = freeze(recentTransferLines, Collections.singletonList("当前没有最近传送记录。"));
+        this.homeLines = freeze(homeLines, Collections.singletonList("当前没有已设定的 Home。"));
+        this.homeNames = freeze(homeNames, Collections.singletonList(""));
+        this.homeSubtitles = freeze(homeSubtitles, Collections.singletonList("可在当前位置设定第一个 Home。"));
+        this.tpaDirections = freeze(tpaDirections, Collections.<String>emptyList());
+        this.tpaCounterpartyNames = freeze(tpaCounterpartyNames, Collections.<String>emptyList());
+        this.tpaTargetServerIds = freeze(tpaTargetServerIds, Collections.<String>emptyList());
+        this.tpaStatusLabels = freeze(tpaStatusLabels, Collections.<String>emptyList());
         this.selectedWarpName = normalize(selectedWarpName, "");
         this.selectedWarpTitle = normalize(selectedWarpTitle, "未选择 warp");
         this.selectedWarpDetail = normalize(selectedWarpDetail, "选择左侧 warp 后查看目标与说明。");
@@ -57,6 +113,10 @@ public final class TerminalServerToolsSectionSnapshot {
         this.selectedTargetLocation = normalize(selectedTargetLocation, "--");
         this.selectedWarpDescription = normalize(selectedWarpDescription, "当前没有额外传送说明。");
         this.selectedWarpEnabled = selectedWarpEnabled;
+        this.selectedHomeName = normalize(selectedHomeName, "");
+        this.selectedHomeTargetServerId = normalize(selectedHomeTargetServerId, "--");
+        this.selectedHomeTargetLocation = normalize(selectedHomeTargetLocation, "--");
+        this.selectedHomeDescription = normalize(selectedHomeDescription, "当前没有可查看的个人 Home。");
         this.recentSourceServerId = normalize(recentSourceServerId, "--");
         this.recentTargetServerId = normalize(recentTargetServerId, "--");
         this.recentTransferStatus = normalize(recentTransferStatus, "暂无记录");
@@ -127,6 +187,14 @@ public final class TerminalServerToolsSectionSnapshot {
         return recentTransferLines;
     }
 
+    public List<String> getHomeLines() { return homeLines; }
+    public List<String> getHomeNames() { return homeNames; }
+    public List<String> getHomeSubtitles() { return homeSubtitles; }
+    public List<String> getTpaDirections() { return tpaDirections; }
+    public List<String> getTpaCounterpartyNames() { return tpaCounterpartyNames; }
+    public List<String> getTpaTargetServerIds() { return tpaTargetServerIds; }
+    public List<String> getTpaStatusLabels() { return tpaStatusLabels; }
+
     public String getSelectedWarpName() {
         return selectedWarpName;
     }
@@ -154,6 +222,11 @@ public final class TerminalServerToolsSectionSnapshot {
     public boolean isSelectedWarpEnabled() {
         return selectedWarpEnabled;
     }
+
+    public String getSelectedHomeName() { return selectedHomeName; }
+    public String getSelectedHomeTargetServerId() { return selectedHomeTargetServerId; }
+    public String getSelectedHomeTargetLocation() { return selectedHomeTargetLocation; }
+    public String getSelectedHomeDescription() { return selectedHomeDescription; }
 
     public String getRecentSourceServerId() {
         return recentSourceServerId;
