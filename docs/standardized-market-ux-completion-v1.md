@@ -4,6 +4,21 @@
 
 Complete the standardized market as a trustworthy, readable trading workflow rather than a collection of technically connected controls. The server remains authoritative for price, fee, balance, inventory, order, and delivery decisions.
 
+## UI2 progressive workflow correction (2026-09-07)
+
+The UI2 production view follows the established progressive workflow instead of keeping catalog, chart, assets and order entry visible at the same time:
+
+`catalog grid -> hover quote -> product detail -> order/cancel overlay or account center`
+
+- The catalog is a responsive real-item grid with search, filter, sort and server pagination. Opening and returning from detail preserves discovery state.
+- Product detail reserves the left summary rail for the item, quote, five-level book, 24-hour statistics and personal availability. The remaining width belongs to the chart.
+- Order parameters and cancellable-order selection are modal work only. They never permanently reduce the chart or catalog viewport.
+- The order and asset center remains a separate route with six account metrics, four tabs, bounded filters, real item rows and server pagination.
+- Minecraft `ItemStack` rendering and chart surfaces use the shared UI2 external-content contract; page-type checks are forbidden in the host.
+- Sparse charts downgrade to a line, a single point remains explicit, and empty trade data displays an empty state. Hover crosshair geometry is always clamped to the chart.
+
+This correction changes presentation only. Matching, settlement, escrow, Vault delivery, recovery, identity and wire contracts remain server-authoritative and unchanged.
+
 ## Completion Matrix
 
 ## Implementation Status

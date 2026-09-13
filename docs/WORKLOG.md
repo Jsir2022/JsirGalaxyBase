@@ -5,6 +5,153 @@
 这份文件用于记录 `JsirGalaxyBase` 的持续开发摘要。
 从本次开始，后续每次实际代码变更都应补一条简要 work log。
 
+### 2026-09-08 - 银河职业、贡献与跨服任务平台 Q.0 / Q.1 起步
+
+- 源码与现场：固定调查 GTNH 当前 `BetterQuesting-3.7.15-GTNH` 源码提交 `524b365211b6b3a9672cab8ae45b4e07e726d49e`；确认 BQ 将定义、玩家进度、队伍、生命和名称分离保存，现场 S1/S2 分别有 40/29 个玩家进度文件且存在分歧，不能以单服 JSON 充当跨服真源。
+- 方案：新增 `docs/galaxy-career-contribution-cross-server-quest-platform-2026-09-08.md`，明确吸收任务、编辑、检测、进度和奖励语义，但不搬 BQ GUI、网络、文件存储单例与 Mod 启动架构；阶段按 Q.0-Q.8 推进，最终由 PostgreSQL 和 UI2 终端接管。
+- 实现：新增纯 Java 8 `galaxy-quest-core`，首批提供稳定 UUID 任务定义、Task/Reward 定义、AND/OR、前置门禁、单调进度合并、完成状态和稳定奖励资格键，以及编辑器的重复 key、未知类型、自依赖、缺失依赖和依赖环校验；继续加入跨服稳定事实键、Task evaluator 注册表及计数事实投影，为后续 Minecraft 检测器提供平台无关归约入口。
+- 合规：记录 BetterQuesting MIT 许可证、固定版本和来源清单，并将许可证/来源纳入正式 JAR 资源；新任务内核没有 BetterQuesting 运行时依赖。
+- 验证：CodeGraph 同步新增 22 个、修改 2 个源文件，`QuestEngine` 影响仅落在新内核及其定向测试；Docker Gradle 的 `:galaxy-quest-core:test`、根项目 `test`、`assemble`、`verifyUi2SelfContained` 与 `git diff --check` 全部通过。正式 JAR 已核验包含任务内核 class、BetterQuesting MIT 文本和来源清单，SHA256 为 `41d49725aa039f0afaf6527c79f5eff100184699faf035c66fea3cb21d1cbe32`；本批未部署、未修改数据库、未触碰 S1/S2 运行状态。
+- Q.1 扩展：参与主体扩展为 PLAYER/PARTY/TEAM/PUBLIC，队伍事实按显式成员快照归入同一进度；重复任务使用 cycle 隔离进度与奖励资格，仓储端口要求事实去重、进度和奖励资格在事务中提交。新增定义版本身份保护，防止旧进度误套新定义。
+- Q.2 起步：新增纯 Java `galaxy-quest-bq-importer`，只读解析 BQ typed NBT-JSON，保留完整原始 Task/Reward 配置，并导入玩家完成、领取和时间戳。实际扫描 S2 DefaultQuests 共 3744 个任务，仅使用 9 种 BQ Standard Task 和 4 种 Reward；导入器测试通过，不写现场文件或数据库。
+- 本轮续验：Q.1/Q.2 定向测试、CodeGraph 同步与影响检查、根 `assemble`、`git diff --check` 均通过；加入 importer 子项目后的正式 JAR SHA256 为 `5d48cecbe3dac6feb74aaeb97cfd5d353afdde6aa7b4a0034b944de005a4d313`。Importer 是开发/迁移工具，当前没有打入运行 JAR，也没有引入 BetterQuesting 运行时依赖。
+
+### 2026-09-08 - UI2 纯 Java视觉闭环 V.0
+
+- 新增独立方案 `docs/galaxy-ui2-pure-java-visual-validation-2026-09-08.md`：自动化只负责越界、重叠、文本、裁剪、图表可见性和多尺寸等结构正确性，交互手感与主观视觉继续由人工验收。
+- `UiDebugSnapshot` 可导出 UI2 组件树、最终边界、DrawList 及越界、文字高度、重复外部区域 ID 告警；UI Lab 无头导出扩展到 `350x193`、`427x240`、`620x340`，并生成 PNG、DrawList、`.ui2.txt` 和 HTML 画廊。
+- UI2 Screen/Container 宿主增加只读调试捕获桥；现代终端页面按 F9 会在客户端 `screenshots/` 同时保存 Minecraft Framebuffer PNG 与 UI2 结构侧车文件，不自动操作、上传或改变业务状态。
+- CodeGraph 在改动前同步完成；`UiLabExporter` 仅影响 Demo 测试，现代 Screen 宿主影响终端应用页和 UI Lab，`TerminalPageDocument` 影响 223 个符号，因此正式业务 Document 下沉拆到后续 V.1-V.4，避免本批形成根项目到 Demo 的反向依赖。
+- 自动验收：Core 41、Lab 2、Demo 5、根项目 458 项（52 项按既有环境条件跳过），共 506 项零失败；三档 15 张 PNG 的结构审计均为 0 告警，`assemble`、`verifyUi2SelfContained` 与 `git diff --check` 通过。运行 JAR SHA-256 为 `9d27e17c1e6504e8157388835660e681f057fb9cfe285a930f9d1d293bce4afb`，本轮未部署或启动客户端。
+
+### 2026-09-06 - UI2 文字正确性、主题包与终端设置页
+
+- 根据实机首页截图和 CodeGraph 调用链确认：正式 UI2 只有首页与资产中心，其他业务仍进入旧
+  `TerminalHomeScreen`；首页窗口尺寸本身有效，爆版来自 35px 卡片承载三条 14px 行高文字、无换行、
+  无省略且无裁剪，原有测试只检查窗口矩形而未检查文字命令。
+- UI2 Core 新增测量驱动 `TextFlow`，支持中文逐字换行、显式换行、最大行数、Unicode 代理对安全截断和
+  末行省略。生产 Label、按钮、徽章、状态页和 Dialog 统一使用主题字体 Token并在自身边界建立 Clip；
+  首页改为紧凑两列卡片，并补三档验收尺寸的文字边界测试。
+- 新增客户端 `TerminalPreferences`、`TerminalThemeRegistry` 与 `TerminalAppearance`，提供
+  `glass_mono / hacker_green / high_contrast` 三套内置主题、三档密度、三档窗口尺寸、减少动画和 Tooltip
+  延迟。偏好写入独立 `config/jsirgalaxybase-terminal-ui.cfg`，不进入服务器配置、网络或数据库。
+- 新增 Resource Pack 数据主题入口；多个已启用资源包的 `ui2/themes/index.json` 可注册数据主题，坏条目
+  单独忽略并回退内置主题，不允许主题携带代码或业务行为。
+- 新增现代 `TerminalSettingsScreen/Document`，设置入口固定在共享导航底部；主题、密度、窗口和减少动画
+  即时应用并持久化，原生物品槽保持固定逻辑尺寸。下一步继续建立统一非 Container 页面注册表并迁移
+  通知、银行与 ServerTools，不用现代边框包装旧 Panel。
+- CodeGraph 在修改前确认 `TerminalAppShell.layout` 仅有首页与资产两个调用者，旧主屏影响 212 个符号；
+  修改中同步 32 个文件，并复核 `TextFlow`、新主题注册表和设置页影响链；CodeGraph 未自动推导测试，故按
+  合同显式执行。Docker Gradle 最终通过根项目 525 项（52 项条件跳过）、UI2 Core 30 项、Lab 2 项、
+  Demo 4 项，0 failure/0 error；`:ui2-demo:renderGolden`、`assemble`、`verifyUi2SelfContained` 与
+  `git diff --check` 均通过。runtime JAR SHA-256 为
+  `4e416c24eeb56d4f4f18cd1d8aa01c1d514015bcbe6608993f076cabf9d75826`。本批未部署、未启动客户端、
+  未触碰 S1/S2。
+
+### 2026-09-06 - UI2 终端窗口化、玻璃主题与首页同壳整改
+
+- 根据资产中心实机截图将 C.2 标记为“业务可用、视觉未通过”：根因是 `ModernContainerHost` 仍以全屏
+  viewport 承载生产文档、UI2 使用近不透明藏蓝主题，而资产返回由 `TerminalRouteCoordinator` 重建旧
+  `TerminalHomeScreen`，形成全屏新页面与旧窗口首页之间的代际跳变。
+- 新增共享 `TerminalWindowMetrics`：在完整 Minecraft 事件宿主内居中放置 `350×193` 至 `620×340`
+  的响应式终端窗口；常规视口按 90% 宽、88% 高布局。资产 Vault、背包、Bay 与 Cell 外部区域继续使用
+  原生 Slot Bridge，但全部限制在窗口内。
+- 新增生产专用 `GlassTerminalTheme`，使用半透明黑色窗口、低透明中性表面、冷白文字和青绿色信号色；
+  选中页签改为弱玻璃底、细强调边框及一像素指示线，导航改用紧凑文字样式，槽位颜色改由 Theme Token
+  提供。F8 UI Lab 继续保留原工业主题，避免影响平台实验基线。
+- 新增 `TerminalHomeScreenV2` 与 `TerminalHomeDocument`。终端首次进入首页、资产中心返回首页、旧页面
+  点击首页均进入同一个 UI2 窗口壳；仓储入口继续由服务端 `VAULT_OPEN` 打开权威 Container，其他未迁移
+  业务页保持旧路由。刷新、帮助 Modal、HUD 通知和通知目标路由一并接回。
+- CodeGraph 同步 19 个文件；`callers TerminalAppShell.layout` 确认仅首页与资产使用新窗口合同，`impact`
+  复核窗口、首页、路由与双宿主链路，`affected` 未自动推导测试，因此显式执行窗口、首页、资产定向测试
+  及全量回归。Docker Gradle 的 Core/Lab/Demo、10 组 golden、根 `test`、`assemble`、
+  `verifyUi2SelfContained` 全部通过，共 565 项、52 项既有条件跳过、0 failure、0 error；
+  `git diff --check` 通过。
+- 交付：同一 runtime JAR 已部署到 Lobby 与客户端，SHA-256 均为
+  `d5a5f330f298a6d69810b651a8b8de0316ea99509f48371d7ffa2440484e313c`；Lobby 恢复为 `RUNNING`
+  并在最终启动日志到达 `Done (1.271s)`。未启动客户端、未执行数据库 migration，未触碰 S1、S2。
+  当前等待玩家实机确认窗口比例、透明度、导航密度和首页/资产往返观感。
+
+### 2026-09-05 - UI2 实机圆角、槽位与字体首帧稳定性修正
+
+- 根据 F8 UI Lab 实机截图定位三项根因：圆角抗锯齿带只向外扩造成边缘毛刺；Container
+  方形槽位底板覆盖了 UI2 小圆角；Noto 字形异步上传前使用 9px 原版字体及其 advance，
+  上传后才切换到 UI2 最终度量，产生约一秒后的文字放大。
+- 圆角 coverage 改为数学边界内外各半个物理像素，hairline 始终为一个物理像素，细分环
+  使用三角形并关闭面剔除；槽位视觉与原生 Slot Bridge 统一使用 16px/2px 间隔网格，
+  Container 仅绘制原生物品和 Tooltip，不再覆盖方形底板。
+- 字体回退按最终 Noto 字形宽高缩放并沿用最终 advance；可见文字先预取，最多 48 个字形的
+  上传步骤从“每条文字”改为“一帧一次”，Container 的浮层二次绘制也不重复上传。
+- 新增回退字体尺寸、物理像素圆角、共享槽位几何及 Slot 对齐测试。CodeGraph 同步 15 个
+  改动文件并复核 Font、Renderer、双宿主和 Slot Bridge 影响链；`affected` 未自动推导测试，
+  因此显式执行全部 UI2 与根项目回归。Docker Gradle 的 Core/Lab/Demo、10 组 golden、全量
+  `test`、`assemble`、`verifyUi2SelfContained` 全部通过，共 543 项、52 项既有条件跳过、
+  0 failure、0 error；`git diff --check` 通过。
+- 交付：runtime JAR 与 Prism 客户端目标 SHA-256 均为
+  `9ecd9956e92191cdf8e7e2eb0f068f4b50ce44c8b2bb6b32007e6cb6b8d4ee9c`。仅部署客户端且未启动，
+  未触碰 Lobby、S1、S2；未修改正式终端业务页面、服务端合同或数据库。
+
+### 2026-09-05 - Galaxy UI 2 Batch B.1-B.4 Qz 算法剪裁与渲染加固
+
+- 边界：保留 Base 自研 UI2 Core、单向 Store、组件树、DrawList、双宿主和 Java2D 后端；仅按固定提交剪裁
+  Qz 1.8.2/4.1.3-LTS/4.7/4.8 的成熟算法，不依赖、不调用、不打包 Qz Mod，也未修改整合包现有 Qz。
+- 稳定性：Modal 以稳定 key 跨 Runtime 重建保留焦点和捕获，Effect 重入动作在一次 flush 内排队收敛并有
+  1000 动作循环门禁。实机第四页崩溃定位为 Modal 两条文字误用了 CONTENT 层，现已统一为 MODAL 层并补
+  打开、重建、Escape 关闭回归。
+- 渲染：`MinecraftUiRenderer` 拆分 Shape/Text/Image/Clip/GL 状态后端；圆角改为半径限幅、物理密度动态细分、
+  内部实色加一物理像素 coverage fringe，边框改用内外填充环，卡片/按钮圆角同步收敛。
+- 字体：增加 generation 化字形请求去重、每帧 48 个上传预算、过期拒绝和 Atlas 上传失败整体回滚；UI Lab
+  增加 generation、页数、队列、上传、DrawCommand、Clip、frame/render 时间诊断。
+- UI Lab：浮层页现在同时展示 ContextMenu、Tooltip、Dialog 和 Toast 的真实层级，Dialog 仍位于普通浮层之上，
+  Toast 位于反馈顶层；库存页继续沿用原生 Slot Bridge 和 Modal 阻断。
+- 合规：新增独立设计、固定提交来源清单、MIT/LGPL 文本和第三方声明；`verifyUi2SelfContained` 扫描生产源码与
+  JAR class，禁止 Qz 包、Mod ID、Mixin 或运行时引用，并验证许可证和 provenance 均进入 JAR。
+- 验证：CodeGraph 同步 27 个改动文件并复核 Runtime、Renderer、Font 与双宿主影响链；`affected` 未推导出测试，
+  因此按影响链显式执行 UI2 Core/Lab/Demo、Minecraft adapter 与全量回归。Docker Gradle 的 UI2 定向测试、
+  Java2D 10 组 golden、全量 `test`、`assemble` 和自包含检查全部通过；合计 538 项，52 项既有环境条件跳过，
+  0 failure、0 error。`git diff --check` 通过。
+- 交付：runtime JAR 与 Prism 客户端目标的 SHA-256 均为
+  `5cd41fbfab168dafbb4d3235823c54d7daa6ee335d712e1c4b586e8ef5311b95`；仅部署客户端且未启动，
+  未部署 Lobby、S1、S2。正式资产中心和终端业务页面仍未迁移，需先完成人工 F8 UI Lab 验收。
+
+### 2026-09-05 - 补齐 Galaxy UI 2 Batch B 的 Lobby 同版部署
+
+- 现象：Batch B 首轮按计划只部署客户端后，Forge 握手检测到客户端 `3ca9376-main+3ca937653a-dirty` 与 Lobby 旧版 `073a5a6-main+073a5a622c-dirty` 不一致并以 Mod rejection 拒绝连接。
+- 处理：使用既有灰度脚本将已经通过全量测试的同一运行 JAR 补充部署到 Lobby；客户端与 Lobby SHA-256 均为 `75cd26ff04d71e13d6410a4fb69a3b13b6550521c25457f806ff4e27c61ac05a`。
+- 验证：Lobby supervisor 为 `RUNNING`，`latest.log` 已出现 `Done (1.609s)`，本机 `127.0.0.1:25566` 正常监听；JGB 的银行、市场、地产 SHADOW、Warehouse、Cluster 与 ServerTools 启动日志均正常。本次未触碰 S1、S2，未启动客户端。
+
+### 2026-09-05 - 完成 Galaxy UI 2 Batch B Minecraft 双宿主 UI Lab
+
+- 模块：新增纯 Java 8 `ui2-lab`，把概览、控件、数据、浮层和库存五页场景、Store 与假数据从 Java2D 后端抽离；`ui2-demo` 和 Minecraft 适配共同使用同一组件文档与 `UiRuntime`。
+- 核心：补齐重建/对账/测量/布局/输入/DrawList/失效/卸载 Runtime，增加平台无关按键、文本度量、资源解析、渲染器、层级、渐变、阴影、图片和稳定外部区域合同。
+- Minecraft：新增逻辑坐标 OpenGL renderer、scissor 换算、GL 状态保护、普通 `ModernScreenHost`、原生 `ModernContainerHost` 和 `NativeSlotBridge`。Container Lab 使用本地假库存并拦截窗口点击，不向服务端发送未知窗口操作。
+- 字体：固定并内置 Noto Sans CJK SC 2.004（OFL 1.1），灰度字形可后台生成，纹理仅在渲染线程上传；Atlas 限 8 页、每页 1024x1024，支持代际取消、LRU 淘汰、资源重载和原版字体逐字形回退。
+- 入口：注册客户端 `F8` UI2 Lab；`D` 切换调试层、`M` 切换 reduced-motion，Inventory 页用 `C` 进入双宿主 Slot 实验。没有接正式终端路由、业务网络或数据库。
+- 验证：`:ui2-core:test`、`:ui2-lab:test`、`:ui2-demo:test`、`:ui2-demo:renderGolden`、根项目全量 `test` 与 `assemble` 通过，共 527 项测试、0 failure、0 error（52 项按既有条件跳过）。运行 JAR 内含 UI2 Core、Lab、Minecraft Adapter、固定字体和 OFL，Core/Lab 均为 Java 8 class 52；未包含 `ui2-demo`、Swing 或 Java2D Demo class。旧 Canvas 和资产中心保持不变。
+- 交付：仅将同一运行 JAR 部署到 Prism 客户端 Mods，源文件与目标文件 SHA-256 均为 `75cd26ff04d71e13d6410a4fb69a3b13b6550521c25457f806ff4e27c61ac05a`；未启动客户端，未部署或重启 Lobby、S1、S2。
+
+### 2026-09-05 - 完成 Galaxy UI 2 Batch A 独立内核与 Java2D UI Lab
+
+- 构建：新增 `ui2-core`、`ui2-demo` Gradle 子项目。内核以标准 Java 8（class 52）独立编译，不依赖 Minecraft、Forge、LWJGL、AE2、ModularUI、BetterQuesting 或旧 Canvas；根项目编译使用 project dependency，正式 shadow/reobf JAR 通过内核 JAR 文件合入 49 个 UI2 class，Demo class 保持为 0。
+- 内核：实现不可变 `UiElement`、稳定 `UiKey`、`UiNode`/reconciler、Component 工厂、Store/Reducer/Selector/Effect、约束几何、Row/Column/Stack/Grid/Scroll 布局、捕获/目标/冒泡输入、焦点、Pointer Capture、Modal、Theme Token、固定 Motion Clock 与平台无关 DrawList。
+- Demo：Java2D UI Lab 提供概览、控件、数据、浮层、库存五页，支持 `350x193`、`620x340`、调试层和 reduced-motion；无头任务已生成 10 张 PNG 和 10 份结构化 DrawList，输出位于 `ui2-demo/build/ui-lab`。
+- 验证：`:ui2-core:test`、`:ui2-demo:test`、`:ui2-demo:renderGolden`、根项目全量 `test` 与 `assemble` 均通过，`git diff --check` 通过；纯内核禁止依赖扫描通过。当前 Canvas、正式终端路由、市场、资产、地产和服务端合同均未修改，也未部署任何服务器或客户端。
+- 构建经验：GTNH RFG 的 `shadowImplementation` 不能直接消费没有 MCP/deobfuscator attributes 的普通 Java project variant；最终采用 `implementation(project)` 加 `shadowImplementation(files(ui2CoreJar))`，既保持开发期类型依赖，又由正式发布链内嵌核心。
+
+### 2026-09-05 - 固化 Galaxy UI 2 独立构建与 Demo 重构规格
+
+- 主题：将“参考 Vue 逐步重建 UI 框架”收口为可执行规格，并明确与 Vue Web Runtime、当前 BetterQuesting 风格 Canvas 框架的差异。
+- 构建决定：优先采用纯 Java 8 `ui2-core`、Java2D `ui2-demo` 和 Minecraft/Forge adapter 三层结构；核心必须能够独立编译和执行 JUnit，Demo 必须能够独立运行并导出两档尺寸 PNG/DrawList golden，根 Mod 只负责合入核心 class 和接平台能力。
+- 测试边界：组件、Store、布局、输入、焦点、模态、Theme、DrawList 和 Motion 自动化；OpenGL 状态、字形 atlas、ItemRenderer、原生 Container/Slot 和实际观感保留游戏内 UI Lab 与资产中心人工验收。
+- 迁移顺序：先做构建探针和纯内核，再做独立 Demo、Minecraft 双宿主、资产中心垂直迁移、普通终端页迁移，最后用 CodeGraph 确认零调用并删除旧框架；禁止未建立新基线前直接铲除现有 Canvas。
+
+### 2026-09-05 - 固定 Vue 官方手册并建立 Galaxy UI 2 概念映射
+
+- 主题：通过 GitHub SSH 拉取 Vue 官方英文文档与官方中文翻译的固定版本，建立 Vue 到 Java/Forge UI2 的工程映射。
+- 来源：`vuejs/docs@b75d188ab16bf83bd1f364a77dfd2315be8f3fa4`、`vuejs-translations/docs-zh-cn@638fe472ad67f36399e7b73400c3a19ba6a461a2`；仅保留 Guide、API 与 Tutorial，文档许可为 CC BY 4.0。
+- 结果：本地参考位于受忽略的 `Reference/VueDocs`，不会成为 Gradle 依赖或打入 JAR；新增 `galaxy-ui-2-vue-reference-map.md`，明确采用 Component/Props/Action/Slot/Store/Selector/Lifecycle/Key 等公开思想，自主实现 Java UI2，不移植 DOM、CSS、JavaScript Proxy、Vue Runtime 或模板编译器。
+- 现状追溯：当前 Base GUI 由早期 ModularUI 2 迁移而来，现框架参考 BetterQuesting 的 Canvas/Panel/Theme 结构并基于 Minecraft `GuiScreen`/`GuiContainer` 自研；Forge 提供宿主与底层绘制能力，不提供当前的高级 Canvas 组件框架。
+
 ### 2026-09-01 - 银河仓储 v2：终端托管真实 Cell Bay 与统一资产中心
 
 - 将后续主体验收收口为“终端提供一个 Bay，而非要求玩家摆放实体 Drive”：每位玩家在银河仓储页打开一格原版
@@ -2776,3 +2923,907 @@
 - 本轮只完成资产中心功能与布局，现代化平滑主题暂不实施，等待实机核对后再单独设计。
 - 验证：CodeGraph 完成变更后同步并复核资产 GUI、Bay 服务、快照协议和受影响测试链；仓储/协议/布局定向测试、仓储 PostgreSQL 4 项集成测试、全量 `test`（496 项，52 项既有环境条件跳过，0 失败）、`assemble` 与 `git diff --check` 均通过。
 - 部署：runtime JAR、Lobby 与 Prism 客户端三处 SHA-256 均为 `edce03d59ac46d70903f9962dc55ff87bd9674dbf7170d0ee0b1d144d7a3223c`。Lobby 达到 `Done (1.281s)` 并注册统一资产中心 Container；客户端未启动，部署目标不包含 S1、S2。本轮没有新增或修改数据库结构。
+
+# 2026-09-05 - Galaxy UI 2 现代 Java 框架决策
+
+- 新增独立设计文档 `galaxy-ui-2-modern-java-framework.md`，确认采用“Vue 式架构、Minecraft 原生渲染”：借鉴组件、Props、Event、Slot、响应式派生状态和单向数据流，不嵌入 JavaScript、DOM、CSS 或 Chromium，也不机械翻译依赖浏览器运行时的 Vue 源码。
+- 明确 Forge/Minecraft 只提供 Screen/Container/Slot、输入回调、纹理、字体和 OpenGL/Tessellator 等底层能力；当前 `Canvas*`、Panel、Theme 和输入调度均是项目自建层，下一代必须自行实现约束布局、DrawList、抗锯齿字体、设计 Token、焦点/模态和现代组件。
+- CodeGraph 复核当前 `GuiPanel` 影响约 558 个符号、`TerminalShellFrame` 约 255 个、`CanvasSceneRuntime` 约 98 个。最终仍会铲除旧框架，但采用独立 UI2 内核、UI Lab、双宿主、资产中心纵向切换、全页面迁移、最后删除旧框架的替换顺序；Git 提交只解决回滚，不替代迁移期间的可编译基线和行为对照。
+- 本轮只记录架构决策和实施路线，没有修改客户端代码、业务合同、数据库或部署状态。
+
+# 2026-09-06 - Galaxy UI 2 C.0-C.2 生产组件与资产中心正式迁移
+
+- C.0：新增 `ComponentUiDocument`、`UiWidgetRegistry`、`UiWidgetAdapter`、`UiActionHandler` 与生产
+  `StandardWidgets`；组件绘制先逐组件采集，再按层级稳定合成，解决原生物品层与后续兄弟内容层冲突。
+  新增共享 `TerminalAppShell`、普通/Container UI2 终端基类和 `NativeItemBridge`。F8 UI Lab 已迁移到同一生产
+  组件实现，不再维护手写 DrawList/裸坐标控件副本。
+- C.1：`GuiTerminalAssetCenter` 已切换为 UI2 Container 宿主并新增
+  `AssetCenterUiState/Action/Reducer/Effect/Document`。页面保持左侧 Vault 与背包、右侧 Bay 与可选 Cell 内容、
+  第二页签系统资产动态；服务端 Container、快照、版本、幂等、准入、失败回滚和无闪烁路由合同未改。旧
+  `AssetContentPanel` 以及资产专用旧布局类/测试已删除。
+- C.2：三档布局 `350×193`、`427×240`、`620×340`、Modal 阻断、稳定 external region、Cell 中文反馈、
+  Vault/Bay/资产动态/协议与双宿主定向回归通过。全量自动测试共 545 项，52 项按既有环境条件跳过，0 失败；
+  其中根项目 513 项、UI2 Core 26 项、Lab 2 项、Demo 4 项。Warehouse PostgreSQL 临时 schema 集成测试
+  4/4 通过并清理。
+- CodeGraph：变更前后均执行 `status/sync`；`GuiTerminalAssetCenter` 影响链为快照消息与 `ClientProxy` 两个外部
+  入口，`ComponentUiDocument` 影响资产文档、UI Lab 和组件测试，`TerminalAppShell` 影响两类终端宿主与资产页。
+  `affected` 对跨子项目新文件未返回测试，故按影响链人工选择并执行上述定向与全量矩阵。
+- 构建：`:ui2-core:test`、`:ui2-lab:test`、`:ui2-demo:test`、`:ui2-demo:renderGolden`、根 `test`、
+  `assemble`、`verifyUi2SelfContained` 与 `git diff --check` 均通过。最终 JAR 自包含 UI2 Core/Lab/适配层和许可，
+  不含 Qz 运行时引用。
+- 部署：同一 JAR 仅同步到 Lobby 与 Prism 客户端，构建产物和两处目标 SHA-256 均为
+  `8ea74527024712a2ddba8effe527771d8c7064ebb55a9fe1c9c21d66d502e45c`。Lobby 达到 `Done (1.432s)`；客户端
+  未启动，数据库 migration 被显式跳过，S1/S2 不在目标中。
+- 当前门槛：C.0/C.1/C.2 自动验收完成，等待玩家人工验证资产中心真实拖放、Shift-click、数字键、双击、Cell
+  浏览/存取、Tooltip、Modal 阻断、中文字体和返回路由；通过前不进入 D 阶段。
+
+# 2026-09-06 - Galaxy UI 2 全终端统一路由与业务页面迁移
+
+- 修复首页在高 GUI Scale 下的文字布局：所有 Label 使用主题字号参与测量、换行、省略和裁剪，首页与只读摘要页按窗口宽度切换单列/双列，不再让文本越过卡片或终端窗口。
+- 增加客户端独立外观系统和设置页：`glass_mono`、`hacker_green`、`high_contrast` 三套内置主题，Resource Pack 主题索引，紧凑/标准/舒适密度，小窗/标准/宽大窗口和减少动画均即时保存；不进入网络或服务端数据库。
+- 建立稳定 `TerminalApplicationScreen` 和 `TerminalPageRegistry`。首页、职业、公共、通知、物品策略、银行、ServerTools、市场总览、标准市场、订单与交付、定制市场、汇率市场和地产均使用同一个窗口化 UI2 宿主；正式普通页面不再回退 `TerminalHomeScreen`。
+- 三类市场继续使用既有服务端 payload、玩家身份注入、订单版本、托管、交付与幂等合同。定制发布和汇率输入在现代页面内选择真实 Base Vault 资产，所有确认动作仍由服务端重新校验。
+- 地产页面的页签、我的产权、检查器、市场未启用占位、确认框和路由已迁移。真实地形、产权覆盖、拖拽、滚轮、快捷键和客户端缓存暂通过 UI2 `ExternalSurface` 嵌入已验证地图渲染器；Modal 打开时宿主先阻断地图输入。
+- CodeGraph 在各阶段执行 `status/sync/impact`，确认正式路由只剩资产 Container 与统一普通宿主。旧 Canvas 完整删除仍有一个明确前置：将 `TerminalLandMapPanel` 抽为无 Canvas 继承的地图后端；在此之前不伪称旧框架已移除。
+- 最终自动验收：根项目 538 项（52 项既有环境条件跳过）、UI2 Core 31 项、UI2 Lab 2 项、UI2 Demo 4 项，全部 0 失败；`:ui2-demo:renderGolden`、`assemble`、`verifyUi2SelfContained` 与 `git diff --check` 均通过。当前 runtime JAR 为 `jsirgalaxybase-3ca9376-main+3ca937653a-dirty.jar`，SHA-256 `e1651ce1c9730f890e37aeed70a1e454117f87c87e5934f13c1ad0b3caa5bdf4`。
+- 地产地图后端已从旧 `AbstractGuiPanel/GuiRect` 解耦，改用 UI2 `UiRect`；正式代码中的旧 `CanvasScreen`、`CanvasContainerScreen`、Theme、Popup、Panel、终端页面工厂和重复输入运行时均已删除。`verifyUi2SelfContained` 增加回归守卫，JAR 若重新包含旧 framework/theme 类会直接失败。
+- 删除旧专用视觉测试和无调用遗留工具后重新执行完整矩阵：根项目 454 项（52 项既有环境条件跳过）、UI2 Core 31 项、UI2 Lab 2 项、UI2 Demo 4 项，全部 0 失败；Golden 导出、`assemble`、自包含检查与 `git diff --check` 通过。新 runtime JAR SHA-256 为 `7c2b95eccc5209c8d6e9afd1e93a410346c51ebd42b08b6470933fc4c8873fc5`。
+- 2026-09-07 部署：同一 runtime JAR 已同步到 Lobby 与 Prism 客户端，构建产物和两处目标 SHA-256 均为 `7c2b95eccc5209c8d6e9afd1e93a410346c51ebd42b08b6470933fc4c8873fc5`。Lobby 重启后为 `RUNNING`，日志达到 `Done (1.455s)`；客户端未启动。部署器只执行既有迁移历史表的幂等存在性检查，输出中没有应用新的业务 migration；S1、S2 未被部署或操作，保持原状态。下一门槛为玩家完整实机视觉与交互矩阵。
+
+# 2026-09-07 - UI2 固定密度、字体来源与文字边界合同
+
+- 根据实机反馈取消玩家可调界面密度和字号：主题继续固定语义字号、行高、间距和控件高度；设置页只保留主题、窗口尺寸、字体来源、减少动画与恢复默认。
+- 新增独立字体来源 `MINECRAFT / TERMINAL`。前者直接复用客户端已加载的 `FontRenderer` 并跟随资源包，作为旧配置和恢复默认后的默认值；后者继续使用内置 Noto Sans CJK 平滑字体。普通 Screen 与 Container 的文本测量和绘制统一使用同一选择。
+- 旧 `density` 配置键在兼容加载时移除，不进入服务端 Snapshot、网络或数据库。字体选择仍是纯客户端偏好，与主题包相互独立。
+- UI2 公共文本流新增固定主题字号下的单行自动适配：优先原字号，空间不足时有限缩小到可读下限，仍不足则省略；异常宽单字不会逃出边界。所有正式终端渲染增加窗口级硬裁剪兜底。
+- CodeGraph 前置同步确认 `TerminalPreferences` 影响约 186 个符号、`TextFlow` 约 103 个、`StandardWidgets` 约 80 个，因此改造集中于偏好、双宿主与公共文字组件，没有逐页添加字号补丁。
+- 配置迁移测试覆盖独立字体来源持久化、旧 `density` 清理和缺失字体项默认迁移；纯 JUnit 中显式提供 Forge `Configuration` 所需的临时游戏目录，并在测试结束后恢复全局状态。
+- 自动验证：UI2 Core/Lab/Demo 与根项目共 499 项（52 项既有环境条件跳过），0 失败；`:ui2-demo:renderGolden`、根 `test`、`assemble`、`verifyUi2SelfContained` 和 `git diff --check` 全部通过。runtime JAR SHA-256 为 `30380622ace6d44f6a576afb0b3ba9dece57ea6fe1664d90628facd889c2cb24`。本轮尚未部署、未启动客户端、未触碰 Lobby/S1/S2 或数据库。
+
+# 2026-09-07 - UI2 统一 Minecraft 字体与语义字号上限
+
+- 根据最终实机决策移除内置 Noto Sans CJK、字体来源选项、后台字形栅格线程、Atlas、逐帧上传和回退切换；UI2 从测量到绘制只使用 Minecraft 当前 `FontRenderer`，自动跟随语言与资源包。
+- 客户端兼容加载会清理旧 `density` 和 `fontSource` 配置。设置页只保留主题、窗口尺寸、减少动画和恢复默认；Base JAR 不再包含 CJK 字体或 OFL 文件。
+- 公共 `TextFit` 将每个文本框的语义字号视为上限：短文本保持标题/正文/说明的默认层级，溢出时才在可读下限内缩小；单行仍不足则省略，多行先在限定行数内换行，仍不足再省略。文本框光标使用最终适配字号测量。
+- CodeGraph `impact` 显示 `MinecraftFontService` 影响链由原 87 个符号收敛为 26 个，`TextFit` 影响 21 个符号；`affected` 对跨模块公共组件未返回测试，因此执行 UI2 Core/Lab/Demo、设置配置与根项目全量矩阵。
+- 干净构建验证共 494 项（52 项既有环境条件跳过）、0 失败；`:ui2-demo:renderGolden`、`test`、`assemble`、`verifyUi2SelfContained` 与 `git diff --check` 全部通过。JAR 内无 Noto/字体/OFL 残留。
+- 已部署同一 runtime JAR 到 Lobby 与 Prism 客户端，SHA-256 均为 `a75dea120b4799159a12cc6706c00cc900e2ea29de27d2415cd892b3064c80f3`；Lobby 由部署器重启并通过完整启动检查，客户端未启动。数据库只执行既有迁移历史表的幂等存在性检查，无业务 migration；S1/S2 未触碰。
+
+# 2026-09-07 - UI2 字体崩溃修复与标准市场工作台恢复
+
+- 根据两份客户端崩溃报告定位到资源包字体测量返回负宽度后直接进入 `UiSize`；新增饱和测量边界，负值、非法缩放和极大结果均被限制为安全尺寸，绘制对齐宽度同步防御。
+- 对照 Git 中旧 `TerminalMarketSection`、`TerminalMarketSectionContent` 及既有市场 UX 合同，将过度简化的标准市场 UI2 页面恢复为三栏工作台：左侧商品浏览，中间行情/盘口/个人资产，右侧交易台。
+- 重新接回商品筛选、排序、分页，`1h/24h/7d` 行情周期，三档盘口，可用/锁定/待收/冻结资金，以及订单与交付入口；服务端市场 Snapshot、订单 payload、身份、托管和结算合同未修改。
+- CodeGraph 前置确认 `MinecraftFontService` 影响 26 个符号、`TerminalStandardMarketDocument` 影响 91 个符号；测试覆盖字体异常测量及三档正式窗口的标准/定制/汇率市场文本边界。
+- 定向测试、根项目全量 `test`、`assemble`、`verifyUi2SelfContained` 与 `git diff --check` 通过。runtime JAR、Lobby 和 Prism 客户端 SHA-256 均为 `557d79f2b2295baab5974e384f5e092e1512828c117fae3818b03bebeb0a4de4`；Lobby 完成重启健康检查，客户端未启动，S1/S2 未触碰。
+
+# 2026-09-07 - 标准市场 UI2 渐进式还原整改
+
+- 实机复核确认临时三栏工作台偏离既有市场交互，现已整体替换为“商品目录 -> 悬浮行情 -> 商品详情 -> 下单/撤单浮层或订单中心”的渐进流程；定制与汇率市场没有重排。
+- 商品目录使用真实 `ItemStack`、响应式 2/3/4 列网格、搜索/筛选/排序/服务器分页、迷你走势及悬浮行情；详情页恢复左侧商品/五档盘口/24h/个人资产与右侧主图，底部仅保留买入、卖出、撤单、订单中心。
+- 新增 UI2 市场图表几何与渲染：OHLC、稀疏折线、单点、空态、成交量、图内十字光标；全部坐标和 long 运算饱和到图表范围，不恢复旧 Canvas 绘制。
+- 下单改为稳定键浮层，恢复市价/限价、数量、`25% / 50% / 最大`、`买一 / 最新 / 卖一`、结算预览、禁用原因和二次确认；撤单使用当前商品可撤委托及版本绑定确认。
+- 订单与资产中心恢复六项账户摘要、四页签、商品/方向/状态/时间筛选、清除筛选、真实物品行、服务端分页、撤单及领取动作。宿主新增通用外部物品/图表合同，地产地图同步采用同一合同且行为不变。
+- 服务端市场 Snapshot、撮合、银行、托管、Vault、交付、恢复、玩家身份、网络 payload 和 PostgreSQL 均未修改；本轮没有数据库 migration。
+- CodeGraph `status/sync` 后确认 `TerminalStandardMarketDocument` 影响 161 个符号，通用 `TerminalPageDocument` 影响 256 个符号并覆盖地产外部画布；`affected` 未返回跨模块测试，因此按调用链执行终端、市场、UI2 与全量矩阵。
+- 自动验收共 501 项：根项目 456 项（52 项既有环境条件跳过）、UI2 Core 39 项、Lab 2 项、Demo 4 项，0 失败；Golden 导出、`assemble`、`verifyUi2SelfContained` 与 `git diff --check` 全部通过。runtime JAR SHA-256 为 `f469da65463007e0fdfabd0f8ec61fb368cab6a428304dd7ccd12eb192d52bb6`。
+- 已将同一 runtime JAR 同步到 Lobby 与 Prism 客户端，两处目标 SHA-256 均为 `f469da65463007e0fdfabd0f8ec61fb368cab6a428304dd7ccd12eb192d52bb6`；Lobby 重启后为 `RUNNING`，日志达到 `Done (1.311s)`。客户端未启动，部署器只幂等确认 migration 历史表，没有业务 migration；S1/S2 未触碰。人工门槛为目录、悬浮行情、详情图表、买卖、撤单和订单中心的实机逐项检查。
+
+# 2026-09-07 - UI2 点击、市场详情与帮助层紧急修复
+
+- 检查用户最新客户端崩溃报告 `crash-2026-09-07_19.38.09-client.txt`，确认直接原因是地产“我的产权”页签和内容根重复使用 `land-mine`，`LayoutEngine` 在渲染期拒绝重复键；现将页签与内容键拆为独立稳定常量并增加回归测试。
+- 标准市场商品卡点击失败的原因是事件命中卡片内的被动物品/图表子节点后，Card 只接受 TARGET、不接受 BUBBLE；公共控件现只允许“可点击 Card”消费未被子控件处理的冒泡点击，嵌套按钮仍在 TARGET 阶段优先消费，避免双触发。
+- 标准市场帮助层增加明确“关闭”操作，并修正帮助状态误走确认框命中区的问题；点击帮助层或按 Enter/Escape 都只关闭当前帮助层，下一次关闭操作才能退出终端。
+- CodeGraph 同步后确认 `TerminalLandDocument` 影响 57 个符号、`StandardWidgets` 影响整个 UI2 控件输入面，因此除地产/市场定向测试外执行 UI2 与根项目全量矩阵。
+- 自动验证共 504 项：根项目 458 项（52 项既有环境条件跳过）、UI2 Core 40 项、Lab 2 项、Demo 4 项，0 失败；`assemble`、`verifyUi2SelfContained` 与 `git diff --check` 通过。runtime JAR SHA-256 为 `118d83ed4efe5647db1d36c7508fe063e0f1daf797b1a51f9c34a004261e295a`。
+- 同一修复 JAR 已部署 Lobby 与 Prism 客户端，两处目标哈希一致；Lobby 重启后为 `RUNNING`，日志达到 `Done (1.545s)`。客户端未启动，S1/S2 未触碰，数据库没有业务 migration。
+
+# 2026-09-07 - UI2 Modal 失效边界与市场图表渲染修复
+
+- 实机确认首页帮助层虽然消费了 Escape/点击，却未必显式请求 Runtime 重建，旧 Modal 因而持续缓存并拦截 R、返回和关闭。现将“被消费的 UI 输入”定义为 UI2 Runtime 的统一失效边界；关闭状态在下一帧自动重建，普通 Screen 与 Container 共用此行为，不再依赖每个页面手工调用 `invalidate()`。
+- 标准市场图表此前在 `RenderItem` 之后直接使用 Minecraft 固定管线绘制，可能继承物品渲染留下的颜色、光照和混合状态，实机表现为整块灰色。现调整为先绘制页面外部图表、后绘制真实物品，并用独立 `GlStateGuard` 隔离两段状态。
+- 详情图增加明确周期标题；真实成交不足时保留网格和参考价格线，并显示“暂无成交数据 · 参考价”，避免无成交商品呈现为疑似故障的空白块。服务端行情、撮合和数据库合同未改。
+- CodeGraph 同步后复核 `UiRuntime`（71 个受影响符号）和 `MarketChartRenderer`（117 个受影响符号），测试范围覆盖 UI2 Runtime、首页 Modal、标准市场文档与全部终端/业务回归。
+- 自动验证共 504 项（52 项既有环境条件跳过），0 失败；`:ui2-core:test`、`:ui2-lab:test`、`:ui2-demo:test`、Golden 导出、根项目 `test`、`assemble`、`verifyUi2SelfContained` 与 `git diff --check` 全部通过。runtime JAR SHA-256 为 `1b7dea024df84fe5527d574617c68d01f28949d52a9c7fe71d1ae4794142295e`。
+- 同一 JAR 已部署到 Lobby 与 Prism 客户端，构建产物及两处目标哈希一致；Lobby 由部署器完成重启和启动日志健康检查，客户端未启动。部署器仅幂等确认既有 migration 历史表；S1/S2 未触碰。
+- 二次实机反馈确认前述隔离只恢复了宿主状态，却没有为外部二维画布建立确定状态；图表实际被恢复后的深度测试遮挡，只露出底层 Card。现于图表阶段显式关闭深度测试/写入与光照、启用标准 Alpha 混合并重置颜色。定向测试、`assemble`、自包含检查与差异检查通过；重新部署后的构建/Lobby/客户端 SHA-256 均为 `581597c3e38afdda0874b6287ad7a44675ec32c4529cf9691055588782a90459`。
+
+# 2026-09-07 - Victoria 3 经济 Mod 源码研究基线
+
+- 通过 GitHub SSH 将 Anbeeld's Stockpile Economy 与 Economic and Financial Mod 拉取到仓库外的 `reference-sources/victoria3-economy/`；固定提交分别为 `c7a7e0cd5c1646b9a449854d0cefb27a7ef8ea9b` 与 `48c3f7014dec0dab86899cca64fce1c06a10e4a1`，不会进入 Base 构建、JAR 或部署。
+- 新增 `docs/victoria3-economy-mod-research-2026-09-07.md`，记录 ASE 的目标库存、双阈值滞回、扣除自身订单、批处理和限幅设计，以及 E&F 的货币、银行、利率、债券、股票、通胀、流动性、信用与危机系统。
+- 许可证边界：ASE 根目录为 MIT；E&F 当前提交和历史检查未发现许可证文件，因此只研究思想与行为，不复制其代码、数据、GUI 或美术资源。
+- 初步建议先执行只读经济事实盘点与历史数据离线计算，再做经济观测页和公共储备回放；未经单独批准不修改市场、银行、Vault、数据库或生产服务器。
+# 2026-09-08 - Galaxy UI2 正式终端纯 Java视觉闭环 V.1/V.2 与 V.3 基础
+
+- 新增独立 Java 8 `ui2-terminal` 子模块，依赖方向固定为 `ui2-terminal -> ui2-core`；根 Mod 与 Java2D Demo 均消费同一终端壳和正式 Document。纯模块新增 `TerminalVisualModel`、`VisualItem`、`ExternalVisualRegion`、动作端口、窗口度量与确定性场景，不引用 Minecraft、Forge、LWJGL 或 AE2。
+- 首页、设置和资产中心已下沉为平台无关 Document；根 Mod 只负责把现有服务端快照、客户端偏好、`ItemStack`、光标栈及操作动作转换到纯模型。资产中心仍复用原 Container、Vault、背包、Bay、Cell、幂等和版本合同。
+- Java2D 报告已从 15 张 UI Lab 扩展到 63 张正式终端截图，覆盖三套主题和 `350×193 / 427×240 / 620×340`。视觉门禁实际发现并修复了资产内容区整体 0 高度、市场商品价格行 0 高度以及物品数量文字行高不足三类布局缺陷，并新增“挂载内容塌缩为 0”失败规则。
+- V.3 已建立纯标准市场目录/详情模型和平台无关 `CHART_LINE / CHART_VOLUME` DrawCommand；Java2D 与 Minecraft 渲染后端均支持同一命令。正常、稀疏、单点和空行情场景进入报告，有数据却无图形及空态缺失会使 `verifyTerminalVisuals` 失败。正式下单/撤单/订单中心适配尚未迁移，因此 V.3 保持实施中。
+- `scripts/render-ui2-visuals.sh` 现在执行 Core、Terminal、Lab、Demo 测试与 `:ui2-demo:verifyTerminalVisuals`，统一报告仍为 `ui2-demo/build/ui-lab/index.html`。本记录写入时定向视觉矩阵通过：63 张正式终端快照及 15 张 Lab 快照，0 个结构告警。
+- 自动验收：根项目 458 项（52 项既有条件跳过）、UI2 Core 41 项、Terminal 1 项、Lab 2 项、Demo 5 项，全部 0 failure/0 error；`test`、`assemble`、`verifyUi2SelfContained`、`verifyTerminalVisuals` 与 `git diff --check` 均通过。运行 JAR SHA-256 为 `9062bbe4d41e4a72a952b569e89e5e512134d948c769a4063cd37ea3c5e6213a`。按阶段约束本轮未部署，未启动客户端，未触碰 Lobby/S1/S2 或数据库。
+
+# 2026-09-08 - 跨服任务平台 Q.2 玩家进度结构化导入
+
+- `galaxy-quest-bq-importer` 将 BQ 玩家进度从不透明 Task JSON 提升为结构化 Task 进度：稳定 task key、类型、
+  当前玩家完成标记和数值列表；兼容现网 `data` 整数数组与击杀任务 `value` 标量，同时继续保留完整原始 JSON。
+- 增加 9 种现网 Task 与 4 种 Reward 的固定兼容矩阵测试，以及只读 `progressInventory` 工具。S2 实跑读取
+  29 个玩家文件、108557 个任务进度、4524 个已完成、1279 个已领取；所有类型均在兼容矩阵内。
+- S2 DefaultQuests 再次全量导入 3744 个任务，unknown Task/Reward 集合均为空。现场文件只读挂载，无写回、
+  无数据库 migration、无部署；S1 未操作。
+- 移除定义导入阶段错误的统一 `target=1` 占位，改为任务类型对应的规范参数；检索、合成、流体和方块破坏
+  使用逐项向量目标，击杀、位置、会面、选择奖励与 XP 保留源码中的关键语义。兼容报告现明确输出
+  `ADAPTED/UNKNOWN`，不会把“能导入”误报成“运行时已完整支持”。
+- `galaxy-quest-core` 的 `TaskProgress` 已升级为向量兼容模型，旧标量构造器保持可用；逐项进度单调合并、
+  全项完成判断及形状冲突失败均有测试。新增 `BqProgressMapper` 将旧进度按定义形状映射到核心模型，拒绝
+  task 类型、数量或向量宽度漂移，避免跨服迁移静默损坏。
+- CodeGraph 复核 `TaskProgress` 影响 43 个符号、`BqStandardCodec` 影响 35 个符号、`BqProgressMapper`
+  影响 7 个符号；导入器定向测试、Core 测试、根项目全量 `test`、`assemble` 与 `git diff --check` 通过。
+  新构建 JAR SHA-256 为 `bf085903b7a0967fcae9645b352868d5de87030dc625ec1a8680d0089e53fe6c`；本轮未部署。
+
+# 2026-09-09 - 跨服任务平台 Q.3 PostgreSQL 权威运行时第一批
+
+- 新增纯 Java 8 `galaxy-quest-postgres` 模块。第一版 PostgreSQL DDL 包含版本化任务定义、唯一事实收件箱、
+  PLAYER/PARTY/TEAM/PUBLIC 进度、BIGINT 数组 Task 进度和唯一奖励资格；尚未接入生产 migration。
+- 新增 JDBC 连接/事务边界和 `JdbcQuestRuntimeRepository`。事实、进度和奖励资格变更强制要求活动事务；
+  进度读取使用参与主体+任务版本的事务 advisory lock，覆盖“记录尚不存在”时的并发首次更新。
+- 核心新增 `QuestRuntimeService`，把事实去重、进度锁定、事实投影、任务归约和奖励资格生成固定在一个事务
+  工作流中，重复事实不会再次运行任何任务。
+- 使用独立临时 PostgreSQL 数据库和角色完成 8 项仓储/事务测试，其中 4 项为真库测试：相同事实并发、
+  不同事实并发首次更新、向量进度往返、奖励资格幂等及强制故障整体回滚全部通过。临时数据库和角色已删除；
+  现有数据库用户、业务 schema 和数据未修改。
+- CodeGraph 复核 `QuestRuntimeService` 影响 19 个符号、`JdbcQuestRuntimeRepository` 影响 28 个、
+  `JdbcQuestTransaction` 影响 17 个。Quest Core、PostgreSQL 模块、根项目全量 `test`、`assemble` 和
+  `git diff --check` 均通过；新 JAR SHA-256 为
+  `49cae7ad0108e326a2e5c0818154f7294b722c01236175c31e3a68d2aaa5245e`，未部署。
+
+# 2026-09-09 - 跨服任务平台 Q.3 定义发布、奖励恢复与双源冲突预演
+
+- 新增任务定义草稿、内容哈希乐观锁、发布和退役仓储；发布版本不可原地修改，运行时只读取最新发布版本。
+- 奖励资格增加租约、尝试和恢复状态机：多工作器通过 `FOR UPDATE SKIP LOCKED` 领取，失败可延迟重试，
+  达到上限进入 `ABANDONED`，租约过期可被其他工作器接管，旧工作器确认会被拒绝。外部交付端合同强制
+  使用稳定 entitlement key 实现幂等。
+- 新增纯 Java 工作器测试，覆盖成功确认、稳定外部键、可重试失败、最大次数放弃和陈旧确认；一次性真
+  PostgreSQL 库覆盖草稿冲突、发布不可变、失败重试、租约接管和尝试审计。测试结束后临时库与角色已删除，
+  生产数据库和 migration 未修改。
+- 新增 BetterQuesting 双源只读冲突分析工具，按单调偏序区分一致、单边存在、左/右领先和真正分叉；向量
+  交叉领先、Task 类型或形状漂移不会被静默合并。因 S1 操作需单独授权，本轮未读取 S1 现场数据。
+- CodeGraph 前置同步并复核 `JdbcQuestDefinitionRepository`、`JdbcRewardDeliveryRepository` 与
+  `RewardDeliveryWorker` 的影响链，改动保持在 quest-core、quest-postgres 和 quest-bq-importer 新模块内。
+  三个模块共 36 项测试通过，根项目全量 `test`、`assemble` 与 `git diff --check` 通过；runtime JAR
+  SHA-256 为 `42c636444185f0779aa1a5710cfdabf1254b36894d917a559ae58dc4a42121a4`。尚未接入 Mod 启动、
+  未部署、未触碰 Lobby/S1/S2。
+
+# 2026-09-09 - 跨服任务平台 Q.4 第一批事件检测器
+
+- 对照 BetterQuesting `EventHandler`、`TaskHunt`、`TaskCrafting` 和 `TaskCheckbox`，采用其成熟的事件/周期
+  检测分工，但将调用方向改为 Forge 事件生成不可变事实，禁止事件处理器遍历任务或直接修改进度。
+- 新增击杀、合成、熔炼、铁砧事实工厂与服务器事件处理器，过滤客户端世界、FakePlayer 和取消事件；保留
+  BQ 对 Shift-click 合成空栈重新求配方数量以及熔炼异常数量的兼容修正。每次服务进程使用启动 ID 加单调
+  序号生成唯一事件键，重试继续携带同一个不可变事实。
+- 纯核心新增击杀父类型/伤害源求值、合成物品向量求值和服务端绑定复选确认求值；导入的 hunt、crafting、
+  checkbox 定义获得稳定 `galaxy:*` fact type。注册名、meta、通配 meta、OreDict 以及三种生产通道均有
+  明确合同；NBT 字段已保留但部分匹配尚未宣告完成。
+- 当前 Handler 尚未注册，避免在发布定义目录、参与主体解析和生产 DDL 未接线前丢弃事实；没有生产
+  migration、部署或服务器操作。CodeGraph 复核 `ItemVectorTaskEvaluator`（21 个影响符号）与
+  `QuestGameplayEventHandler`（12 个影响符号）；Quest 模块当前 40 项测试为 0 failure/0 error，其中默认
+  环境下 7 项真 PostgreSQL 测试按连接条件跳过（本轮前一批已用一次性真库通过）。根项目 `test`、
+  `assemble` 和 `git diff --check` 通过，runtime JAR SHA-256 为
+  `6c7978dd7245d44d04b535a5a65e4fbca9249bcf98bf7a77fbddf00e555d8b86`。
+
+# 2026-09-09 - 跨服任务平台 Q.4 发布计划、方块与库存快照
+
+- 定义仓储新增最新发布版本目录，进度查询新增参与主体的已完成前置集合；`QuestEvaluationPlanner` 在
+  `QuestRuntimeService` 的同一事务内生成执行计划，先按 fact type 剔除无关任务，再通过显式 Assignment
+  Policy 选择 PLAYER/PARTY/TEAM/PUBLIC 范围。当前导入任务默认 PLAYER-only。
+- 无相关任务的事件现在返回 `IGNORED` 且不写事实表；定义、成员和前置状态不会在事务外形成陈旧快照。
+- 新增方块破坏向量求值和事实采集，保持 BQ“一次破坏只命中第一个需求”的算法，支持直接方块、meta
+  通配和 OreDict。
+- 新增非消费型库存权威快照：未完成的观察进度允许回落，完成后锁定；同一栈按需求顺序分配，禁止重复
+  计数。`consume=true` 的检索不会走快照捷径，后续使用事务提交协议。
+- 使用一次性 PostgreSQL 数据库验证最新发布目录和完成前置查询，全部测试通过后临时库与角色已删除；
+  生产数据库、migration、Mod 注册和部署均未变更。CodeGraph 复核 `QuestEvaluationPlanner`（15 个影响
+  符号）、`InventorySnapshotTaskEvaluator`（20 个）与 `MinecraftQuestFactFactory`（24 个）；Quest 三模块
+  共 47 项测试全部执行且 0 failure/0 error/0 skipped，根项目 `test`、`assemble` 与 `git diff --check`
+  通过。runtime JAR SHA-256 为 `cb1587546e75ac3a3e289af48ed932795758d465a62653ed2318425b9a06c1d5`。
+
+# 2026-09-09 - 跨服任务平台 Q.4 流体与地点权威观察
+
+- 新增非消费型流体库存快照求值器及 Minecraft 容器扫描，按毫桶和需求顺序分配，避免同一容器内容被多个
+  条件重复计数；`consume=true` 明确保持不推进，等待事务型扣除协议。
+- 新增地点求值器和每 100 tick 的基础位置事实，对齐 BQ 的维度、三维欧氏/曼哈顿距离、范围、生物群系与
+  invert 语义。结构与目标可见性必须携带显式服务端证据；缺失证据按 unknown 处理，不会误判为 false，
+  因而 inverted 任务也不会误完成。
+- BQ 导入器为 fluid 与 location 写入稳定 fact type；兼容注册表现在覆盖现网 9 类 Task 中的 8 类，尚缺
+  meeting。消费型 retrieval/fluid、部分 NBT、结构/视线探针和奖励交付仍保持待实现状态。
+- Handler 仍未注册，生产数据库、migration、Mod 生命周期和服务器均未修改。CodeGraph 同步覆盖流体、地点、
+  Fact Factory 和 Handler 调用链；Quest 三模块共 49 项测试，0 failure/0 error，其中默认环境下 7 项真库
+  测试按连接条件跳过。根项目全量 `test`、`assemble` 与 `git diff --check` 通过，runtime JAR SHA-256 为
+  `f9b95d51d842a579b86e5d175e2651c6e88c1acbb02cf504864eb39fcd360d27`。本批未部署。
+
+# 2026-09-09 - 跨服任务平台 Q.4 会面检测与周期探针计划
+
+- 新增 meeting 求值器，支持精确实体、子类型别名、所需数量与可选 NBT；附近实体事实携带完整扫描半径，
+  小半径快照无法完成大范围任务，避免把未观察区域错误当成空区域。
+- 新增 `QuestObservationPlan`，从发布定义汇总库存、流体、地点和 meeting 的周期观察需求，并取全部会面任务
+  的最大半径。Handler 按 BQ 的 20/60/100 tick 周期只生成计划要求的事实，不再无条件扫描和写库。
+- BQ 导入器现为当前任务库全部 9 种 Task 写入稳定 fact type，核心注册表也覆盖全部 9 类。这里的“覆盖”
+  不等于已经生产启用：消费型任务、BQ 部分 NBT、地点结构/视线探针和奖励交付仍需完成。
+- 事件 Handler 依旧未注册，生产 migration、数据库和服务器均未操作。CodeGraph 复核 meeting、周期计划、
+  Fact Factory 与 Handler 影响链；Quest 三模块共 51 项测试，0 failure/0 error，默认环境下 7 项真库测试按
+  连接条件跳过。根项目 `test`、`assemble` 与 `git diff --check` 通过；runtime JAR SHA-256 为
+  `455e37c673a79427940ca2e1f0f892252b2a2c1516f623814d37e35ffaa1ab85`。本轮未部署。
+
+# 2026-09-09 - 跨服任务平台 Q.4 消费型任务 Saga 第一批
+
+- 对照 BQ retrieval/fluid 的检测、手工提交与直接扣除逻辑，新增跨服安全的消费协议：稳定提交键、
+  `PREPARED/APPLIED/CONFIRMED/REJECTED` 状态、幂等外部扣除端和确认事实。只有外部扣除返回持久证据后，
+  consuming retrieval/fluid 才按逐项增量推进；非消费快照与消费确认通过组合 evaluator 共存。
+- 消费事实绑定玩家、Quest UUID、定义版本、Task key 和 item/fluid 种类；Planner 精确验证这些边界，无法
+  匹配发布任务时不会把已扣资源静默确认为成功。周期计划也不再为 consume=true 的任务生成无意义快照。
+- PostgreSQL DDL 新增消费提交表与恢复索引，JDBC 仓储拒绝同一提交键对应不同内容，并校验合法状态迁移。
+  使用一次性独立数据库/角色执行全部真 PostgreSQL 集成测试，覆盖准备幂等、应用、确认、重复确认与内容
+  碰撞；测试结束后临时数据库和角色均已删除，现有业务 schema 未修改。
+- 尚未实现 Minecraft 玩家 NBT 的幂等扣除端，因此 Handler/消费入口仍不注册；无生产 migration、部署或
+  服务器改动。
+- 后续补齐服务端规范请求授权器：外部意图不含资源或数量，授权器从最新发布定义、锁定玩家进度、前置任务
+  和重复周期生成规范请求；锁定/完成、非消费、错误 Quest/Task 均拒绝。任意请求直提入口已移除，恢复只能
+  按数据库既有提交键执行。
+- CodeGraph 复核 `ConsumptionSubmissionService`、`ConsumptionRequestAuthorizer`、Planner 与 JDBC 提交仓储
+  影响链。Quest 三模块默认矩阵共 56 项，0 failure/0 error，其中 8 项真库测试在默认无连接环境下跳过；
+  另使用一次性数据库实际执行全部 8 项 PostgreSQL 集成测试并通过，临时库/角色已删除。根项目 `test`、
+  `assemble`、`git diff --check` 通过，runtime JAR SHA-256 为
+  `c86229a97680bbf927312dcfdb4cd50597aa9aa60ec158640d6892729610b532`。未部署。
+
+# 2026-09-10 - 跨服任务平台 Q.4 玩家物品幂等消费端
+
+- 新增 Minecraft 服务端物品消费适配：只按服务端 UUID 查找在线玩家，客户端仍不能提交物品定义、数量或
+  目标玩家。扣除前先为所有需求生成完整分配计划，同一物品栈不会重复满足多个需求；任何需求不足时背包
+  保持不变。
+- 物品匹配覆盖注册名、耐久/通配 meta、OreDict，并按 BetterQuesting MIT 源码语义重写完整/部分 NBT
+  比较，包括嵌套 Compound、无序 List、跨整数类型数值和带重复控制的 byte/int 数组。
+- 每个 submission key 以 SHA-256 标记写入玩家 persisted NBT；背包变更与标记经世界玩家数据接口同步写盘。
+  重试命中标记时直接返回既有成功证据，持久化抛错则恢复完整背包快照并撤销标记，Saga 不会进入 APPLIED。
+- 新增可注入的在线玩家解析与玩家数据 flush 边界，以及默认服务器实现；未注册 Handler、消费入口或 Mod
+  生命周期。本批尚不处理 fluid 容器消费，生产 migration、数据库和服务器均未改动，也未部署。
+- CodeGraph 前置复核 `ConsumptionPort`（27 个影响符号）与 `ConsumptionSubmissionService`（43 个）；
+  Minecraft 适配编译通过，新增 NBT 语义测试及根项目测试通过。全量测试中的 `ui2-demo` 两项 Java2D 导出
+  因容器字体环境失败，排除该已知视觉环境项后根 `:test` 通过；该失败与本批 Quest 代码无调用关系。
+  `assemble` 与 `git diff --check` 通过，runtime JAR SHA-256 为
+  `a0997dbfb8f81278f4425ef5fd79df043f9f72d23af0a208514ab987129fa1cf`。
+
+# 2026-09-10 - 跨服任务平台 Q.4 流体容器幂等消费端
+
+- `MinecraftPlayerConsumptionPort` 现同时支持 item 与 fluid。流体需求在完整背包副本上依次分配，兼容 Forge
+  固定流体容器和 `IFluidContainerItem` 可变容器，并按流体注册名及可选 NBT 匹配；部分排空容器和空容器
+  会进入规划后的背包状态，输入背包在规划阶段保持不变。
+- 满背包无法接纳返回容器时整次提交拒绝且不扣流体。此处有意不采用 BQ 的掉落空容器行为，因为世界实体
+  无法与玩家 persisted NBT 的幂等标记一起回滚；玩家整理出空间后可以使用新的 submission key 重试。
+- Forge 流体操作下沉到 `QuestFluidContainerAdapter`，生产实现调用 Forge 1.7.10，测试使用确定性 fake，
+  解决无完整 Minecraft Bootstrap 时 `FluidRegistry` 不能初始化的问题。新增测试覆盖 1500 mB 跨容器部分
+  排空、返回容器数量守恒、输入不变以及满背包拒绝。
+- 根 `:test`（排除既有 `ui2-demo` 字体环境项）通过：464 项、52 项条件跳过、0 失败。Handler、生产
+  migration、数据库和服务器未改动，未部署。`assemble` 与 `git diff --check` 通过，runtime JAR SHA-256
+  为 `d4324f1202bca016dc13cfe7df20edd9ce03bdc1bd6cc988bd94d2838733fd43`。
+
+# 2026-09-10 - 跨服任务平台 Q.3 奖励类型路由与选择门禁
+
+- 新增纯 Java `RewardDeliveryHandler/RewardDeliveryRouter`：按完整 Reward type ID 精确路由，重复 handler
+  注册立即失败，未知类型返回不可重试失败，防止 worker 把尚未支持的奖励静默标记为已领取。
+- 新增 PostgreSQL 选择奖励表与 `JdbcRewardChoiceSelectionRepository`。选择只接受服务端会话提供的当前玩家
+  UUID，校验 entitlement 所有权、`bq_standard:choice` 类型、可交付状态和 `item.count` 索引范围；首次选择
+  不可变，相同选择幂等，不同选择报告冲突。
+- Delivery lease 查询会跳过尚未选择的 choice entitlement；选择后才允许租赁，并把数据库中的选择索引作为
+  `choice.index` 注入不可变 Reward 参数。客户端提交的 Reward 参数不会进入该链路。
+- 使用一次性数据库/角色 `jgb_quest_choice_it` 实际执行全部 PostgreSQL 集成测试，覆盖未选择不可租赁、跨玩家
+  拒绝、越界拒绝、同值幂等、改选冲突及租约参数；测试通过后数据库和角色均删除并核验不存在。生产 schema、
+  migration、服务器和 Handler 未修改，未部署。Quest Core 36 项、Importer 11 项、PostgreSQL 13 项真库测试
+  及根项目 464 项（52 项既有条件跳过）均为 0 失败；`assemble`、`git diff --check` 通过。runtime JAR
+  SHA-256 为 `47968f4089b090e234cdc303c7602cb2f1dd0d97a7b638f9910df1be7e6dd367`。
+
+# 2026-09-10 - 跨服任务平台 Q.4 物品、选择与经验奖励交付器
+
+- 对照 BetterQuesting `RewardItem/RewardChoice/RewardXP/XPHelper/NBTReplaceUtil` 源码，实现 PLAYER 范围的
+  `bq_standard:item`、`bq_standard:choice` 和 `bq_standard:xp` handler。选择索引只取数据库租约注入值；
+  物品 NBT 支持递归 `VAR_NAME/VAR_UUID` 替换；XP 等级曲线与 BQ 的三个区间保持一致。
+- 交付前在背包副本中完成全部堆叠规划。背包不足返回可重试失败，不像 BQ 那样生成世界掉落，从而保证
+  entitlement 标记、背包或经验变化可由同一次玩家数据持久化覆盖；保存异常恢复玩家状态和标记。
+- CodeGraph 前置复核 `RewardDeliveryRouter`（10 个影响符号）及 `MinecraftPlayerConsumptionPort`（42 个）；
+  改动后同步新增 5 个文件、修改 1 个文件。新增确定性测试覆盖堆叠、满背包全量拒绝、NBT 替换、XP 边界与
+  标记稳定性，连同消费端定向测试共 10 项通过。Quest Core 36 项、Importer 11 项、PostgreSQL 13 项（默认
+  环境 9 项真库条件跳过）及根项目 469 项（52 项条件跳过）均为 0 失败；`assemble`、
+  `verifyUi2SelfContained` 与 `git diff --check` 通过，runtime JAR SHA-256 为
+  `a54b034adcd9feb9434b9dc1931ed65120443074edc8547f3fb8620633f1a0d1`。运行时注册、生产 migration、服务器
+  和数据库均未修改，本批不部署；quest-completion 与非 PLAYER 奖励策略留待下一批。
+
+# 2026-09-10 - 跨服任务平台 Q.4 任务完成奖励事务化
+
+- 对照 BetterQuesting `RewardQuestCompletion`，新增纯核心 `QuestCompletionRewardPort` 和对应 delivery
+  handler；目标 UUID 只取已发布 Reward 定义参数，非法 UUID 与未发布目标为永久失败。
+- PostgreSQL 实现把目标任务进度强制完成和目标奖励资格创建置于同一事务。目标已完成作为幂等成功；目标
+  Task 各分量写至定义目标值，使进度快照与完成状态一致。该语义保留 BQ 不检查目标前置的行为，同时利用
+  参与主体进度锁、稳定资格键和通用租约恢复消除跨服重复完成/重复发奖。
+- CodeGraph 复核 `QuestRuntimeService`（36 个影响符号）、新 handler（12 个）和 JDBC port（11 个）。Core
+  39 项测试通过；使用一次性数据库/角色实际执行 PostgreSQL 14 项测试，0 failure/0 error/0 skipped，验证
+  完成时间不被重试覆盖、Task 完成及奖励只产生一次。测试库和角色随后删除并核验均为 0。生产 schema、
+  Mod 生命周期和服务器未修改，本批不部署。
+
+# 2026-09-10 - 跨服任务平台 Q.4 扩展到完整 BQ Standard 重要类型
+
+- 源码复核发现，现网 9 Task/4 Reward 之外，BQ Standard 还提供实体交互、物品/方块交互、计分板、XP Task，
+  以及命令、计分板 Reward。导入兼容集合扩展为 13 Task/6 Reward，避免未来内容或编辑器创建这些类型时被
+  错误归为 unknown。
+- 新增稳定 fact type 与参数归一化：交互任务保留次数和事件类型；计分板把可能为负的比较阈值单独保存为
+  `scoreTarget`，TaskProgress 使用布尔完成目标，避免破坏非负进度不变量；XP 等级阈值按 BQ 曲线转为经验点。
+  所有原始配置继续保存在 `bq.raw`，当前未实现的运行适配仍明确为 ADAPTED。
+- CodeGraph 复核 `BqStandardCodec`（35 个影响符号）。Importer 12、Core 39、PostgreSQL 14 项以及根项目
+  469 项（52 项条件跳过）均 0 失败；`assemble`、`verifyUi2SelfContained`、`git diff --check` 通过。runtime
+  JAR SHA-256 为 `8d6ee70d5bc254b976e2a0072d4b2f25f5cc225ae31279c703c71aeebe022086`。未部署。
+
+# 2026-09-10 - 跨服任务平台 Q.4 计分板、XP 与交互检测
+
+- 新增计分板和非消费 XP evaluator：计分板支持 BQ 六种比较操作和负阈值，完成后锁定；XP 使用绝对经验点
+  快照，未完成值允许下降，消费型 XP 不走观察捷径。
+- `QuestObservationPlan` 增加发布定义感知的 XP 与计分板目标；Minecraft Handler 按 BQ 的 20/60 tick 周期
+  采集服务端权威值。缺失 objective 按定义 criteria 创建，避免每个 Task 自行扫描。
+- 新增方块左/右键和实体攻击/交互事实，基础求值覆盖动作、实体父类型、手持物、方块、meta 与 OreDict。
+  有 NBT 限制的交互目前 fail-closed，等待 canonical NBT 比较，绝不误推进。Handler 仍未注册。
+- CodeGraph 影响范围：`QuestObservationPlan` 29、`InteractionTaskEvaluator` 36、
+  `QuestGameplayEventHandler` 19 个符号。Core 43、Importer 12、PostgreSQL 14 项（默认环境 10 项条件跳过）
+  以及根项目 469 项（52 项条件跳过）均 0 失败；`assemble`、`verifyUi2SelfContained`、`git diff --check`
+  通过。runtime JAR SHA-256 为 `b7966f336cd12662fb9c5efdcaa81318d5eceeafd87acf8c783af88749496cfc`。
+  未部署，也未修改生产配置或数据库。
+
+# 2026-09-10 - 跨服任务平台 Q.4 跨模块 canonical NBT 匹配
+
+- 新增纯 Java `PortableNbt/PortableNbtMatcher`：确定性编码保留 Compound、List、String、Number、byte[] 与
+  int[] 类型，Compound 键排序，数值跨原 NBT 宽度归一；部分 Compound 和无序集合匹配均禁止一个实际元素
+  被重复使用，畸形编码 fail-closed。
+- BQ Importer 将带类型后缀的 NBT-JSON 同时写入 `*.nbtPortable`，Minecraft 事实工厂则从真实 `NBTBase`
+  生成相同编码；原始字段继续保留用于奖励重建与审计。物品生产、库存、流体、方块、击杀、会面和实体/
+  方块交互求值现共用该合同，hunt 和 interact_entity 的目标实体 NBT 采用 BQ 的部分匹配语义。
+- CodeGraph 前置同步后复核 `PortableNbt`（49 个影响符号）、`InteractionTaskEvaluator`（36 个）；新增核心、
+  导入和 Minecraft 适配测试。Quest Core 与 Importer 共 60 项、根项目 471 项（52 项条件跳过）均 0 失败；
+  `compileJava` 通过。未挂载开发字体的普通聚合 `test` 会在既有两项 Java2D 导出测试失败；使用正式视觉脚本
+  只读挂载 CJK 开发字体后，UI2 四模块测试及 63 个正式终端视觉快照全部通过。`assemble`、
+  `verifyUi2SelfContained` 和 `git diff --check` 通过，runtime JAR SHA-256 为
+  `397310493f01bf5731ff3be65fe455f8a411dc7fc4b37085fda4a71f7681ea5b`。未注册 Handler、未部署，生产数据库
+  和 migration 未修改。
+
+# 2026-09-10 - 跨服任务平台 Q.4 消费型 XP 与实际扣除向量
+
+- 对照 BQ `TaskXP.detect`，修正原 Saga 只能表达“全额请求/全额确认”的限制。外部扣除结果、Submission 和
+  PostgreSQL 现持久化本次实际扣除向量；确认事实使用实际量而非请求上限。物品/流体继续全额原子扣除，XP
+  可以按玩家当前经验部分扣除并在后续新提交中继续推进。
+- Minecraft 玩家 NBT 的 SHA-256 submission marker 从布尔值升级为实际向量 Compound；读取旧布尔 marker
+  时仍按旧全额语义兼容。扣 XP、写 marker 和玩家数据 flush 共享回滚边界，保存失败恢复经验和 marker；
+  成功后同步经验条。消费型 XP 已加入授权器和组合求值器，非消费型仍使用周期快照。
+- Quest DDL 新增 `applied_values BIGINT[]`，资源类型允许 `xp`；JDBC 在 APPLIED 转换前校验向量宽度、非负、
+  不超过请求量。使用一次性 `jgb_quest_xp_it` 数据库与角色实际执行 PostgreSQL 14 项测试，0 skipped/0
+  failure，随后删除并核验数据库/角色计数均为 0。CodeGraph 复核 `ConsumptionSubmissionService`（20 个影响
+  符号）和 `MinecraftPlayerConsumptionPort`（43 个）；Quest 三模块 75 项、根项目 472 项（52 项条件跳过）、
+  63 个终端视觉快照均 0 失败。`assemble`、`verifyUi2SelfContained`、`git diff --check` 通过，runtime JAR
+  SHA-256 为 `e0a0fe8bda149327bd71235611a09979de12c4ecfcbc85e00639ba5c95fdd5b5`。生产 schema、Handler 注册、
+  服务器和部署均未修改。
+
+# 2026-09-10 - 跨服任务平台 Q.4 计分板与安全命令奖励
+
+- 对照 BQ `RewardScoreboard`，实现 PLAYER 计分板奖励。相对值先转换为 int 饱和的绝对目标并持久化到
+  entitlement marker，之后只执行幂等 set；崩溃重试不会把相对奖励重复相加。缺失 objective 按 criteria
+  创建并回退 dummy，只读 objective 永久拒绝。
+- 对照 BQ `RewardCommand` 保留变量替换和 `viaPlayer`，但把任意命令执行替换为纯核心白名单与
+  `CommandRewardExecutor` 合同。执行端必须按 entitlement key 持久去重；默认空白名单，控制字符、超长和
+  未允许根命令不会进入执行端。扫描当前 GTNH 默认任务库未发现 command reward，因此该安全默认不改变现有
+  内容。没有复制 BQ 网络、调度器或管理员 CommandSender。
+- 新增核心策略/handler 测试与 Minecraft 计分目标计算测试；Handler 仍未注册，生产配置、数据库和服务器
+  均未修改。Quest Core 51、Importer 12、PostgreSQL 14、根项目 473 项测试均为 0 失败（条件测试按环境跳过）；
+  63 个终端视觉快照、`assemble`、`verifyUi2SelfContained` 和 `git diff --check` 通过。runtime JAR SHA-256
+  为 `d76ccb3b86d8c5d1d9c4e271fe1179a866cd17bc195f0b19f1207965cd2be83d`，本批未部署。
+
+# 2026-09-10 - 跨服任务平台 Q.6 编辑领域与章节迁移基础
+
+- 对照 BetterQuesting `GuiQuestEditor`、`QuestLine` 与 `QuestLineEntry`，开始吸收“编辑任务内容和编排章节”
+  的领域能力，但不复制 GUI、Packet、全局数据库单例或 NBT 文件写入。新增纯 Java `QuestDraftEditor`，支持
+  基本字段、前置关系、Task/Reward 的增删、替换和稳定排序；所有操作输出新不可变定义，发布版本不原地改写。
+- 新增版本化 `QuestChapterDefinition/QuestChapterEntry` 与章节草稿编辑器；章节只保存展示编排，不承载玩家
+  进度。PostgreSQL 新增章节定义表和 JDBC 仓储，复用 DRAFT/PUBLISHED/RETIRED、内容哈希、事务写入及乐观锁，
+  为多个管理端跨服编辑提供冲突保护。
+- BQ 导入器新增 split QuestLines 只读解析：读取 `QuestLinesOrder.txt` 的章节顺序/名称、`QuestLine.json` 的
+  说明/图标/背景，以及位置文件的 UUID、坐标和尺寸；URL-safe Base64 目录后缀按完整 16 字节 UUID 验证，
+  避免连字符被误判为名称分隔符。对当前客户端只读实跑通过：3739 个 Quest、46 个章节、3842 个位置，Task/
+  Reward 均无未知类型。
+- CodeGraph 同步 14 个新增文件；影响范围为 `QuestDraftEditor` 44、`QuestChapterDefinition` 76、
+  `JdbcQuestChapterRepository` 17、`BqQuestChapterImporter` 28 个符号。Core 56、Importer 15、PostgreSQL 15、
+  根项目 473 项测试均 0 失败（PostgreSQL 10、根项目 52 项按环境跳过）；63 个终端视觉快照、`assemble`、
+  `verifyUi2SelfContained` 和 `git diff --check` 通过。runtime JAR SHA-256 为
+  `fff4604bdd8d8e6fbe90fab078d4e8fac1220b8101148f7d601c03923fa17485`。生产 migration、Handler 注册、服务器
+  和数据库均未修改，本批不部署。
+
+# 2026-09-10 - 跨服任务平台 Q.4/Q.6 行为、领取与编辑类型合同
+
+- 导入并内部化 BQ Quest 行为：七类可见性、图标引用、main/silent、自动领取、锁定进度、simultaneous、
+  global/globalShare、音效和相对/固定重复周期。纯核心运行时默认拒绝锁定任务进度，显式属性才允许推进；
+  simultaneous 在未同时满足时清除局部结果，可见性求值不依赖 BQ 客户端单例。
+- 奖励资格新增 `CLAIMABLE`。普通完成等待玩家本人领取，auto-claim 才直接 `PENDING`；手动 Choice 必须先由
+  当前认证玩家做不可变选择，再经领取事务转入投递队列。领取按玩家、Quest 版本和周期加锁，区分未找到、
+  非本人、缺少选择、已领取和非法状态；DDL 增加 `claimed_at`，但未向生产数据库执行。
+- 新增纯 Java 编辑描述层：`QuestEditorTypeRegistry`、Task/Reward 元素描述、字段类型和结构化参数问题。
+  BQ 适配目录完整覆盖 13 种 Standard Task 与 6 种 Reward，能驱动布尔、数字、枚举、UUID、物品/流体/
+  方块列表、实体、NBT 与命令控件，并逐项拒绝空身份、非整数和非正数量；不引入 BQ GUI 或网络。
+- CodeGraph 复核 `RewardEntitlement`（49 个影响符号）、`QuestBehavior`（90）、
+  `QuestEditorTypeRegistry`（25）和 `BqStandardEditorTypeRegistry`（19）。Quest 三模块定向测试通过；另用
+  一次性数据库/角色实际执行 PostgreSQL 集成测试，覆盖手动奖励及 Choice 的“选择-领取-租约”完整链，随后
+  删除并核验数据库与角色计数均为 0。当前客户端 DefaultQuests 只读复跑为 3739 Quest、46 章节、3842
+  位置，未知 Task/Reward 均为空。生产注册、migration、服务器和部署均未修改。
+- 最终自动门禁：Core 63、Importer 17、PostgreSQL 19 项均 0 failure/0 error（默认无连接环境下 PostgreSQL
+  12 项条件跳过，另已在一次性真库中无跳过通过）；根项目 473 项、52 项条件跳过、0 failure/0 error。
+  正式字体挂载的 UI2 脚本验证 63 个终端视觉快照；`assemble`、`verifyUi2SelfContained` 与
+  `git diff --check` 均通过。runtime dev JAR SHA-256 为
+  `e845ae956199c1e62e173e4729729e90e24dca98bdd02caa6b0db54ffbb4bc4f`。未部署。
+
+# 2026-09-10 - 跨服任务平台 Q.6 玩家任务中心与有界分页
+
+- 新增平台无关 `QuestCenterVisualModel/QuestCenterVisualDocument/QuestCenterActionPort`，玩家任务中心已经能在
+  Java2D 与 Minecraft 双宿主之间共享浏览、章节、筛选、详情、Task 进度、奖励与领取动作。浏览、详情、空态、
+  错误态覆盖三套主题和三档视口，统一视觉报告现验证 99 个终端快照。
+- 修复大型任务库不可用的结构问题：Document 不再静默只绘制前 6/9 个章节和 7 个任务。模型新增查询词、
+  章节/任务页索引、页大小、总数和前后页状态，动作端口新增查询与两类翻页意图，页面明确显示分页控件。
+- 纯核心新增 `QuestCenterPageRequest/QuestCenterPaginator/QuestCenterPage/QuestCenterChapterSummary`。搜索和
+  `all/active/claimable/completed` 筛选先于分页，非法页码会限幅，客户端页大小硬限制为章节 12、任务 24；
+  `QuestCenterQuery.loadPage` 使 PostgreSQL 读取结果能在进入网络前缩成有界快照，章节摘要不携带全部布局坐标。
+- PostgreSQL `JdbcQuestCenterQuery` 已按服务端参与主体批量连接最新发布定义、章节、玩家进度、Task 向量和
+  奖励状态；根适配器可直接映射有界服务端页，不再二次截断。正式终端 Snapshot/Action 接线仍未启用，生产
+  migration、Forge Handler、数据库和服务器均未修改，也未部署。
+- CodeGraph 同步 21 个文件；`QuestCenterPaginator` 影响 27 个符号，`QuestCenterVisualModel` 影响 194 个符号。
+  Core 66 项、UI2 Terminal 4 项以及根适配器 2 项定向测试均 0 failure；99 个视觉快照通过结构审计。
+  章节与任务节点使用实体 ID 而非页内序号作为对账 key，翻页不会把上一页控件状态错误保留给下一页实体。
+  `assemble`、`verifyUi2SelfContained` 与 `git diff --check` 通过；runtime JAR SHA-256 为
+  `0043011a280aed98ffd84ad23fbd0537bf9f96ba35b299357ea79fab1e3035b6`。未部署。
+
+# 2026-09-10 - 跨服任务平台 Q.6 Base 终端协议接线
+
+- 新增 Base 自有 `TerminalQuestCenterSectionSnapshot` 和 `TerminalQuestActionPayload`，把玩家任务中心接入现有
+  `TerminalSnapshotMessage/TerminalActionMessage` 主链；没有复制 BetterQuesting Packet、客户端数据库或
+  玩家身份字段。职业正式路由改用 `TerminalQuestCenterDocument`，共享纯 Java Document，Minecraft 层只解析
+  真实物品图标。
+- 服务端只从当前认证 `EntityPlayerMP` 的 UUID 构造 `ParticipantId`。查询词、筛选、章节选择和两级页码均受
+  限；编码端将章节、任务、Task、Reward 分别截断到 12、24、64、64，解码端拒绝越界数量。详情页刷新保留
+  当前任务，只有返回动作退出详情。领取仍明确只读，生产 `QuestCenterQuery` 未装配，现有 BQ 不受影响。
+- 新增动作载荷、协议完整详情往返、集合上限、认证身份和快照回传测试。CodeGraph 已同步 18 个改动文件；
+  `TerminalService` 影响 396 个符号，`TerminalQuestCenterDocument` 影响 63 个符号，`affected` 未额外识别测试，
+  因此执行了全量测试。根项目 481、Quest Core 66、Importer 17、PostgreSQL 20、UI2 Core 41、UI2 Lab 2、
+  UI2 Terminal 4、UI2 Demo 5 项均 0 failure/0 error；挂载开发用 CJK 字体后 99 个终端视觉快照通过。
+- `assemble`、`verifyUi2SelfContained` 与 `git diff --check` 通过；runtime JAR SHA-256 为
+  `7d46c38bd001b96eea877f85b80cc131c87b3d1c87ec35d98535d403e8f41c7c`。生产 migration、Handler、数据库、
+  Lobby/S1/S2 和客户端均未修改，本批不部署。
+
+# 2026-09-10 - 跨服任务平台 Q.6 只读运行时与认证领取装配
+
+- 新增默认关闭的 `questPostgresReadEnabled` 服务端开关和 `QuestModule`。模块只在专用服务器、共享 Banking
+  JDBC 已就绪、五张 Quest 表通过只读校验时安装终端查询；不自动建表、不读取客户端数据库配置、不创建第二套
+  凭据。任一条件失败均清空已安装端口并保持任务中心不可用，现有 BetterQuesting 继续工作。
+- 根构建开始内嵌 Base 自己的 `galaxy-quest-postgres`；自包含门禁明确检查 Quest Core 的认证领取服务和
+  PostgreSQL 查询类存在于最终 JAR。玩家仍只需 Base JAR，不依赖 BetterQuesting API 或额外 Quest Mod。
+- 新增 `AuthenticatedQuestClaimService`：客户端只能提交 Quest UUID；服务端在事务内从最新发布定义和当前玩家
+  进度推导 version/cycle，然后调用已实现的幂等 Claim Repository。成功进入 PENDING 交付队列，重复、缺 Choice、
+  非本人、非法状态与缺失任务均返回明确文案。生产开关保持关闭，领取不会在现网触发。
+- CodeGraph 同步 10 个文件；`QuestModule` 影响 43 个符号，`AuthenticatedQuestClaimService` 影响 29 个符号，
+  `affected` 未额外识别测试，故执行全量回归。根项目 484 项（52 项环境条件跳过）、Quest Core 68、Importer 17、
+  PostgreSQL 20（13 项因本轮未注入测试库环境而条件跳过）、UI2 Core 41、Lab 2、Terminal 4、Demo 5 项均
+  0 failure/0 error。99 个视觉快照、`assemble`、`verifyUi2SelfContained`、`git diff --check` 通过。
+- runtime JAR SHA-256 为 `6329d193131740daeba58ae0c34671690aad676bc01ba90532256e698435b696`。
+  本轮未执行生产 migration、未启用 Quest 开关、未注册 Forge Handler、未部署，也未修改 Lobby/S1/S2、客户端
+  或生产数据库。
+## 2026-09-10 — Q.6 奖励多选项认证边界
+
+- 新增 `AuthenticatedRewardChoiceService`：客户端未来只需提交任务、奖励键和选项序号；玩家身份、已发布定义版本、当前循环及 entitlement key 均由服务端推导。
+- 仅允许 `bq_standard:choice` 奖励进入选择仓储，非多选奖励在数据库调用前拒绝；选择仍由 PostgreSQL 仓储保证不可变与冲突检测。
+- CodeGraph 确认原 `RewardChoiceSelectionRepository` 尚无调用者，本批先建立纯核心服务，不提前暴露不完整的终端按钮。
+- 验证：`:galaxy-quest-core:test` 70 项通过，`git diff --check` 通过；未部署、未修改生产数据库。
+
+### 终端闭环
+
+- `QUEST_SELECT_REWARD_CHOICE` 已贯通 UI2、终端意图协议、认证服务与 PostgreSQL 不可变选择仓储。
+- 任务奖励快照现在携带最多 32 个有界选项及服务端读取的已选序号；客户端仍不能提交玩家、定义版本、周期或 entitlement key。
+- `JdbcQuestCenterQuery` 联查 choice selection，启动校验增加对应表；UI2 详情使用稳定键显示选项，选定后禁止改选，随后可继续执行原有领取流程。
+- 旧 6 段任务意图仍可解码；新协议增加奖励键和 0–31 的选项序号。协议往返测试覆盖选项物品、数量和已选状态。
+- 验证：核心、PostgreSQL、UI2 Terminal、根项目全量测试通过；99 个终端视觉快照通过；`assemble`、`verifyUi2SelfContained`、`git diff --check` 通过。
+- 运行 JAR：`build/libs/jsirgalaxybase-3ca9376-main+3ca937653a-dirty.jar`，SHA-256 `8babf202d363bb6ef10c6c0e96b022d581491df6054dd4c3fe6e5602576c789a`。未部署、未修改生产数据库。
+
+## 2026-09-10 — Q.6 跨服任务追踪真源
+
+- 新增纯核心 `AuthenticatedQuestTrackingService` / `QuestTrackingRepository` 与 PostgreSQL `JdbcQuestTrackingRepository`；追踪状态由数据库保存，不复用 BetterQuesting 客户端 JSON。
+- 新 DDL `galaxy_quest_player_preference` 以 `(player_id, quest_id)` 唯一，原子切换 `tracked`，并为玩家最近追踪查询建立部分索引。该 DDL 仍只是评审/测试制品，未应用生产库。
+- `JdbcQuestCenterQuery`、终端快照/编解码及 UI2 目录/详情已贯通追踪状态；客户端只提交任务 ID，服务端验证最新已发布任务并使用认证玩家身份。
+- CodeGraph 影响集中在 QuestModule、TerminalService、查询映射与 UI2 任务文档；因此执行了全量回归。
+- 验证：根项目 485 项（52 跳过）、Quest Core 72 项、Quest PostgreSQL 20 项（13 项因集成环境条件跳过）、UI2 Terminal 4 项、UI2 Demo 5 项，均 0 失败；99 个终端视觉快照通过；`assemble`、`verifyUi2SelfContained`、`git diff --check` 通过。
+- 运行 JAR：`build/libs/jsirgalaxybase-3ca9376-main+3ca937653a-dirty.jar`，SHA-256 `7b6d3f84bca076285a8545bf69b6d28d9a227b87de3db7ba35e93ed31ad68eeb`。未部署、未改生产数据库。
+
+## 2026-09-11 — Q.6 已追踪任务 HUD
+
+- 新增有界 `TerminalTrackedQuestSnapshot`：最多 5 个任务、每项最多 3 个目标，只有展示字段，不含玩家身份、版本、周期或任何写权限。
+- `TrackedQuestSnapshotFactory` 从服务端 `QuestCenterQuery` 投影数据库真源；`TrackedQuestSyncController` 在登录及低频服务端周期通过 Base 自有消息发送，不使用 BetterQuesting Packet/JSON。
+- 客户端 `TrackedQuestHudState` 保存不可变快照，离开世界立即清空；原 HUD 通知层增加左上角任务摘要，最多显示 3 项并对标题、目标文本和进度做宽度限制。
+- Forge 事件总线注册被抽成可替换组合边界，避免纯 JVM 测试初始化 Forge 单例；全量测试曾捕获此问题，修复后重跑通过。
+- CodeGraph 影响集中在 QuestModule、同步控制器、网络消息和 HUD；执行全量回归而非仅定向测试。
+- 验证：根项目 487 项（52 跳过）、Quest Core 72 项、Quest PostgreSQL 20 项（13 项环境条件跳过）、UI2 Terminal 4 项、UI2 Demo 5 项，均 0 失败；99 个终端视觉快照通过；`assemble`、`verifyUi2SelfContained`、`git diff --check` 通过。
+- 运行 JAR：`build/libs/jsirgalaxybase-3ca9376-main+3ca937653a-dirty.jar`，SHA-256 `44c41b41f968c62ec58a8fb3f567d6ec4fe75466b3f6afe428fe39a9b9f6868a`。未部署、未修改生产数据库。
+
+## 2026-09-11 — Q.6 服务端草稿管理命令层
+
+- 新增纯 Java `QuestDraftManagementService`、认证编辑者与权限合同、结构化结果；支持草稿创建、内容哈希乐观锁更新、发布和退役，并保持所有写操作处于 `QuestTransaction` 内。
+- `QuestDefinitionValidator` 现在可直接用 `QuestEditorTypeRegistry` 校验 Task/Reward 类型及其字段参数，问题路径稳定到具体元素和字段；未知类型、自依赖与重复 key 均在持久化前拒绝。
+- 权限来源被明确限制为服务端认证的 `QuestEditorActor`，客户端未来只发送编辑意图和预期内容哈希，不携带管理员判定。BetterQuesting GUI、Packet、客户端数据库和 JSON 写入均未引入。
+- 新增 5 组管理服务测试，覆盖拒绝未授权、结构校验、完整创建/更新/发布/退役事务、过期哈希冲突及不存在目标。CodeGraph 已同步新增文件；Quest Core 77 项、根项目 487 项（52 项环境条件跳过）均 0 failure/0 error，99 个终端视觉快照、`assemble`、`verifyUi2SelfContained` 与 `git diff --check` 通过。
+- 运行 JAR：`build/libs/jsirgalaxybase-3ca9376-main+3ca937653a-dirty.jar`，SHA-256 `3b01573ae6179077796dabdce01ed1dde14d750377f3e6125d56fbce5a80057a`。生产组合根、管理网络、数据库和部署尚未改动。
+
+## 2026-09-11 — Q.6 管理查询与 Forge 权限组合
+
+- 新增独立 `QuestDefinitionManagementQuery`、有界请求和分页结果，不扩张运行时 `QuestDefinitionRepository` 的玩家目录合同。PostgreSQL 查询支持 DRAFT/PUBLISHED/RETIRED、名称或完整 UUID 筛选、稳定排序和最多 50 项服务器分页。
+- 新增认证查询包装；未授权编辑者不会触发存储访问。`MinecraftQuestEditorAuthorization` 只按当前在线 `EntityPlayerMP` 的认证 UUID 判断，并复用 Forge 命令权限 level 2，客户端无法提交权限布尔值或冒用离线名称。
+- BQ Standard 编辑类型规范从导入器下沉至纯 Core；导入器保留兼容门面，生产 QuestModule 可直接组合 13 类 Task、6 类 Reward 的字段规范，不需要把导入 CLI/Gson 打进 Base JAR。
+- CodeGraph 影响：管理查询 44 个符号、QuestModule 55 个符号、标准类型注册表 33 个符号。新增 3 项认证查询/边界测试，并扩充 PostgreSQL 乐观锁集成用例验证管理筛选。Quest Core 80 项、根项目 487 项（52 项环境条件跳过）均 0 failure/0 error；Importer/PostgreSQL 定向测试、99 个终端视觉快照、`assemble`、`verifyUi2SelfContained` 与 `git diff --check` 全部通过。
+- 运行 JAR：`build/libs/jsirgalaxybase-3ca9376-main+3ca937653a-dirty.jar`，SHA-256 `a2dc7225711a78828e07552e432b937b94d83b665e330b80a859c8a0730b18df`。未部署、未执行生产 DDL，Lobby/S1/S2 与客户端均未修改。
+
+## 2026-09-11 — Q.6 任务管理终端只读闭环
+
+- Base 终端新增 `QUEST_ADMIN_OPEN/FILTER/PAGE`，任务动作载荷扩展管理生命周期和页码，同时继续兼容原 6/8 段编码。管理快照最多 50 条，只包含任务 ID、版本、名称、生命周期、内容哈希、发布时间及 Task/Reward 数量。
+- `TerminalService` 从当前 `EntityPlayerMP` 传入认证 UUID/名称，认证管理查询再次通过在线实体与 OP level 2 校验；未授权访问返回稳定拒绝页，不执行数据库查询。QuestModule 负责安装和失败时清空查询端口。
+- 新增纯 Java `QuestManagementVisualModel/Document/ActionPort`。玩家任务页提供管理入口，管理页支持返回、生命周期筛选和服务器分页；三主题下的正常/空态及三档视口均进入 Java2D 结构审计。
+- 新增协议截断、管理动作兼容、认证身份映射与 UI2 视觉测试。根项目 490 项（52 项环境条件跳过）、UI2 Terminal 5 项均 0 failure/0 error；终端视觉快照由 99 增至 117，`assemble`、`verifyUi2SelfContained` 与 `git diff --check` 全部通过。
+- 运行 JAR：`build/libs/jsirgalaxybase-3ca9376-main+3ca937653a-dirty.jar`，SHA-256 `770f177ed1e31bf62a99576e9721fcbd76ca86128aef18bd53a2da1dfcb5739f`。未部署、未执行生产 DDL，Lobby/S1/S2 与客户端均未修改。
+
+## 2026-09-11 — Q.6 定义详情与发布生命周期闭环
+
+- 管理查询增加按 `quest_id + version` 读取定义，终端详情以有界结构返回说明、前置、Task、Reward、逻辑和行为选项；UI2 列表可进入详情，并只在 DRAFT/PUBLISHED 状态分别显示发布/退役动作。
+- 管理动作只提交任务 ID、版本和已读内容哈希。`TerminalService` 使用当前认证玩家构造编辑者，写服务再次执行服务端授权、类型/参数校验和 PostgreSQL 乐观锁；`QuestModule` 在启动、失败清理与测试复位时成对安装/卸载读写端口。
+- 发布前新增依赖图门禁：缺少已发布直接前置、不可完整读取的依赖链、超过有界遍历规模以及由候选最新版本形成的循环均拒绝发布。玩家运行时仍只读取最新已发布版本。
+- CodeGraph 已同步；`buildQuestManagementSnapshot` 影响 3 个符号，图校验影响 20 个符号。全量 666 项测试（65 项环境条件跳过）0 failure/0 error，126 个终端视觉快照通过；`assemble`、`verifyUi2SelfContained` 与 `git diff --check` 通过。
+- 运行 JAR：`build/libs/jsirgalaxybase-3ca9376-main+3ca937653a-dirty.jar`，SHA-256 `1ac899ab4204033ba9717b6f02ce0f2f662ba57d0a3272ca7335571d3a672da1`。未部署、未执行生产 DDL，Lobby/S1/S2 与客户端均未修改。下一项为草稿创建和字段编辑表单。
+
+### 字段编辑命令基础
+
+- 新增平台无关 `QuestDraftEditOperation/QuestDraftEditRequest`，用最多 128 个白名单语义操作表达一次编辑，不接受反射、任意对象图或客户端权限字段。
+- `QuestDraftManagementService.applyEdit` 仅允许编辑 DRAFT：先在不可变定义的工作副本上应用完整批次，再复用类型注册表验证并以预期内容哈希执行一次事务写入；错误 key、位置、类型或陈旧哈希均不会产生部分保存。
+- 新增原子批量编辑与失败不落库测试；Quest Core 定向测试通过。该合同尚未暴露到网络或正式 UI，下一步是有界操作编解码和由字段描述器驱动的表单。
+
+### 基础字段编辑端到端
+
+- 新增 Base 自有 `TerminalQuestDraftEditPayload`，使用带版本标识的有界二进制载荷承载最多 128 个语义操作；限制载荷、文本、参数数量和值长度，并拒绝未知操作、重复参数与尾随内容，不复用 BetterQuesting Packet。
+- `QUEST_ADMIN_EDIT` 已接入正式终端。DRAFT 详情可编辑名称、说明、前置逻辑和目标逻辑；客户端只形成语义批次，服务端重新鉴权、读取当前草稿并通过内容哈希一次提交。保存成功后返回新哈希，UI 编辑会话自动收口；取消不会发送网络动作。
+- 编辑页新增三主题、三视口确定性场景。第一次门禁发现 350 宽详情操作栏出现 0 宽按钮，随后把详情头改为响应式两行结构；最终 135 个终端视觉快照全部通过。
+- CodeGraph 显示编辑载荷解码影响 40 个符号、编辑会话影响 52 个符号。全量 670 项测试（65 项环境条件跳过）0 failure/0 error；`assemble`、`verifyUi2SelfContained` 和 `git diff --check` 通过。
+- 运行 JAR SHA-256：`a18e6157de0a7660dbe20479e5ec4a656f5dd817f966db0c4d00242af0f7051b`。未部署、未执行生产 DDL、未触碰 Lobby/S1/S2 或客户端。下一项为字段描述器驱动的 Task/Reward 编辑器、前置选择器与草稿创建模板。
+
+### Task/Reward 描述器驱动编辑
+
+- 管理快照新增有界 Task/Reward 类型目录，字段描述包含类型、必填、数值范围和枚举选项；目录只在管理查询已经通过服务端授权后生成。协议往返测试覆盖 nullable 上下界和字段类型。
+- UI2 不再按具体 BetterQuesting 类型硬编码表单。现有 Task/Reward 行可进入元素编辑器；BOOLEAN、ENUM 与其他字段分别生成开关、受限选择和文本输入，字段超过四项时分页。稳定 key、Task 可选属性及参数通过 `REPLACE_TASK/REPLACE_REWARD` 原子保存并复用服务端校验。
+- 元素编辑器增加三主题、三视口结构场景，视觉快照由 135 增至 144；详情和元素编辑在 350×193 下均无 0 宽或越界内容。
+- CodeGraph 显示类型目录影响 26 个符号，元素编辑器核心影响 4 个直接符号。全量 670 项测试（65 项环境条件跳过）0 failure/0 error，144 个终端视觉快照通过；`assemble`、`verifyUi2SelfContained`、`git diff --check` 通过。
+- 运行 JAR SHA-256：`d96ee45042e7ea69cb6028ae961f4746001de7b4f67b0a1d81ddd05523ae9da9`。未部署、未执行生产 DDL。下一项为元素新增/删除/排序、前置任务选择器和新草稿模板。
+
+### Task/Reward 元素新增、删除与排序
+
+- DRAFT 详情的目标与奖励卡增加类型目录驱动的新增入口；新元素只允许在服务端已声明的类型间切换，并在必填字段完整后启用保存。现有元素提供上移、下移和两步删除确认。
+- Minecraft 适配桥把新元素映射为 `ADD_TASK/ADD_REWARD`，把排序与删除分别映射为 `MOVE_*`、`REMOVE_*`；载荷继续只承载 Base 白名单语义操作，不发送完整定义或客户端权限。
+- CodeGraph 同步后确认主要影响为 `QuestManagementVisualDocument`、`TerminalQuestCenterDocument` 和视觉场景。UI2 Terminal 定向测试、根项目全量 670 项测试（65 项环境条件跳过）、`assemble` 与 `verifyUi2SelfContained` 均通过；三主题三视口的终端视觉快照由 144 增至 153，结构告警为 0。
+- 未部署、未执行生产 DDL、未触碰 Lobby/S1/S2 或客户端。下一项为前置任务选择器和新草稿模板。
+
+### 前置任务选择器
+
+- DRAFT 基础编辑页增加独立前置选择子页；服务端在详情已授权后读取最多 50 个最新 PUBLISHED 定义作为候选并排除自身，普通管理列表分页合同不变。
+- 客户端保存前后 UUID 集合差异，只发出 `ADD_PREREQUISITE/REMOVE_PREREQUISITE` 白名单操作；服务端继续执行内容哈希乐观锁，发布时继续执行完整依赖存在性与循环检测。
+- 新增三主题、三视口前置选择场景；162 个终端视觉快照全部通过且结构告警为 0。根项目 670 项测试（65 项环境条件跳过）、`assemble`、`verifyUi2SelfContained` 与 `git diff --check` 通过。运行 JAR SHA-256：`f3de8c1212f071b5c35ab649a337b381c572819411af7e6069e764a9c5c94053`。未部署、未执行生产 DDL。下一项为受限的新草稿模板与创建协议。
+
+### 服务端所有的新草稿模板
+
+- 新增 `QuestDraftTemplate`：空白任务、人工确认目标和经验目标。客户端只提交模板 ID 与任务名称；UUID、版本、逻辑和初始 Task 均由服务端构造，再复用原管理服务授权、标准类型校验和事务创建。
+- 终端任务管理列表增加新建入口与独立创建页；`QUEST_ADMIN_CREATE` 使用任务意图协议新增的专用 `managementTemplate` 字段，不复用奖励字段，也不承载玩家身份、任意参数或完整定义；旧 6/8/10/11/12 段意图继续兼容解码。创建成功后返回 DRAFT 查询结果。
+- 模板合法性、“身份由服务端生成”和专用模板字段往返有自动测试；创建页增加三主题、三视口场景。全量 673 项测试（65 项环境条件跳过）、171 个终端视觉快照、`assemble`、`verifyUi2SelfContained`、`git diff --check` 全部通过。
+- 运行 JAR SHA-256：`b7249a5897ba8df7ba9773174a1e56eebe65d580c27cfc2d02ecdcd9ef180b3c`。未部署、未执行生产 DDL、未触碰 Lobby/S1/S2 或客户端。下一批继续吸收任务行为选项、重复策略和章节编辑能力。
+
+### 重复策略与任务行为编辑
+
+- 草稿语义操作新增末尾兼容的 `SET_OPTION`。服务端白名单覆盖重复周期/边界、可见性、主线、静默、自动领取、锁定进度、同时满足、全局/共享、图标与进度/完成音效；严格拒绝未知键和非法值，并保持批次原子回滚。
+- UI2 提供三页响应式表单，分别编辑重复与可见性、执行语义、资源与音效；选项保存只发送实际变化。客户端仍不能提交完整 `RepeatPolicy`、`QuestBehavior` 或任意 JSON。
+- 新增连续选项合并及未知选项不落库测试，编辑载荷往返覆盖 `SET_OPTION`；三主题三视口视觉场景增至 189 张且 0 结构告警。全量 675 项测试（65 项跳过）、`assemble`、`verifyUi2SelfContained`、`git diff --check` 通过。
+- 运行 JAR SHA-256：`1a95d3a71de20a7cea11095f727c184c541a7e21dd844fa46f2596cfc3ed76ba`。未部署、未执行生产 DDL。下一阶段进入章节管理、布局放置和章节发布生命周期。
+
+### 章节管理服务端基础
+
+- 新增章节批量语义编辑请求、结构化结果与认证管理查询。章节草稿支持名称、说明、图标、背景、可见性以及任务位置的放置、移动、缩放和移除；整批先在内存完成并校验，再以预期内容哈希执行一次乐观锁写入。
+- 章节发布会重新校验所有位置，并要求引用的任务存在已发布版本；非法输入、越权、未找到与并发冲突使用独立结果。认证查询在访问仓储前检查当前服务端编辑者权限，并提供生命周期、名称/完整 UUID 和最多 50 条的服务器分页。
+- `JdbcQuestChapterRepository` 实现管理查询，`QuestModule` 在同一共享 JDBC 与 Forge 权限边界下安装章节读写端口，停用或初始化失败时成对清空。当前尚未增加客户端章节载荷或 UI2 页面，因此正式玩家入口行为未改变。
+- CodeGraph 已同步并检查 `QuestChapterManagementService`、`JdbcQuestChapterRepository` 的影响链。Quest Core 定向测试、PostgreSQL/根源码编译与 `QuestModuleTest` 通过；PostgreSQL 真库用例已增加章节名称/生命周期查询断言但未执行生产数据库。未部署、未执行 DDL、未触碰 Lobby/S1/S2 或客户端。下一步为章节专用有界意图载荷和 UI2 布局编辑器。
+
+### 章节终端载荷与纯 Java 布局画布
+
+- 新增独立 `TerminalQuestChapterEditPayload`，完整覆盖章节的 10 类白名单操作，同时限制编码大小、操作数量、文本长度、UUID、版本和预期哈希；畸形编码、未知序号和尾随字节均拒绝，不复用 BQ Packet 或普通任务导航字段。
+- 新增平台无关章节管理模型、动作端口和生产 UI2 Document。章节详情使用专用画布按内容边界确定性缩放，可显示负坐标、不同尺寸及重叠任务；后放置条目保持上层绘制/优先命中。选中后可步进移动、扩大或移除，并可从服务端候选加入章节。
+- 载荷往返/失败关闭测试通过；章节列表与空间详情在 `350×193`、`427×240`、`620×340` 下结构审计均为 0 问题。当前 Document 尚未接正式终端网络快照，下一步补章节 DTO/编解码、认证路由和 Minecraft Action Bridge。
+
+### 章节管理正式终端闭环
+
+- 正式终端快照和网络编解码新增有界章节管理投影；列表、详情、空间位置和候选任务均不携带玩家身份或写权限。
+- `TerminalService` 接入章节打开、筛选、分页、选择、创建、编辑、发布和退役；定向测试证明当前认证玩家身份、20 项服务端分页以及负坐标/尺寸可完整映射到终端 DTO。
+- `TerminalQuestCenterDocument` 与 `TerminalApplicationScreen` 已接通章节动作，任务定义管理页增加章节入口。章节 UI2 新增三主题下列表、空态、空间详情共 9 个场景，三档视口共 27 张快照。
+- CodeGraph 影响集中于 `TerminalService`、`TerminalQuestCenterDocument` 和 `QuestChapterManagementVisualDocument`，因此回归包含协议、服务端路由、UI2 Terminal 和根构建。
+- 自动验收：全仓 686 项测试（65 项环境条件跳过）0 failure/0 error；231 张 UI Lab/正式终端 PNG 与结构快照生成成功；`assemble`、`verifyUi2SelfContained`、`git diff --check` 通过。运行 JAR SHA-256：`53bcc1a39a6aa757d52609536b1673f97761d18bc3760bf5f089d61aec80a3ff`。
+- 本批未部署、未执行生产 DDL、未启用 Quest 生产开关，也未触碰 Lobby/S1/S2 或客户端。章节字段表单、候选搜索和直接拖拽/缩放仍为下一批。
+
+### 章节新建命名表单
+
+- 章节管理的新建动作不再立即提交固定“新任务章节”。新增纯 Java UI2 名称表单，限制 96 字符、空名称禁用提交、取消不产生服务端动作；UUID、版本和初始布局继续完全由服务端创建。
+- 新建表单加入三套主题和三档视口，统一视觉报告由 231 增至 240 张 PNG/结构快照，结构问题为 0。
+- 全仓 686 项测试（65 项环境条件跳过）0 failure/0 error；`assemble`、`verifyUi2SelfContained`、`git diff --check` 通过。运行 JAR SHA-256：`fbdb51fa24a02ebef869885cd361f64ff1bf644df051c980b3b2eed9aceb0304`。
+- 未部署、未执行生产 DDL。下一项是章节基础属性的两页编辑表单，然后进入候选任务搜索和直接画布拖拽。
+
+### 章节基础属性编辑表单
+
+- DRAFT 章节详情增加两页纯 Java UI2 编辑器：名称/说明/可见性，以及图标/背景/背景尺寸；已发布章节没有编辑入口。
+- 保存通过现有 `saveBasics` 桥产生 `SET_NAME/SET_DESCRIPTION/SET_ICON/SET_BACKGROUND/SET_BACKGROUND_SIZE/SET_VISIBILITY` 白名单操作，继续绑定章节版本和已读内容哈希。
+- 新增真实点击编辑、保存的动作测试，逐项断言 ID、版本、哈希和六类字段；两页表单加入三主题三视口视觉门禁。
+- 全仓 687 项测试（65 项环境条件跳过）0 failure/0 error；258 张 PNG/结构快照生成成功；`assemble`、`verifyUi2SelfContained`、`git diff --check` 通过。运行 JAR SHA-256：`71522dd13fb39c8260dcf60b539e4d28b29a134fc7c209fb186d72cf009b2051`。
+- 未部署、未执行生产 DDL。下一批为候选任务搜索/分页，以及章节画布拖拽、平移和缩放。
+
+### 章节候选检索与直接画布操作
+
+- 候选任务侧栏增加名称/UUID 搜索和每页三项的本地分页，可从服务端授权返回的最多 50 个发布任务中选择任意一项；无匹配结果有明确空态。
+- 章节画布增加 Pointer Capture：左键拖拽任务提交 `MOVE`，右键拖拽提交 `RESIZE`，拖动时提供即时轮廓预览；鼠标释放前不修改定义，最终仍由服务端鉴权和乐观锁写入。
+- 自动测试真实分发按下/移动/释放事件，验证捕获、负坐标换算、移动与缩放语义；另有搜索中文并加入非首个候选的动作测试。
+- 全仓 690 项测试（65 项环境条件跳过）0 failure/0 error；258 张 PNG/结构快照通过；`assemble`、`verifyUi2SelfContained`、`git diff --check` 通过。运行 JAR SHA-256：`7cfb2ea1ce9fb0eba0a42b3def553807a2591d75ff4806c0d2ad42cd837d0c0c`。
+- 未部署、未执行生产 DDL。下一步补画布平移、缩放、网格和键盘精调，然后继续 BetterQuesting 功能差距审计。
+
+### 章节画布导航与键盘精调
+
+- 章节画布增加自适应坐标网格、光标锚定滚轮缩放、中键 Pointer Capture 平移；缩放和平移仅是客户端视图状态，不进入任务定义或服务端载荷。
+- DRAFT 中选中任务后，方向键按一个逻辑单位提交既有 `MOVE` 语义动作；没有新增客户端直接写定义的通道，服务端版本、哈希、授权和事务边界保持不变。
+- CodeGraph 同步后确认主要影响集中于 `QuestChapterManagementVisualDocument` 及其纯 Java 测试；文件级 `affected` 未发现额外测试入口。定向测试新增网格、缩放、平移、捕获释放和键盘精调覆盖。
+- 全仓 692 项测试（65 项环境条件跳过）0 failure/0 error，258 张 UI Lab/正式终端 PNG 与结构快照生成成功；`assemble`、`verifyUi2SelfContained`、`git diff --check` 通过。运行 JAR SHA-256：`d80dfddf9731f713eec3045c6860e792d0f9bb31d0810684b775295172ff31c4`。
+- 本批仍未部署、未执行生产 DDL、未启用 Quest 生产开关。下一步为 BetterQuesting 功能差距审计。
+
+### BetterQuesting 能力矩阵与批量克隆核心
+
+- 新建 `docs/betterquesting-capability-absorption-matrix-2026-09-13.md`，以本地只读源码逐项记录任务定义、13 类 Standard Task、6 类 Reward、编辑、诊断、迁移与影子运行差距；明确不搬运 GUI、Packet、客户端数据库、JSON 存档和 Mod 生命周期。
+- 固定兼容提交 `524b365211b6b3a9672cab8ae45b4e07e726d49e` 仍在本地源码对象库中；本地镜像 HEAD 为 `5ff4864bb072c866ac8c527495c76d3d77e4be2f`，后续修复只能作为注明版本的补充参考。
+- 新增纯 Java `QuestDefinitionBatchCloner`、有界 `QuestDefinitionCloneRequest` 和结构化结果。组选中复制保持源顺序，为复制品生成不碰撞 UUID，只重映射组内前置，保留组外前置、Task、Reward、重复策略和行为选项。
+- `QuestDraftManagementService.cloneDrafts` 在读取任何定义前执行服务端授权，按精确 ID+版本读取，完整校验复制品，并在单个 `QuestTransaction` 中创建所有版本 1 草稿；客户端没有 NBT 或身份写入口。
+- CodeGraph `impact` 显示批量克隆影响集中于纯核心管理服务与新增测试，文件级 `affected` 没有遗漏额外测试入口。全仓 698 项测试（65 项环境条件跳过）0 failure/0 error，258 张 UI Lab/正式终端 PNG 与结构快照通过；`assemble`、`verifyUi2SelfContained`、`git diff --check` 通过。
+- 运行 JAR SHA-256：`80415a66ac7fe895b7747d7af8346ccd0d586e035ead65ff94f3b0eb79167ef5`。未部署、未执行生产 DDL、未启用 Quest 生产开关。下一步把任务克隆计划与章节位置合并为服务端原子事务，再开放有界终端动作。
+
+### BQ 替代目标文档进度回填
+
+- 将当前代码与自动门禁证明的已完成能力回填到原始目标文档，而不再只散落在阶段 Worklog；同步修正 Q.4、Q.6 状态。
+- 新增“尚未完成”和六项最终验收定义，明确批量编辑、检测兼容、团队奖励、影子运行、迁移演练及冻结 BQ 都是目标组成部分，后续不得把某个中间批次通过误报为完成替代。
+- 本次仅更新文档，不修改运行代码、不部署、不执行数据库操作。
+
+### 任务复制与章节布局原子复合操作
+
+- 新增 `QuestChapterCloneService`、有界请求和结果：服务端先授权，再按章节 ID/版本/哈希读取 DRAFT 的真实布局，按精确任务 ID/版本读取源定义；未放置、缺失、发布章节、越界坐标及无效定义都会在写入前拒绝。
+- 复制保留 BQ 组选中语义：首个选中位置是锚点，后续位置相对偏移保持；新任务 UUID 只由服务端生成，组内前置重映射、组外前置保留。所有新 DRAFT 定义和章节更新落在同一个 `QuestTransaction`，章节乐观锁冲突将触发事务回滚。
+- 纯核心测试覆盖相对位置、内部前置、单事务、未放置源和越权早拒绝。终端专用载荷、服务端路由和 UI 多选还未接入，因此不能向玩家展示或称为完整复制功能。
+- 全仓 701 项测试（65 项环境条件跳过）0 failure/0 error，258 张 UI Lab/正式终端 PNG 与结构快照通过；`assemble`、`verifyUi2SelfContained`、`git diff --check` 通过。运行 JAR SHA-256：`dc153ef9e8fa1b3bc0769bdc67f4e929696f528e3d681d73481412622a03479b`。
+- 未部署、未执行生产 DDL、未启用 Quest 生产开关。下一步实现专用有界终端载荷及服务端路由。
+
+### 任务复制终端动作与画布多选
+
+- 新增 `TerminalQuestChapterClonePayload` 与 `QUEST_CHAPTER_ADMIN_CLONE`：载荷只允许章节 ID、版本、内容哈希、锚点、查询上下文和 1–128 个任务 ID/版本；Base64 解析要求 magic、边界和无尾随字节，服务端从当前认证玩家构造 `QuestEditorActor`。
+- `QuestModule` 在已启用的 PostgreSQL Quest 运行时时安装 `QuestChapterCloneService`；`TerminalService` 将复制结果回填章节管理快照。运行时未启用、越权、缺失、冲突和无效数据均为失败闭合且不产生写入。
+- 章节画布增加草稿多选模式与复制按钮；普通单选可复制一项，多选只在显式模式下切换，复制语义继续由服务端读取真实布局并做内部前置重映射。UI2 纯 Java 测试覆盖选择后动作和三档布局。
+- CodeGraph 对 `QuestChapterCloneService`、`TerminalQuestChapterClonePayload`、`QuestChapterManagementVisualDocument` 执行 `impact`，并对实际文件执行 `affected`；完整 Docker 门禁 `:galaxy-quest-core:test :galaxy-quest-postgres:test :ui2-core:test :ui2-lab:test :ui2-terminal:test :ui2-demo:test :ui2-demo:renderGolden test assemble verifyUi2SelfContained` 和 `git diff --check` 通过，258 张 PNG 生成。
+- 未部署、未执行生产 DDL、未启用 Quest 生产开关；下一项转入 QB.2：章节排序/对齐、依赖连线及影响预览。
+
+### QB.2 章节依赖图只读投影基础
+
+- 根据 BQ `QuestLineDatabase#lineOrder` 与 `NetChapterEdit` 的源码行为复核：章节排序是独立目录顺序，不等同于画布任务坐标；当前 Base 尚无该 PostgreSQL 权威目录模型，不能把拖拽误实现为排序。
+- 新增纯 Java `QuestChapterDependencyGraph`：用服务器加载的 `QuestDefinition` 和章节真实放置项生成依赖边，区分 `INTERNAL`、`EXTERNAL` 与 `MISSING`，并提供入边计数；不接受客户端提交的连线或定义。
+- `QuestChapterDependencyGraphTest` 覆盖三类边与计数。定向测试后完整 Docker 门禁 `:galaxy-quest-core:test :galaxy-quest-postgres:test :ui2-core:test :ui2-lab:test :ui2-terminal:test :ui2-demo:test :ui2-demo:renderGolden test assemble verifyUi2SelfContained` 与 `git diff --check` 均通过；下一步将该投影接入有界终端快照、网络编码和 UI2 画布连线。
+- 预接入复核：章节管理快照采用顺序二进制编码；依赖边必须作为受版本控制的有界扩展，与同一 Base JAR 同步发布，禁止向旧字段序列中直接插入数据或复用 BetterQuesting 网络同步。
+
+### QB.2 章节依赖图正式快照与画布连接
+
+- 新增 `AuthenticatedQuestChapterDependencyQuery`：先以当前服务端 `QuestEditorActor` 鉴权，再读取所选章节的真实版本与章节内任务的最新已发布定义；同时读取直接画布外前置，以准确区分内部边、外部边与缺失前置。客户端没有提供依赖边、定义或玩家身份的入口。
+- `TerminalQuestCenterSectionSnapshot.ChapterDetail`、`OpenTerminalApprovedMessage` 和 `TerminalQuestCenterDocument` 现携带最多 8192 条有界依赖边；读端拒绝负数和越界数量。该序列变更要求同一 Base JAR 的客户端与服务端同时更新，未试图兼容或复用 BetterQuesting Packet。
+- UI2 章节画布在网格和任务卡之下绘制内部前置的三段正交连接；画布外或缺失前置没有被虚构为节点，后续将在侧栏增加明确的诊断/影响预览。
+- 自动覆盖：核心授权/外部/缺失分类，终端编解码往返，UI2 内部边几何与三档布局。CodeGraph 已对 `AuthenticatedQuestChapterDependencyQuery`、`QuestChapterManagementVisualDocument` 执行 `impact`，并对核心、终端网络与 UI 文件执行 `affected`。
+- Docker 门禁使用只读预览字体挂载后通过：`:galaxy-quest-core:test`、`:ui2-terminal:test`、根 `test`、`:ui2-demo:test`、`:ui2-demo:renderGolden`、`assemble`、`verifyUi2SelfContained` 与 `git diff --check`；生成 258 张 UI 预览。未部署、未执行生产 DDL、未启用 Quest 生产开关，也未触碰 Lobby/S1/S2 或客户端。
+
+### QB.2 前置诊断摘要
+
+- 章节侧栏新增固定高度的“内部 / 外部 / 缺失”前置汇总，所有三类服务端投影边都会被看见；仅内部边进入画布，避免把画布外定义或坏引用画成可点击的伪节点。
+- UI2 回归覆盖最小 `350×193` 视口仍保留诊断区域；`:ui2-terminal:test`、`:galaxy-quest-core:test` 和 `git diff --check` 通过。未部署、未执行 DDL。
+
+### QB.2 章节目录排序与相对移动
+
+- 依据 BetterQuesting `QuestLineDatabase#lineOrder` 与 `NetChapterEdit.reorderChapters` 的语义，新增纯核心 `QuestChapterCatalogEntry`、`QuestChapterCatalogRepository`、`QuestChapterOrderingService`：目录顺序独立于章节定义版本和画布坐标，不允许把拖拽任务卡误当成章节排序。
+- PostgreSQL 新增待迁移的 `galaxy_quest_chapter_catalog` 权威目录表；新草稿章节会在同一事务补齐目录项，读取按目录排序。重排在事务内锁定目录、验证客户端不能伪造或遗漏完整集合后原子替换；相对移动由服务端读取完整当前目录后转换为完整顺序，避免分页、筛选或陈旧 UI 覆盖全局目录。
+- 终端新增有界 `TerminalQuestChapterOrderPayload` 与 `QUEST_CHAPTER_ADMIN_MOVE_BEFORE`；上/下操作只提交“源章节、目标前置章节（或追加）”和查询上下文，认证、章节目录读取及最终写入均在服务端完成。UI2 回归验证首行下移会发送第二章置于第一章前的相对语义。
+- CodeGraph 已复核 `QuestChapterOrderingService`、`JdbcQuestChapterRepository` 及其终端入口影响范围；Docker 全量门禁在只读预览字体挂载下通过：`:galaxy-quest-core:test`、`:galaxy-quest-postgres:test`、`:ui2-terminal:test`、`:ui2-demo:test`、`:ui2-demo:renderGolden`、根 `test`、`assemble`、`verifyUi2SelfContained` 与 `git diff --check`。未部署、未执行生产 DDL、未启用 Quest 生产开关，未触碰 Lobby/S1/S2 或客户端；仍待管理员实机验收及后续对齐/影响预览。
+
+### QB.2 多选对齐与中断工作收口
+
+- 接手时本批处于半接线状态：核心对齐类、协议和服务端路由已添加，但正式 Screen 未实现发送接口、UI 测试桩缺方法，且 QuestModule 异常清理路径误漏了 tracking 服务重置。先停止扩展，逐项补齐并由编译器复核，没有把不可编译状态留给后续批次。
+- 新增服务端权威 `QuestChapterAlignmentService`：请求只包含章节 ID/版本/哈希、2–128 个互异已放置任务 ID 和 `LEFT/CENTER_X/RIGHT/TOP/CENTER_Y/BOTTOM` 白名单模式。服务器从当前 DRAFT 真实布局计算选中组包围盒及新坐标，一次性乐观更新；越权、缺失任务、重复选择、非草稿和版本冲突均失败闭合。
+- 新增有界 `TerminalQuestChapterAlignmentPayload`、`QUEST_CHAPTER_ADMIN_ALIGN`、QuestModule 组合根和 UI2 动作链。多选时侧栏显示六种对齐按钮并替代单项移动控件，避免小窗堆叠；三档 `350×193`、`427×240`、`620×340` 结构审计均无越界。
+- CodeGraph 同步并复核 `QuestChapterAlignmentService`（31 个受影响符号）、`TerminalQuestChapterAlignmentPayload`（30 个）、`QuestChapterManagementVisualDocument`（119 个）和 `QuestModule`（73 个）；`affected` 未推导测试，故显式执行核心、协议、模块、UI2、PostgreSQL 与全量门禁。
+- Docker 在只读预览字体挂载下通过 `:galaxy-quest-core:test :galaxy-quest-postgres:test :ui2-core:test :ui2-lab:test :ui2-terminal:test :ui2-demo:test :ui2-demo:renderGolden test assemble verifyUi2SelfContained`，`git diff --check` 通过。运行 JAR SHA-256 为 `f0bb1b428f7e7be13fdb489ef2cdd08a53e238ab628b0020b1d7522f2aa33698`。未部署、未执行生产 DDL、未启用 Quest 生产开关，未触碰 Lobby/S1/S2 或客户端。
+
+### QB.3 任务定义影响预览核心
+
+- CodeGraph 复核显示直接修改任务生命周期服务会影响约 70 个符号、章节生命周期服务会影响约 40 个符号，因此先建立独立只读预检，没有把未验证的图算法直接嵌入退休事务。
+- 新增 `QuestDefinitionImpactAnalyzer`、不可变有界报告和 `AuthenticatedQuestDefinitionImpactQuery`：从服务端权威已发布目录计算直接/传递依赖与章节放置，稳定排序并显式标记截断；越权请求在仓储读取前拒绝，客户端不能提交边或“安全”结论。
+- 核心测试覆盖直接与两级传递影响、章节放置、草稿排除及保守 `safeToRetire`。本批只是影响预览底座，尚未接终端协议和退休确认，也未部署、未执行 DDL 或触碰任何服务器。
+- CodeGraph 对新分析器复核为 34 个局部受影响符号；完整 Docker 门禁 56 项任务通过，包括 Quest Core/PostgreSQL、UI2 全模块、258 张视觉快照、根 `test`、`assemble` 与 `verifyUi2SelfContained`，`git diff --check` 通过。运行 JAR SHA-256：`240279a4a9965f63bbcfe4c2c35633e4098a3cbdf7b89f0b79d23e3477a44014`。
+- 随后完成生产接线：`QuestModule` 使用共享 PostgreSQL 连接安装认证影响查询；管理员定义详情显示直接、间接依赖、章节放置及截断摘要。退役按钮仅在服务端报告明确安全时启用，服务端动作仍再次预检，查询缺失、越权、异常或截断一律拒绝退役。
+- 影响摘要复用既有有界 options 编解码，避免改动影响 402 个符号的任务快照顺序协议；关系图及最终安全判断始终由服务端生成。三档窗口、全部主题和影响卡进入纯 Java 视觉审计。
+- CodeGraph 复核认证查询组合根影响、任务管理快照 7 个直接下游和 UI 文档 88 个局部符号；完整 Docker 门禁再次通过 56 项任务及 258 张视觉快照，`git diff --check` 通过。最新运行 JAR SHA-256：`a7391ccd8d1348500d9350346610c6ff09bca652f5ca9189317376a02485f8ed`。未部署、未执行生产 DDL、未启用 Quest 生产开关，未触碰任何服务器或客户端。
+- 完成后语义复核发现 `bq_standard:questcompletion` 奖励也会引用任务；影响分析现同时识别前置集合和 Task/Reward 参数中的 `questUuid`，并记录 `PREREQUISITE / TASK_REFERENCE / REWARD_REFERENCE` 来源。新增测试证明“完成另一任务”的奖励引用同样会阻止不安全退役。
+- 上述引用补全后再次执行完整 56 项 Docker 门禁，Quest、PostgreSQL、UI2、258 张视觉快照、根测试、整包和自包含检查全部通过；最终 `git diff --check` 通过，运行 JAR SHA-256：`67f0ad0d5bc151ebdc557420c6cd3da00864d912c4fe96ef1c7bc26acfd28cbd`。
+
+### QB.4 批量退役纯核心与原子服务
+
+- 对照 BetterQuesting `ToolboxToolRemove` 与 `ToolboxToolDelete` 的多选语义，Base 没有吸收客户端修改整库 NBT 后同步的做法；新增 1–128 项有界批量请求、结构化影响报告和服务端原子退役服务。
+- 批量影响分析会忽略选中集合内部的前置及 Task/Reward 任务引用，但集合外依赖、已发布章节放置、缺失/非发布目标和结果截断全部阻止退役。越权请求在仓储读取和事务开始前失败。
+- `QuestDefinitionBatchRetirementService` 在同一 `QuestTransaction` 内重新读取已发布任务与章节目录、核对所有精确版本，再执行全部生命周期写入；任一 JDBC 写冲突通过异常触发整体回滚，不会像 BQ 客户端包那样留下半批状态。
+- CodeGraph 同步后确认批量退役服务影响 53 个符号、扩展后的影响分析器影响 69 个符号；文件级 `affected` 没有推导额外测试，因此显式执行 Quest、PostgreSQL、UI2 与根项目完整门禁。
+- Docker 完整 56 项任务通过：全仓 732 项测试（66 项环境条件跳过）0 failure/0 error，258 张视觉快照、`assemble`、`verifyUi2SelfContained` 与 `git diff --check` 均通过。运行 JAR SHA-256：`ebbdf6526210146acc0fb263bd5af2041dd94b0d4de11dc1f2fec16dd4433234`。
+- 本段只建立可复用的核心合同，尚未接终端协议或正式管理 UI；下一步为有界批量载荷、管理列表多选、确认与完整影响项浏览。未部署、未执行生产 DDL、未启用 Quest 生产开关，未触碰任何服务器或客户端。
+
+### QB.4 批量退役终端载荷与管理多选
+
+- 将批量退役接入正式终端链路：`TerminalQuestBatchRetirePayload` 采用 magic、长度和 2–128 项边界，只传任务
+  UUID/精确版本、查询上下文、生命周期和页码；客户端不能提交定义、依赖图、身份或“安全”结论。
+- `TerminalService` 由当前认证管理员创建核心请求，`QuestModule` 在共享 PostgreSQL 管理器上安装
+  `QuestDefinitionBatchRetirementService`；查询、影响预检、版本核对和逐项退役均在同一事务内完成，异常写冲突
+  通过事务回滚阻止半批状态。未启用 Quest 运行时或服务未安装时返回失败快照，不产生写入。
+- `QuestManagementVisualDocument` 增加显式“多选退役/取消多选”和选中计数；仅已发布条目可进入选择，单击多选行不
+  打开详情，提交后清除选择。小视口保留筛选行并通过结构审计，避免批量按钮把控件画到视口外。
+- CodeGraph 已同步（1,014 files / 26,939 nodes / 71,432 edges）。`QuestDefinitionBatchRetirementService`
+  影响 29 个符号，`TerminalQuestBatchRetirePayload` 影响 32 个符号；文件级 `affected` 未推导额外测试，
+  因此显式执行核心、PostgreSQL、UI2、终端和根项目门禁。
+- 最新门禁报告：全仓 735 项测试，0 failure/0 error（66 项环境条件跳过）；`ui2-demo:renderGolden` 生成三档
+  视觉 PNG/DrawList，`assemble`、`verifyUi2SelfContained` 与 `git diff --check` 通过。运行 JAR SHA-256：
+  `539101997e81f61c19f7495cd6cea8880e60e6443fbf084a6b28598349d15203`。
+- 本段未部署、未执行生产 DDL、未启用 Quest 生产开关，未触碰 Lobby/S1/S2。仍待独立批量确认框、完整影响项分页
+  与移动/属性批处理；这些完成前不宣称 BQ 替代完成。
+
+### QB.4 批量退役确认浮层收口
+
+- 批量退役按钮不再直接发送破坏性动作；在选中至少两项后打开稳定键
+  `quest-admin-batch-confirm`，显示退役数量、服务端依赖/章节/版本复检和单事务说明。
+- 模态输入层优先消费 Escape、Enter、遮罩点击和确认区域点击，确认只关闭一次并提交快照中的 UUID/版本；弹窗
+  打开期间底层列表与快捷键不会收到输入，选中状态在确认提交后清除。
+- `:ui2-terminal:test` 通过（含 Escape/Enter 模态阻断测试）；根 `test assemble verifyUi2SelfContained` 在只读
+  预览字体挂载下通过，共 736 项测试、0 failure/0 error，最新运行 JAR SHA-256 为
+  `8f0da5b3c23b6ea96ac9e0e26da106f939d0c97432244a189a377b3037ef5268`。
+- 当前仍未部署、未执行生产 DDL、未启用 Quest 生产开关。QB.4 剩余工作是完整影响项分页/稳定业务键展示，
+  以及批量移动和属性修改；完成前不宣称 BQ 替代完成。
+
+### 2026-09-14 - QC 运行时检测接线收口
+
+- CodeGraph 先复核 `QuestRuntimeService`、`RuntimeQuestFactSink` 与 `QuestGameplayEventHandler`：此前只有定义和
+  测试引用，没有生产注册调用，检测事实并未真正进入 PostgreSQL 进度运行时。对 `QuestModule` 与事件处理器执行
+  `impact`（分别 67、18 个符号），并以 `callers/callees` 确认缺口后再修改。
+- `QuestModule` 现在在共享连接通过 schema 校验后装配 `QuestRuntimeService`、`QuestEvaluationPlanner`、BQ 兼容
+  evaluator registry、事实幂等仓储、投影器和引擎；`QuestGameplayEventHandler` 同时注册 FML 总线与 Forge 总线，
+  事件与周期观察因此拥有真实生产入口。观察计划由已发布目录生成并以 5 秒窗口缓存，瞬时数据库失败保留上次
+  成功计划；重复 `serverStarting` 会先解除旧处理器，避免跨世界重复计数。
+- 所有运行时对象仍使用当前服务器身份和 banking source server，客户端、未启用 Quest 配置和缺少共享 JDBC 的环境
+  保持失败闭合。新增模块测试断言成功组合根会创建运行时服务，并通过测试覆写阻断静态 Forge 总线初始化。
+- Docker 编译与定向 `QuestModuleTest` 通过；随后完整门禁（只读挂载 `/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc`
+  为 `UI2_PREVIEW_FONT`）通过：根 `test` 共 738 项、66 项条件跳过，0 failure/0 error，`assemble`、
+  `verifyUi2SelfContained` 与 `git diff --check` 均通过。最新运行 JAR SHA-256：
+  `70e4f3548b6a78a905910bb991e29f0b939b215c481804df6ccd608b17f4942a`。
+- 本轮未部署、未执行生产 DDL、未启用 Quest 生产开关，未触碰 Lobby/S1/S2。下一项为 QC crafting statistics
+  模式与扩展检测边界；随后再做库存去重、流体/NBT 矩阵和 BQ 影子差异报告。
+
+### 2026-09-14 - QC crafting statistics 兼容
+
+- 对照 BetterQuesting `TaskCrafting.detect()` 的 `allowCraftedFromStatistics` 分支，补充
+  `QuestCraftingStatisticObservation` 与 `QuestObservationPlan` 统计需求集合：只从已发布、明确开启该选项的
+  crafting 任务收集实际需求物品，按稳定注册名/meta 去重。
+- Minecraft 事实工厂新增原版 `StatisticsFile/objectCraftStats` 绝对累计值读取，使用稳定
+  `channel=craft-statistics` 事实；`ItemVectorTaskEvaluator` 对该通道取快照最大值而不是叠加增量，并要求
+  `allowCraftedFromStatistics=true`。周期事件每 20 tick 只提交需求集合，避免扫描全物品注册表和无界写入。
+- 统计读取仅接受 `EntityPlayerMP`，沿用 FakePlayer、客户端世界、取消事件过滤；1.7.10 原版按 Item ID 聚合导致
+  meta 维度不完全等价，已在能力矩阵中标记为影子对照差异，不误报为完全兼容。
+- 运行时复核发现请求规划器必须与进度仓储共享同一个 `JdbcQuestConnectionManager`，否则规划查询会脱离事实
+  事务读取。本次已将 runtime repository、transaction、definition catalog 与 completion query 收口到同一管理器，
+  保证“规划—归约—奖励资格”处于同一 PostgreSQL 事务边界。
+- `:galaxy-quest-core:test` 通过（新增观察计划与绝对统计快照测试）。随后在只读预览字体挂载下完成完整 Docker
+  门禁：`:galaxy-quest-core:test`、`:galaxy-quest-postgres:test`、`:ui2-core:test`、`:ui2-lab:test`、
+  `:ui2-terminal:test`、`:ui2-demo:test`、`:ui2-demo:renderGolden`、根 `test`、`assemble` 与
+  `verifyUi2SelfContained` 均通过；根共 738 项测试、66 项条件跳过，0 failure/0 error，`git diff --check`
+  通过。最新运行 JAR SHA-256：`8b97c0fc938e0db32d93742097b07d17d47e685499ee34bdca466299e706f13f`。
+- 未部署、未执行生产 DDL、未启用 Quest 生产开关；下一项为事件取消/FakePlayer 边界、扩展类型注册表、库存去重、
+  流体/NBT 矩阵和 BQ 影子差异报告。
+
+### 2026-09-14 - QC 运行时扩展类型目录
+
+- CodeGraph 在编辑前复核 `TaskEvaluatorRegistry`、`QuestEditorTypeRegistry`、`QuestGameplayEventHandler` 与
+  `QuestModule` 的调用链；确认此前标准 evaluator 与编辑器描述分别构造，无法让 GTNH 专用类型以同一合同进入
+  求值和管理校验。
+- 新增纯 Java `QuestRuntimeTypeExtension` 与 `QuestRuntimeTypeRegistry`：以标准 BQ 兼容类型为基线，组合根可
+  显式注册成对的 evaluator/编辑器描述；扩展 ID、重复类型、空描述均在组合阶段拒绝。QuestModule 现在让运行时、
+  草稿编辑和章节复制共享同一目录，未知类型继续失败闭合。
+- 新增核心目录组合与重复注册测试，并在 QuestModule 测试断言生产组合根安装标准目录。未引入 ServiceLoader、反射、
+  BQ 类或额外 Mod 依赖；当前没有外部扩展提供者，GTNH 专用类型仍需后续明确语义后显式加入。
+- CodeGraph 已同步并执行 `impact QuestRuntimeTypeRegistry`（24 个符号）、`impact QuestRuntimeTypeExtension`
+  （29 个符号）、`impact QuestModule`（79 个符号）及实际文件 `affected`；affected 未推导额外测试，故显式执行
+  Quest Core、BQ importer 与 QuestModule 定向测试，全部通过。
+- 本轮未部署、未执行生产 DDL、未启用 Quest 生产开关，未触碰 Lobby/S1/S2 或客户端。下一项继续处理事件取消/
+  FakePlayer 边界、库存快照去重、流体/NBT 兼容矩阵与影子差异报告。
+
+### 2026-09-14 - QC 库存观察去重与服务端玩家边界
+
+- CodeGraph 复核 `QuestGameplayEventHandler`、`MinecraftQuestFactFactory` 的调用链后，收紧事实入口为真实
+  `EntityPlayerMP` 且排除 `FakePlayer`、客户端世界；事件取消检查继续在各可取消事件入口执行。
+- 新增纯 Java `InventoryObservationEntry` 与 `InventoryObservationCanonicalizer`。背包快照按注册名、meta、
+  OreDict 和 portable NBT 合并相同条目，保持首次出现顺序并对数量溢出饱和；不同 NBT 保持独立，避免改变 BQ
+  retrieval 的匹配/分配语义。Minecraft 事实工厂现在使用该核心算法，不再维护第二套去重逻辑。
+- 新增核心去重、顺序、NBT 隔离和溢出测试；`QuestGameplayEventHandler` 与事实工厂的 CodeGraph `impact` 分别
+  覆盖 33/54 个符号，文件级 `affected` 未推导额外测试，故显式执行 Quest Core、根编译与 BQ importer 定向门禁。
+- Docker 定向门禁通过：`:galaxy-quest-core:test`、`:galaxy-quest-bq-importer:test`、根 `testClasses`，0 failure。
+  本轮未部署、未执行生产 DDL、未启用 Quest 生产开关，未触碰 Lobby/S1/S2 或客户端。下一项为流体/NBT 兼容矩阵
+  与 BQ 影子差异报告。
+
+### 2026-09-14 - QD/QE 进度影子差异报告基础
+
+- 新增 `BqShadowProgressAnalyzer`、`BqShadowDifference`、`BqShadowDifferenceReport` 与稳定关系枚举；对只读
+  BQ 导入进度和 Base `QuestProgressSnapshot` 按玩家/任务对账，区分 `IDENTICAL`、`BASE_AHEAD`、`BQ_AHEAD`、
+  `DIVERGENT`、单侧记录及 `INCOMPARABLE`，并给出完成状态、任务键/类型/向量的具体原因。
+- 报告固定最多 4096 行、稳定 UUID 顺序、重复玩家/任务拒绝；没有合并、写库、发奖或接受客户端结论。它是未来
+  BQ/Base 并行事实计算报告的可复用证据层，不能替代尚未完成的实时双算接线。
+- CodeGraph 在实现前已复核 `BqProgressConflictAnalyzer`、`BqProgressMapper`、`QuestProgressSnapshot` 与
+  `QuestEngine` 的关系；文件同步后显式执行 importer 定向测试。`:galaxy-quest-bq-importer:test` 通过，0 failure。
+- 本轮未部署、未执行生产 DDL、未启用 Quest 生产开关，未触碰 Lobby/S1/S2 或客户端。下一项仍为流体/NBT 兼容
+  矩阵、事件边界及把影子报告接入受控管理诊断入口。
+
+### 2026-09-14 - QC/QE 全量门禁收口
+
+- 在类型目录、服务端玩家边界、库存快照去重和影子差异基础完成后，重新执行 CodeGraph `status/sync`、主要
+  符号 `impact` 与实际文件 `affected`，确认没有额外测试被漏选。
+- Docker 完整门禁通过：`:galaxy-quest-core:test`、`:galaxy-quest-postgres:test`、`:galaxy-quest-bq-importer:test`、
+  `:ui2-core:test`、`:ui2-lab:test`、`:ui2-terminal:test`、`:ui2-demo:test`、`:ui2-demo:renderGolden`、根
+  `test`、`assemble`、`verifyUi2SelfContained`；共 744 项测试、66 项条件跳过，0 failure/0 error。
+- `git diff --check` 通过；本次运行 JAR SHA-256：
+  `12911d81008b2cd51b5cf55a1a1a6aeb6b5f308143ff7baec08ed650339d18b9`。
+- 本轮仍未部署、未执行生产 DDL、未启用 Quest 生产开关，未触碰 Lobby/S1/S2 或客户端。当前可继续推进流体/NBT
+  兼容矩阵、事件取消边界的细粒度测试，以及把影子报告接入受控管理员诊断入口。
+
+### 2026-09-14 - QE 影子对账边界与流体快照规范化
+
+- CodeGraph 先执行 `status/sync`，并对 `BqShadowProgressAnalyzer`、`FluidObservationCanonicalizer` 与
+  `MinecraftQuestFactFactory` 执行 `impact/affected`。影子分析器现在拒绝 PARTY/TEAM/PUBLIC 快照进入玩家对账，
+  防止把群体主体 UUID 误当成玩家；任务类型缺失、向量宽度不一致和任务单侧缺失统一标记为
+  `INCOMPARABLE`，不再错误归类为某一侧领先。
+- 新增纯 Java `FluidObservationEntry` 与 `FluidObservationCanonicalizer`。流体库存事实按流体名＋portable NBT
+  合并，保留首次出现顺序和诊断用原始 NBT，数量使用饱和加法；Minecraft 适配器改用该核心算法，匹配器的
+  requirement allocation 语义不变。
+- 新增影子组主体、任务类型/向量形状及流体名称/NBT/溢出测试。Docker 定向门禁后又完成 Quest Core、
+  PostgreSQL、BQ importer、UI2、终端、视觉导出、根 `test`、`assemble` 和 `verifyUi2SelfContained` 全量门禁：
+  共 748 项测试、66 项环境条件跳过，0 failure/0 error；`git diff --check` 通过。最新运行 JAR SHA-256：
+  `11748467d73adcf615c77f3f97774081ae1071b120acb9a4bf9d7fd4523277d9`。
+- 本轮未部署、未执行生产 DDL、未启用 Quest 生产开关，未触碰 Lobby/S1/S2。影子报告仍是只读证据层，下一步
+  可接入受控管理员诊断入口，并继续补 fluid/NBT 行为矩阵与实时 shadow 计算接线。
+
+### 2026-09-14 - UI2 与跨服任务平台稳定检查点收口
+
+- 冻结功能范围并完成 Git 审计：558 个非构建未跟踪文件按 UI2、Quest Core、PostgreSQL、BQ importer、
+  Minecraft/终端适配、测试、许可证和文档分类；四个新增子项目补齐独立 `build/` 忽略规则。代码、构建、
+  许可证和测试以明确路径暂存，没有使用无审计的 `git add -A`。
+- CodeGraph 已同步并复核 UI2 Screen/Container 双宿主、`QuestModule`、`QuestRuntimeService`、
+  `TerminalService` 与 `BqShadowProgressAnalyzer`。全仓搜索确认正式生产源码不再引用旧 Canvas/Panel 工厂；
+  BQ 影子分析器没有生产调用者，仍是离线只读证据层。
+- Docker 门禁通过 56 项 Gradle 任务：三个 Quest 模块、四个 UI2 模块、258 张终端视觉快照、根 `test`、
+  `assemble` 和 `verifyUi2SelfContained` 均成功；测试报告合计 748 项、66 项环境条件跳过、0 failure、
+  0 error，`git diff --check` 通过。
+- 运行 JAR 为 `build/libs/jsirgalaxybase-3ca9376-main+3ca937653a-dirty.jar`，SHA-256 为
+  `11748467d73adcf615c77f3f97774081ae1071b120acb9a4bf9d7fd4523277d9`。内容审计确认包含 UI2、Quest Core
+  和 PostgreSQL 运行代码，不包含 BQ importer、BetterQuesting 类、Gson 导入 CLI、BQ GUI/Packet/JSON 存储。
+- 代码稳定检查点提交为 `4f51c92`（`feat: 完成UI2终端与跨服任务平台稳定检查点`）。本次没有部署、没有执行
+  PostgreSQL migration、没有启用 Quest 生产开关、没有停用 BetterQuesting，也没有触碰 Lobby/S1/S2/客户端。
+- 后续唯一权威进度见 `betterquesting-capability-absorption-matrix-2026-09-13.md`。PARTY/TEAM/PUBLIC 奖励归属、
+  管理诊断与受控修复、幂等迁移/回滚、实时影子双算和自动切换证据均明确未完成；历史各段“下一步”只保留
+  为当时记录，不再作为当前计划依据。

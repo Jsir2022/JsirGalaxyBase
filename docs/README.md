@@ -4,6 +4,33 @@
 
 ## 当前最建议先看的内容
 
+- `betterquesting-capability-absorption-matrix-2026-09-13.md`
+  - BetterQuesting 替代工作的唯一权威进度表；区分已完成、部分完成和未完成，并明确当前稳定检查点不代表
+    正式替代、生产迁移或切换已经完成
+- `galaxy-ui2-pure-java-visual-validation-2026-09-08.md`
+  - UI2 正式页面的纯 Java 视觉正确性闭环：明确自动与人工验收边界、三档截图/结构报告、Mod F9 调试截图，
+    以及逐页下沉生产 Document 的阶段路线
+- `victoria3-economy-mod-research-2026-09-07.md`
+  - ASE 与 Victoria 3 Economic and Financial Mod 的固定源码来源、许可证边界和第一轮经济机制分析；提出适用于
+    GTNH 的库存覆盖率、公共储备、经济解释指标及先离线回放再 SHADOW 的实施路线
+- `galaxy-ui2-terminal-personalization-and-migration-2026-09-06.md`
+  - UI2 从首页与资产中心走向完整终端的当前执行计划；记录文字溢出根因、三套客户端主题、窗口/密度设置、
+    Resource Pack 主题合同，以及轻量页面、市场、地产和旧 Canvas 删除顺序
+- `galaxy-ui2-production-migration-roadmap-2026-09-05.md`
+  - UI2 从资产中心开始的正式迁移状态表；C.0/C.1/C.2 自动验收已完成，当前等待资产中心实机操作门槛，
+    通过后才依次迁移首页、通知、银行、ServerTools、市场与地产并最终删除旧 Canvas
+- `galaxy-ui2-qz-derived-integration-plan-2026-09-05.md`
+  - UI2 从 Qz 1.8.2、4.1.3-LTS、4.7 和 4.8 剪裁成熟算法的正式边界；记录固定提交、许可证、
+    圆角/裁剪/字体 generation/Modal 加固方案、自包含门禁与人工验收条件
+- `galaxy-ui-2-modern-java-framework.md`
+  - 下一代终端 UI 的正式架构决策：以 Vue 的组件、状态和单向数据流思想用 Java 重建现代 UI2，明确 Minecraft/Forge
+    底层边界、双宿主、字体/渲染/布局/输入设计，以及完成迁移后删除旧 Panel 框架的顺序
+- `galaxy-ui-2-vue-reference-map.md`
+  - Vue 官方英文/中文文档的本地固定版本说明与概念映射；明确哪些组件、状态、生命周期和 Key 思想进入 Java UI2，
+    哪些 DOM、CSS、Proxy、模板编译器和浏览器机制不得机械照搬
+- `galaxy-ui-2-rebuild-execution-spec.md`
+  - UI2 的可执行重构规格；定义纯 Java 8 内核、Java2D 独立 Demo、Minecraft 双宿主适配、与旧 Canvas 的差异、
+    自动化边界和从资产中心开始的分阶段替换门槛；Batch A 独立内核与 Batch B Minecraft 双宿主 UI Lab 已完成
 - `ae2-galactic-warehouse-terminal-bay-v2.md`
   - 当前个人 AE2 银河仓储的正式方向：终端托管的一格真实 Storage Cell Bay 与 Base Vault 统一资产中心；
     不需要实体 Drive、不建立外部 ME 网络，Cell 的容量和内容限制仍完全由 AE2 负责
@@ -191,3 +218,14 @@
 - 持续变更记录以 `WORKLOG.md` 为准
 - `Reference/ServerUtilities` 只作为参考源码区使用；如果后续吸收其中能力，应以 `../README.md` 中的整合边界为准
 - 服务器制度细节和更大范围的设计约束仍以工作区 `../Docs/` 下的文档为长期参考
+
+## 职业、贡献与跨服任务平台
+
+- `galaxy-career-contribution-cross-server-quest-platform-2026-09-08.md`
+  - BetterQuesting 3.7.15-GTNH 的吸收边界、PostgreSQL 权威模型、职业/贡献/公共任务分层及 Q.0-Q.8 实施路线
+# Galaxy UI 2 正式迁移
+
+- `galaxy-ui2-production-migration-roadmap-2026-09-05.md`：从生产组件、资产中心纵向迁移到旧 Canvas 删除的阶段状态与人工闸门。
+# BetterQuesting 能力吸收
+
+- [BetterQuesting 关键能力吸收矩阵与实施路线](betterquesting-capability-absorption-matrix-2026-09-13.md)
