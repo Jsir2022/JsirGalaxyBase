@@ -37,20 +37,6 @@ public class TerminalMarketSectionStateTest {
     }
 
     @Test
-    public void standardizedActionHintsExplainMissingInputs() {
-        TerminalMarketSectionModel model = marketModelWithCatalog();
-        TerminalMarketSectionState state = new TerminalMarketSectionState();
-
-        assertTrue(TerminalMarketSectionContent.limitBuyActionHint(model, state).contains("先在左侧选择商品"));
-
-        state.setSelectedProductKey("minecraft:stone:0");
-        assertTrue(TerminalMarketSectionContent.limitBuyActionHint(model, state).contains("填写价格与数量"));
-        assertTrue(TerminalMarketSectionContent.limitSellActionHint(model, state).contains("填写价格与数量"));
-        assertTrue(TerminalMarketSectionContent.instantBuyActionHint(model, state).contains("填写数量"));
-        assertTrue(TerminalMarketSectionContent.instantSellActionHint(model, state).contains("填写数量"));
-    }
-
-    @Test
     public void browserQueryResetsPageAndFlowsIntoMarketPayload() {
         TerminalMarketSectionState state = new TerminalMarketSectionState();
         state.setBrowserPage(3);

@@ -17,6 +17,7 @@ import com.jsirgalaxybase.terminal.client.viewmodel.TerminalHomeScreenModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalMarketSectionModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalServerToolsSectionModel;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalLandSectionModel;
+import com.jsirgalaxybase.terminal.client.viewmodel.TerminalNotificationCenterModel;
 
 import cpw.mods.fml.common.network.ByteBufUtils;
 import cpw.mods.fml.common.network.simpleimpl.IMessage;
@@ -150,7 +151,9 @@ public class TerminalSnapshotMessage implements IMessage {
                 toCustomMarketSectionModel(snapshot.getCustomMarketSectionSnapshot()),
                 toExchangeMarketSectionModel(snapshot.getExchangeMarketSectionSnapshot()),
                 toServerToolsSectionModel(snapshot.getServerToolsSectionSnapshot()),
-                toLandSectionModel(snapshot.getLandSectionSnapshot())));
+                toLandSectionModel(snapshot.getLandSectionSnapshot()),
+                toNotificationCenterModel(snapshot.getNotificationCenterSnapshot()),
+                snapshot.getQuestCenterSnapshot()));
         }
         return models;
     }
@@ -215,6 +218,18 @@ public class TerminalSnapshotMessage implements IMessage {
             snapshot.getOwnedVersions(), snapshot.getPageIndex(), snapshot.getTotalPages(), snapshot.getTotalEntries(),
             snapshot.getSelectedTitleId(), snapshot.getSelectedVersion(), snapshot.getSelectedState(),
             snapshot.isCanClaim(), snapshot.isCanUnclaim(), snapshot.getFeedbackCode());
+    }
+
+    private static TerminalNotificationCenterModel toNotificationCenterModel(
+        com.jsirgalaxybase.terminal.TerminalNotificationCenterSnapshot snapshot) {
+        if (snapshot == null) return null;
+        List<TerminalNotificationCenterModel.EntryModel> entries =
+            new ArrayList<TerminalNotificationCenterModel.EntryModel>();
+        for (com.jsirgalaxybase.terminal.TerminalNotificationCenterSnapshot.Entry entry : snapshot.getEntries()) {
+            entries.add(new TerminalNotificationCenterModel.EntryModel(entry.getSourceId(), entry.getTargetPageId(),
+                entry.getTargetRecordId(), entry.getTitle(), entry.getBody(), entry.getSeverityName(), entry.getOccurrences()));
+        }
+        return new TerminalNotificationCenterModel(snapshot.getServiceState(), entries, snapshot.getRetainedEntries());
     }
 
     private static TerminalCustomMarketSectionModel toCustomMarketSectionModel(

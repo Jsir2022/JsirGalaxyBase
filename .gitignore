@@ -9,6 +9,13 @@
 
 # Build outputs
 /build/
+/ui2-core/build/
+/ui2-lab/build/
+/ui2-demo/build/
+/ui2-terminal/build/
+/galaxy-quest-core/build/
+/galaxy-quest-postgres/build/
+/galaxy-quest-bq-importer/build/
 /bin/
 /out/
 /eclipse/

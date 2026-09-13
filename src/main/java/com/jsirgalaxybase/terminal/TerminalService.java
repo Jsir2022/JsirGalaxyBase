@@ -57,6 +57,47 @@ import com.jsirgalaxybase.terminal.ui.TerminalLandPageService;
 import com.jsirgalaxybase.terminal.ui.TerminalNotification;
 import com.jsirgalaxybase.terminal.ui.TerminalNotificationSeverity;
 import com.jsirgalaxybase.terminal.ui.TerminalPage;
+import com.jsirgalaxybase.quest.core.ParticipantId;
+import com.jsirgalaxybase.quest.core.AuthenticatedQuestClaimService;
+import com.jsirgalaxybase.quest.core.AuthenticatedRewardChoiceService;
+import com.jsirgalaxybase.quest.core.AuthenticatedQuestTrackingService;
+import com.jsirgalaxybase.quest.core.AuthenticatedQuestDefinitionManagementQuery;
+import com.jsirgalaxybase.quest.core.AuthenticatedQuestChapterManagementQuery;
+import com.jsirgalaxybase.quest.core.AuthenticatedQuestChapterDependencyQuery;
+import com.jsirgalaxybase.quest.core.AuthenticatedQuestDefinitionImpactQuery;
+import com.jsirgalaxybase.quest.core.QuestDefinitionImpactReport;
+import com.jsirgalaxybase.quest.core.QuestDefinitionBatchImpactReport;
+import com.jsirgalaxybase.quest.core.QuestDefinitionBatchRetirementResult;
+import com.jsirgalaxybase.quest.core.QuestChapterDependencyGraph;
+import com.jsirgalaxybase.quest.core.QuestDefinitionManagementPage;
+import com.jsirgalaxybase.quest.core.QuestDefinitionManagementRequest;
+import com.jsirgalaxybase.quest.core.QuestDefinitionLifecycle;
+import com.jsirgalaxybase.quest.core.QuestDraftManagementResult;
+import com.jsirgalaxybase.quest.core.QuestDraftManagementService;
+import com.jsirgalaxybase.quest.core.QuestChapterManagementService;
+import com.jsirgalaxybase.quest.core.QuestChapterManagementResult;
+import com.jsirgalaxybase.quest.core.QuestChapterManagementPage;
+import com.jsirgalaxybase.quest.core.QuestChapterCloneService;
+import com.jsirgalaxybase.quest.core.QuestChapterAlignmentService;
+import com.jsirgalaxybase.quest.core.QuestChapterCloneResult;
+import com.jsirgalaxybase.quest.core.QuestChapterOrderingService;
+import com.jsirgalaxybase.quest.core.QuestChapterOrderingResult;
+import com.jsirgalaxybase.quest.core.StoredQuestChapter;
+import com.jsirgalaxybase.quest.core.QuestChapterEntry;
+import com.jsirgalaxybase.quest.core.QuestDraftTemplate;
+import com.jsirgalaxybase.quest.core.QuestDraftEditRequest;
+import com.jsirgalaxybase.quest.core.QuestEditorActor;
+import com.jsirgalaxybase.quest.core.QuestEditorValidationIssue;
+import com.jsirgalaxybase.quest.core.QuestElementKind;
+import com.jsirgalaxybase.quest.core.QuestElementTypeDescriptor;
+import com.jsirgalaxybase.quest.core.QuestEditorFieldDescriptor;
+import com.jsirgalaxybase.quest.core.StoredQuestDefinition;
+import com.jsirgalaxybase.quest.core.RewardChoiceSelectionStatus;
+import com.jsirgalaxybase.quest.core.QuestCenterPage;
+import com.jsirgalaxybase.quest.core.QuestCenterPageRequest;
+import com.jsirgalaxybase.quest.core.QuestCenterQuery;
+import com.jsirgalaxybase.quest.core.RewardClaimStatus;
+import com.jsirgalaxybase.modules.quest.application.TerminalQuestCenterSnapshotMapper;
 
 public final class TerminalService {
 
@@ -71,6 +112,21 @@ public final class TerminalService {
         new TerminalExchangeQuoteConfirmationGate();
     static final TerminalLandPageService landPageService = new TerminalLandPageService();
     static final TerminalPlayerNotificationCenter notificationCenter = new TerminalPlayerNotificationCenter();
+    private static volatile QuestCenterQuery questCenterQuery;
+    private static volatile AuthenticatedQuestClaimService questClaimService;
+    private static volatile AuthenticatedRewardChoiceService rewardChoiceService;
+    private static volatile AuthenticatedQuestTrackingService questTrackingService;
+    private static volatile AuthenticatedQuestDefinitionManagementQuery questDefinitionManagementQuery;
+    private static volatile QuestDraftManagementService questDraftManagementService;
+    private static volatile com.jsirgalaxybase.quest.core.QuestDefinitionBatchRetirementService questBatchRetirementService;
+    private static volatile AuthenticatedQuestChapterManagementQuery questChapterManagementQuery;
+    private static volatile AuthenticatedQuestChapterDependencyQuery questChapterDependencyQuery;
+    private static volatile AuthenticatedQuestDefinitionImpactQuery questDefinitionImpactQuery;
+    private static volatile QuestChapterManagementService questChapterManagementService;
+    private static volatile QuestChapterCloneService questChapterCloneService;
+    private static volatile QuestChapterAlignmentService questChapterAlignmentService;
+    private static volatile QuestChapterOrderingService questChapterOrderingService;
+    private static final TerminalQuestCenterSnapshotMapper questCenterMapper = new TerminalQuestCenterSnapshotMapper();
 
     private TerminalService() {}
 
@@ -132,10 +188,28 @@ public final class TerminalService {
                 "贡献",
                 String.valueOf(snapshot == null ? 0 : snapshot.getContribution())),
             createTopLevelNavItems(normalizedPageId),
-            createPageSnapshots(player, snapshot, bankContext, marketContext, serverToolsContext, landContext, selectedPage),
+            createPageSnapshots(player, snapshot, bankContext, marketContext, serverToolsContext, landContext,
+                selectedPage, actionType, payload),
             notifications,
             normalizedSessionToken);
     }
+
+    /** Installs Base's own quest read model. The caller owns lifecycle; null disables the terminal task center. */
+    public static void installQuestCenterQuery(QuestCenterQuery query) { questCenterQuery = query; }
+    public static void installQuestClaimService(AuthenticatedQuestClaimService service) { questClaimService = service; }
+    public static void installRewardChoiceService(AuthenticatedRewardChoiceService service) { rewardChoiceService = service; }
+    public static void installQuestTrackingService(AuthenticatedQuestTrackingService service) { questTrackingService = service; }
+    public static void installQuestDefinitionManagementQuery(AuthenticatedQuestDefinitionManagementQuery query) { questDefinitionManagementQuery = query; }
+    public static void installQuestDraftManagementService(QuestDraftManagementService service) { questDraftManagementService = service; }
+    public static void installQuestBatchRetirementService(com.jsirgalaxybase.quest.core.QuestDefinitionBatchRetirementService service) { questBatchRetirementService = service; }
+    public static void installQuestChapterManagementQuery(AuthenticatedQuestChapterManagementQuery query) { questChapterManagementQuery = query; }
+    public static void installQuestChapterDependencyQuery(AuthenticatedQuestChapterDependencyQuery query) { questChapterDependencyQuery = query; }
+    public static void installQuestDefinitionImpactQuery(AuthenticatedQuestDefinitionImpactQuery query) { questDefinitionImpactQuery = query; }
+    public static void installQuestChapterManagementService(QuestChapterManagementService service) { questChapterManagementService = service; }
+    /** Installs the Base-owned atomic chapter copy command; null leaves definitions unchanged. */
+    public static void installQuestChapterCloneService(QuestChapterCloneService service) { questChapterCloneService = service; }
+    public static void installQuestChapterAlignmentService(QuestChapterAlignmentService service) { questChapterAlignmentService = service; }
+    public static void installQuestChapterOrderingService(QuestChapterOrderingService service) { questChapterOrderingService = service; }
 
     static void setBankPageFacadeForTest(BankPageFacade facade) {
         bankPageFacade = facade == null ? new DefaultBankPageFacade() : facade;
@@ -556,10 +630,11 @@ public final class TerminalService {
 
     private static List<TerminalOpenApproval.PageSnapshot> createPageSnapshots(EntityPlayer player,
         TerminalHomeSnapshot snapshot, BankActionContext bankContext, MarketActionContext marketContext,
-        ServerToolsActionContext serverToolsContext, LandActionContext landContext, TerminalPage selectedPage) {
+        ServerToolsActionContext serverToolsContext, LandActionContext landContext, TerminalPage selectedPage,
+        TerminalActionType actionType, String payload) {
         List<TerminalOpenApproval.PageSnapshot> pageSnapshots = new ArrayList<TerminalOpenApproval.PageSnapshot>();
         pageSnapshots.add(createHomePageSnapshot(snapshot));
-        pageSnapshots.add(createCareerPageSnapshot(player));
+        pageSnapshots.add(createCareerPageSnapshot(player, selectedPage, actionType, payload));
         pageSnapshots.add(createPublicServicePageSnapshot(player));
         pageSnapshots.add(createMarketPageSnapshot(selectedPage, marketContext));
         pageSnapshots.add(createBankPageSnapshot(bankContext));
@@ -753,8 +828,423 @@ public final class TerminalService {
             sections);
     }
 
-    private static TerminalOpenApproval.PageSnapshot createCareerPageSnapshot(EntityPlayer player) {
-        return createLinePageSnapshot(TerminalPage.CAREER, TerminalHomeSnapshotProvider.INSTANCE.createCareerPageLines(player));
+    private static TerminalOpenApproval.PageSnapshot createCareerPageSnapshot(EntityPlayer player,
+        TerminalPage selectedPage,TerminalActionType actionType,String payload) {
+        TerminalQuestCenterSectionSnapshot questSnapshot=TerminalQuestCenterSectionSnapshot.unavailable(
+            "跨服任务运行时尚未启用；现有 BetterQuesting 不受影响。");
+        if(selectedPage==TerminalPage.CAREER&&player instanceof EntityPlayerMP&&questCenterQuery!=null){
+            try{
+                if(actionType==TerminalActionType.QUEST_ADMIN_EDIT)questSnapshot=buildAuthenticatedQuestDraftEdit(
+                    ((EntityPlayerMP)player).getUniqueID(),player.getCommandSenderName(),TerminalQuestDraftEditPayload.decode(payload));
+                else if(actionType==TerminalActionType.QUEST_ADMIN_BATCH_RETIRE)questSnapshot=buildAuthenticatedQuestBatchRetire(
+                    ((EntityPlayerMP)player).getUniqueID(),player.getCommandSenderName(),TerminalQuestBatchRetirePayload.decode(payload));
+                else if(actionType==TerminalActionType.QUEST_CHAPTER_ADMIN_EDIT)questSnapshot=buildAuthenticatedQuestChapterEdit(
+                    ((EntityPlayerMP)player).getUniqueID(),player.getCommandSenderName(),TerminalQuestChapterEditPayload.decode(payload));
+                else if(actionType==TerminalActionType.QUEST_CHAPTER_ADMIN_CLONE)questSnapshot=buildAuthenticatedQuestChapterClone(
+                    ((EntityPlayerMP)player).getUniqueID(),player.getCommandSenderName(),TerminalQuestChapterClonePayload.decode(payload));
+                else if(actionType==TerminalActionType.QUEST_CHAPTER_ADMIN_ALIGN)questSnapshot=buildAuthenticatedQuestChapterAlign(
+                    ((EntityPlayerMP)player).getUniqueID(),player.getCommandSenderName(),TerminalQuestChapterAlignmentPayload.decode(payload));
+                else if(actionType==TerminalActionType.QUEST_CHAPTER_ADMIN_MOVE_BEFORE)questSnapshot=buildAuthenticatedQuestChapterMoveBefore(
+                    ((EntityPlayerMP)player).getUniqueID(),player.getCommandSenderName(),TerminalQuestChapterOrderPayload.decode(payload));
+                else questSnapshot=buildAuthenticatedQuestCenterSnapshot(((EntityPlayerMP)player).getUniqueID(),
+                    player.getCommandSenderName(),actionType,TerminalQuestActionPayload.decode(payload));
+            }catch(RuntimeException failure){
+                GalaxyBase.LOG.error("Unable to build authenticated quest-center snapshot for {}",
+                    player.getCommandSenderName(),failure);
+                questSnapshot=TerminalQuestCenterSectionSnapshot.unavailable("跨服任务暂时不可读取，请稍后刷新。");
+            }
+        }
+        List<TerminalOpenApproval.Section> sections=new ArrayList<TerminalOpenApproval.Section>();
+        sections.add(new TerminalOpenApproval.Section("quest_center_runtime","跨服任务中心",
+            questSnapshot.getServiceState(),questSnapshot.getMessage()));
+        return new TerminalOpenApproval.PageSnapshot(TerminalPage.CAREER.getId(),TerminalPage.CAREER.getTitle(),
+            TerminalPage.CAREER.getLead(),sections,null,null,null,null,null,null,null,questSnapshot);
+    }
+
+    static TerminalQuestCenterSectionSnapshot buildAuthenticatedQuestDraftEdit(UUID playerId,String playerName,
+        TerminalQuestDraftEditPayload payload){
+        if(playerId==null||payload==null)return TerminalQuestCenterSectionSnapshot.unavailable("任务编辑请求无效。");
+        QuestDraftEditRequest request=payload.getRequest();QuestEditorActor actor=new QuestEditorActor(playerId,playerName);
+        QuestDraftManagementResult result=questDraftManagementService==null
+            ?QuestDraftManagementResult.status(QuestDraftManagementResult.Status.NOT_FOUND)
+            :questDraftManagementService.applyEdit(actor,request);
+        String message=questDraftManagementService==null?"任务定义写入运行时尚未启用，草稿没有改变。"
+            :managementMutationMessage(TerminalActionType.QUEST_ADMIN_EDIT,result);
+        String hash=result.isSuccess()?result.getDefinition().getContentHash():request.getExpectedContentHash();
+        TerminalQuestActionPayload intent=new TerminalQuestActionPayload("",request.getQuestId().toString(),"all",
+            payload.getQuery(),0,0,"",-1,payload.getLifecycle(),payload.getPage(),request.getVersion(),hash);
+        if(questDefinitionManagementQuery==null)return TerminalQuestCenterSectionSnapshot.unavailable(message);
+        return buildQuestManagementSnapshot(actor,intent,null,message);
+    }
+
+    static TerminalQuestCenterSectionSnapshot buildAuthenticatedQuestBatchRetire(UUID playerId,String playerName,
+        TerminalQuestBatchRetirePayload payload){
+        if(playerId==null||payload==null)return TerminalQuestCenterSectionSnapshot.unavailable("批量退役请求无效。");
+        QuestDefinitionBatchRetirementResult result=questBatchRetirementService==null
+            ?QuestDefinitionBatchRetirementResult.status(QuestDefinitionBatchRetirementResult.Status.NOT_FOUND)
+            :questBatchRetirementService.retire(new QuestEditorActor(playerId,playerName),payload.getRequest());
+        String message=batchRetirementMessage(result);
+        return buildQuestManagementSnapshot(new QuestEditorActor(playerId,playerName),new TerminalQuestActionPayload(
+            "","","",payload.getQuery(),0,0,"",-1,payload.getLifecycle(),payload.getPage()),null,message);
+    }
+
+    private static String batchRetirementMessage(QuestDefinitionBatchRetirementResult result){
+        if(result==null)return "批量退役没有返回结果。";
+        if(result.getStatus()==QuestDefinitionBatchRetirementResult.Status.SUCCESS)return "已原子退役 "+result.getRetired().size()+" 个任务版本。";
+        if(result.getStatus()==QuestDefinitionBatchRetirementResult.Status.FORBIDDEN)return "当前玩家没有管理任务定义的权限。";
+        if(result.getStatus()==QuestDefinitionBatchRetirementResult.Status.UNSAFE){QuestDefinitionBatchImpactReport impact=result.getImpact();return "批量退役被阻止：外部依赖 "+impact.getExternalDependents().size()+"，章节放置 "+impact.getPlacements().size()+"。";}
+        if(result.getStatus()==QuestDefinitionBatchRetirementResult.Status.NOT_FOUND)return "所选任务版本不存在或不是已发布版本。";
+        if(result.getStatus()==QuestDefinitionBatchRetirementResult.Status.CONFLICT)return "任务版本已变化，批量退役已回滚，请刷新后重试。";
+        return "批量退役请求无效，状态没有改变。";
+    }
+
+    static TerminalQuestCenterSectionSnapshot buildAuthenticatedQuestChapterEdit(UUID playerId,String playerName,
+        TerminalQuestChapterEditPayload payload){
+        if(playerId==null||payload==null)return TerminalQuestCenterSectionSnapshot.unavailable("章节编辑请求无效。");
+        QuestEditorActor actor=new QuestEditorActor(playerId,playerName);
+        QuestChapterManagementResult result=questChapterManagementService==null
+            ?QuestChapterManagementResult.status(QuestChapterManagementResult.Status.NOT_FOUND)
+            :questChapterManagementService.apply(actor,payload.getRequest());
+        String message=questChapterManagementService==null?"章节写入运行时尚未启用，草稿没有改变。"
+            :chapterMutationMessage(TerminalActionType.QUEST_CHAPTER_ADMIN_EDIT,result);
+        String hash=result.isSuccess()?result.getChapter().getContentHash():payload.getRequest().getExpectedHash();
+        TerminalQuestActionPayload intent=new TerminalQuestActionPayload(payload.getRequest().getChapterId().toString(),
+            "","all",payload.getQuery(),0,0,"",-1,payload.getLifecycle(),payload.getPage(),
+            payload.getRequest().getVersion(),hash);
+        return buildQuestChapterManagementSnapshot(actor,intent,null,message);
+    }
+
+    static TerminalQuestCenterSectionSnapshot buildAuthenticatedQuestChapterClone(UUID playerId,String playerName,
+        TerminalQuestChapterClonePayload payload){
+        if(playerId==null||payload==null)return TerminalQuestCenterSectionSnapshot.unavailable("任务复制请求无效。");
+        QuestEditorActor actor=new QuestEditorActor(playerId,playerName);
+        QuestChapterCloneResult result=questChapterCloneService==null
+            ?QuestChapterCloneResult.status(QuestChapterCloneResult.Status.NOT_FOUND)
+            :questChapterCloneService.cloneIntoChapter(actor,payload.getRequest());
+        String message=questChapterCloneService==null?"任务复制运行时尚未启用，章节没有改变。"
+            :chapterCloneMessage(result);
+        String hash=result.isSuccess()?result.getChapter().getContentHash():payload.getRequest().getExpectedChapterHash();
+        TerminalQuestActionPayload intent=new TerminalQuestActionPayload(payload.getRequest().getChapterId().toString(),
+            "","all",payload.getQuery(),0,0,"",-1,payload.getLifecycle(),payload.getPage(),
+            payload.getRequest().getChapterVersion(),hash);
+        return buildQuestChapterManagementSnapshot(actor,intent,null,message);
+    }
+
+    static TerminalQuestCenterSectionSnapshot buildAuthenticatedQuestChapterMoveBefore(UUID playerId,String playerName,
+        TerminalQuestChapterOrderPayload payload){
+        if(playerId==null||payload==null)return TerminalQuestCenterSectionSnapshot.unavailable("章节排序请求无效。");
+        QuestChapterOrderingResult result=questChapterOrderingService==null
+            ?QuestChapterOrderingResult.status(QuestChapterOrderingResult.Status.INVALID,"runtime unavailable")
+            :questChapterOrderingService.moveBefore(new QuestEditorActor(playerId,playerName),payload.getChapterId(),payload.getBeforeChapterId());
+        String message=result.getStatus()==QuestChapterOrderingResult.Status.SUCCESS?"章节目录顺序已更新。"
+            :result.getStatus()==QuestChapterOrderingResult.Status.FORBIDDEN?"当前玩家没有排序章节的权限。"
+            :"章节顺序已变化或请求不完整，请刷新后重试。";
+        return buildQuestChapterManagementSnapshot(new QuestEditorActor(playerId,playerName),new TerminalQuestActionPayload("","","all",
+            payload.getQuery(),0,0,"",-1,payload.getLifecycle(),payload.getPage()),null,message);
+    }
+
+    static TerminalQuestCenterSectionSnapshot buildAuthenticatedQuestChapterAlign(UUID playerId,String playerName,
+        TerminalQuestChapterAlignmentPayload payload){
+        if(playerId==null||payload==null)return TerminalQuestCenterSectionSnapshot.unavailable("章节对齐请求无效。");
+        QuestChapterManagementResult result=questChapterAlignmentService==null
+            ?QuestChapterManagementResult.status(QuestChapterManagementResult.Status.NOT_FOUND)
+            :questChapterAlignmentService.align(new QuestEditorActor(playerId,playerName),payload.getRequest());
+        String message=questChapterAlignmentService==null?"章节对齐运行时尚未启用，草稿没有改变。"
+            :chapterMutationMessage(TerminalActionType.QUEST_CHAPTER_ADMIN_ALIGN,result);
+        String hash=result.isSuccess()?result.getChapter().getContentHash():payload.getRequest().getExpectedHash();
+        return buildQuestChapterManagementSnapshot(new QuestEditorActor(playerId,playerName),new TerminalQuestActionPayload(
+            payload.getRequest().getChapterId().toString(),"","all",payload.getQuery(),0,0,"",-1,payload.getLifecycle(),
+            payload.getPage(),payload.getRequest().getVersion(),hash),null,message);
+    }
+
+    private static boolean isChapterManagementAction(TerminalActionType action){return action==TerminalActionType.QUEST_CHAPTER_ADMIN_OPEN
+        ||action==TerminalActionType.QUEST_CHAPTER_ADMIN_FILTER||action==TerminalActionType.QUEST_CHAPTER_ADMIN_PAGE
+        ||action==TerminalActionType.QUEST_CHAPTER_ADMIN_SELECT||action==TerminalActionType.QUEST_CHAPTER_ADMIN_CREATE
+        ||action==TerminalActionType.QUEST_CHAPTER_ADMIN_PUBLISH||action==TerminalActionType.QUEST_CHAPTER_ADMIN_RETIRE;}
+
+    private static TerminalQuestCenterSectionSnapshot buildQuestChapterManagementSnapshot(QuestEditorActor actor,
+        TerminalQuestActionPayload intent,TerminalActionType actionType,String initialMessage){
+        if(questChapterManagementQuery==null)return TerminalQuestCenterSectionSnapshot.unavailable(
+            "章节编辑管理运行时尚未启用。");
+        String message=initialMessage;
+        if(actionType==TerminalActionType.QUEST_CHAPTER_ADMIN_CREATE){
+            QuestChapterManagementResult result=questChapterManagementService==null
+                ?QuestChapterManagementResult.status(QuestChapterManagementResult.Status.NOT_FOUND)
+                :questChapterManagementService.create(actor,intent.getQuery());
+            message=chapterMutationMessage(actionType,result);
+            intent=new TerminalQuestActionPayload("","","all","",0,0,"",-1,"DRAFT",0,0,"");
+        }else if(actionType==TerminalActionType.QUEST_CHAPTER_ADMIN_PUBLISH
+            ||actionType==TerminalActionType.QUEST_CHAPTER_ADMIN_RETIRE){
+            try{
+                UUID id=UUID.fromString(intent.getChapterId());
+                QuestChapterManagementResult result=questChapterManagementService==null
+                    ?QuestChapterManagementResult.status(QuestChapterManagementResult.Status.NOT_FOUND)
+                    :actionType==TerminalActionType.QUEST_CHAPTER_ADMIN_PUBLISH
+                        ?questChapterManagementService.publish(actor,id,intent.getManagementVersion(),
+                            intent.getManagementHash(),System.currentTimeMillis())
+                        :questChapterManagementService.retire(actor,id,intent.getManagementVersion());
+                message=chapterMutationMessage(actionType,result);
+            }catch(IllegalArgumentException invalid){message="章节标识无效，状态没有改变。";}
+        }
+        QuestDefinitionLifecycle lifecycle=null;
+        if(!intent.getManagementLifecycle().isEmpty())try{lifecycle=QuestDefinitionLifecycle.valueOf(
+            intent.getManagementLifecycle().toUpperCase(Locale.ROOT));}catch(IllegalArgumentException ignored){lifecycle=null;}
+        com.jsirgalaxybase.quest.core.AuthenticatedQuestChapterManagementQuery.Result queried=
+            questChapterManagementQuery.load(actor,new QuestDefinitionManagementRequest(intent.getQuery(),lifecycle,
+                intent.getManagementPage(),20));
+        if(queried.getStatus()!=com.jsirgalaxybase.quest.core.AuthenticatedQuestChapterManagementQuery.Status.SUCCESS)
+            return TerminalQuestCenterSectionSnapshot.unavailable("只有服务端授权的任务管理员可以管理章节。");
+        QuestChapterManagementPage page=queried.getPage();
+        List<TerminalQuestCenterSectionSnapshot.ManagedChapter> rows=new ArrayList<TerminalQuestCenterSectionSnapshot.ManagedChapter>();
+        for(StoredQuestChapter stored:page.getChapters())rows.add(managedChapter(stored));
+        TerminalQuestCenterSectionSnapshot.ChapterDetail detail=null;
+        if(!intent.getChapterId().isEmpty()&&intent.getManagementVersion()>0)try{
+            com.jsirgalaxybase.quest.core.AuthenticatedQuestChapterManagementQuery.Result found=
+                questChapterManagementQuery.find(actor,UUID.fromString(intent.getChapterId()),intent.getManagementVersion());
+            if(found.getStatus()==com.jsirgalaxybase.quest.core.AuthenticatedQuestChapterManagementQuery.Status.SUCCESS)
+                detail=chapterDetail(actor,found.getChapter());
+            else if(found.getStatus()==com.jsirgalaxybase.quest.core.AuthenticatedQuestChapterManagementQuery.Status.NOT_FOUND)
+                message="所选章节版本不存在。";
+        }catch(IllegalArgumentException invalid){message="所选章节标识无效。";}
+        TerminalQuestCenterSectionSnapshot.ChapterManagement management=
+            new TerminalQuestCenterSectionSnapshot.ChapterManagement(intent.getQuery(),lifecycle==null?"":lifecycle.name(),
+                page.getPage(),page.getPageSize(),page.getTotal(),rows,detail);
+        return new TerminalQuestCenterSectionSnapshot("READY",message,TerminalQuestCenterSectionSnapshot.View.ADMIN,
+            "","","all",intent.getQuery(),java.util.Collections.<TerminalQuestCenterSectionSnapshot.Chapter>emptyList(),
+            0,6,0,java.util.Collections.<TerminalQuestCenterSectionSnapshot.Quest>emptyList(),0,7,0,null,null,management);
+    }
+
+    private static TerminalQuestCenterSectionSnapshot.ManagedChapter managedChapter(StoredQuestChapter stored){
+        com.jsirgalaxybase.quest.core.QuestChapterDefinition value=stored.getDefinition();
+        return new TerminalQuestCenterSectionSnapshot.ManagedChapter(value.getId().toString(),value.getVersion(),
+            value.getName(),stored.getLifecycle().name(),stored.getContentHash(),stored.getPublishedAt(),value.getEntries().size());
+    }
+
+    private static TerminalQuestCenterSectionSnapshot.ChapterDetail chapterDetail(QuestEditorActor actor,
+        StoredQuestChapter stored){
+        java.util.Map<String,String> names=new java.util.LinkedHashMap<String,String>();
+        List<TerminalQuestCenterSectionSnapshot.ChapterCandidate> candidates=new ArrayList<TerminalQuestCenterSectionSnapshot.ChapterCandidate>();
+        if(questDefinitionManagementQuery!=null){AuthenticatedQuestDefinitionManagementQuery.Result definitions=
+            questDefinitionManagementQuery.load(actor,new QuestDefinitionManagementRequest("",
+                QuestDefinitionLifecycle.PUBLISHED,0,50));
+            if(definitions.getStatus()==AuthenticatedQuestDefinitionManagementQuery.Status.SUCCESS)
+                for(StoredQuestDefinition value:definitions.getPage().getDefinitions()){
+                    String id=value.getDefinition().getId().toString();names.put(id,value.getDefinition().getName());
+                    candidates.add(new TerminalQuestCenterSectionSnapshot.ChapterCandidate(id,value.getDefinition().getName()));
+                }
+        }
+        List<TerminalQuestCenterSectionSnapshot.ChapterPlacement> placements=new ArrayList<TerminalQuestCenterSectionSnapshot.ChapterPlacement>();
+        for(QuestChapterEntry entry:stored.getDefinition().getEntries()){
+            String id=entry.getQuestId().toString();String name=names.get(id);
+            placements.add(new TerminalQuestCenterSectionSnapshot.ChapterPlacement(id,name==null?id:name,entry.getX(),
+                entry.getY(),entry.getWidth(),entry.getHeight()));
+            for(int i=candidates.size()-1;i>=0;i--)if(candidates.get(i).getQuestId().equals(id))candidates.remove(i);
+        }
+        com.jsirgalaxybase.quest.core.QuestChapterDefinition value=stored.getDefinition();
+        List<TerminalQuestCenterSectionSnapshot.ChapterDependency> dependencies=new ArrayList<TerminalQuestCenterSectionSnapshot.ChapterDependency>();
+        if(questChapterDependencyQuery!=null){AuthenticatedQuestChapterDependencyQuery.Result projection=
+            questChapterDependencyQuery.load(actor,value.getId(),value.getVersion());
+            if(projection.getStatus()==AuthenticatedQuestChapterDependencyQuery.Status.SUCCESS)
+                for(QuestChapterDependencyGraph.Edge edge:projection.getGraph().getEdges())dependencies.add(
+                    new TerminalQuestCenterSectionSnapshot.ChapterDependency(edge.getPrerequisiteId().toString(),
+                        edge.getQuestId().toString(),edge.getKind().name()));
+        }
+        return new TerminalQuestCenterSectionSnapshot.ChapterDetail(managedChapter(stored),value.getDescription(),
+            value.getIconReference(),value.getBackgroundReference(),value.getBackgroundSize(),value.getVisibility().name(),
+            placements,candidates,dependencies);
+    }
+
+    private static String chapterMutationMessage(TerminalActionType action,QuestChapterManagementResult result){
+        if(result==null)return "章节操作没有返回结果。";
+        if(result.getStatus()==QuestChapterManagementResult.Status.SUCCESS)
+            return action==TerminalActionType.QUEST_CHAPTER_ADMIN_CREATE?"章节草稿已创建。"
+                :action==TerminalActionType.QUEST_CHAPTER_ADMIN_PUBLISH?"章节版本已发布。"
+                :action==TerminalActionType.QUEST_CHAPTER_ADMIN_RETIRE?"章节版本已退役。":"章节草稿已保存。";
+        if(result.getStatus()==QuestChapterManagementResult.Status.FORBIDDEN)return "当前玩家没有管理章节的权限。";
+        if(result.getStatus()==QuestChapterManagementResult.Status.NOT_FOUND)return "所选章节版本不存在。";
+        if(result.getStatus()==QuestChapterManagementResult.Status.CONFLICT)return "章节版本已经变化，请刷新后重试。";
+        return result.getMessage().isEmpty()?"章节校验失败，状态没有改变。":safeBounded(result.getMessage(),256);
+    }
+
+    private static String chapterCloneMessage(QuestChapterCloneResult result){
+        if(result.getStatus()==QuestChapterCloneResult.Status.SUCCESS)return "已复制 "+result.getRemappedIds().size()+" 个任务草稿。";
+        if(result.getStatus()==QuestChapterCloneResult.Status.FORBIDDEN)return "当前玩家没有复制章节任务的权限。";
+        if(result.getStatus()==QuestChapterCloneResult.Status.NOT_FOUND)return "章节或待复制任务版本不存在。";
+        if(result.getStatus()==QuestChapterCloneResult.Status.CONFLICT)return "章节版本已经变化，请刷新后重试。";
+        return "任务复制数据无效，章节没有改变。";
+    }
+
+    static TerminalQuestCenterSectionSnapshot buildAuthenticatedQuestCenterSnapshot(UUID authenticatedPlayerId,
+        TerminalActionType actionType,TerminalQuestActionPayload intent) {
+        return buildAuthenticatedQuestCenterSnapshot(authenticatedPlayerId,"",actionType,intent);
+    }
+
+    static TerminalQuestCenterSectionSnapshot buildAuthenticatedQuestCenterSnapshot(UUID authenticatedPlayerId,
+        String authenticatedPlayerName,TerminalActionType actionType,TerminalQuestActionPayload intent) {
+        if(authenticatedPlayerId==null||questCenterQuery==null)return TerminalQuestCenterSectionSnapshot.unavailable(
+            "跨服任务运行时尚未启用；现有 BetterQuesting 不受影响。");
+        TerminalQuestActionPayload safeIntent=intent==null?TerminalQuestActionPayload.empty():intent;
+        if(isChapterManagementAction(actionType))return buildQuestChapterManagementSnapshot(
+            new QuestEditorActor(authenticatedPlayerId,authenticatedPlayerName),safeIntent,actionType,"章节由 PostgreSQL 跨服真源管理。");
+        if(actionType==TerminalActionType.QUEST_ADMIN_OPEN||actionType==TerminalActionType.QUEST_ADMIN_FILTER
+            ||actionType==TerminalActionType.QUEST_ADMIN_PAGE||actionType==TerminalActionType.QUEST_ADMIN_SELECT||actionType==TerminalActionType.QUEST_ADMIN_CREATE
+            ||actionType==TerminalActionType.QUEST_ADMIN_PUBLISH||actionType==TerminalActionType.QUEST_ADMIN_RETIRE
+            ||actionType==TerminalActionType.QUEST_ADMIN_BATCH_RETIRE)return buildQuestManagementSnapshot(authenticatedPlayerId,
+                authenticatedPlayerName,safeIntent,actionType);
+        QuestCenterPageRequest request=new QuestCenterPageRequest(safeIntent.getChapterId(),safeIntent.getFilter(),
+            safeIntent.getQuery(),safeIntent.getChapterPage(),6,safeIntent.getQuestPage(),7);
+        ParticipantId participant=ParticipantId.player(authenticatedPlayerId);
+        String message="";
+        if(actionType==TerminalActionType.QUEST_CLAIM){
+            if(safeIntent.getQuestId().isEmpty())message="未选择要领取奖励的任务。";
+            else if(questClaimService==null)message="奖励领取运行时尚未启用，任务状态没有改变。";
+            else try{message=claimMessage(questClaimService.claim(authenticatedPlayerId,
+                UUID.fromString(safeIntent.getQuestId()),System.currentTimeMillis()));}
+            catch(IllegalArgumentException invalid){message="任务标识无效，奖励状态没有改变。";}
+        }else if(actionType==TerminalActionType.QUEST_SELECT_REWARD_CHOICE){
+            if(safeIntent.getQuestId().isEmpty()||safeIntent.getRewardKey().isEmpty()||safeIntent.getChoiceIndex()<0)
+                message="奖励选择无效，任务状态没有改变。";
+            else if(rewardChoiceService==null)message="奖励选择运行时尚未启用，任务状态没有改变。";
+            else try{message=choiceMessage(rewardChoiceService.select(authenticatedPlayerId,
+                UUID.fromString(safeIntent.getQuestId()),safeIntent.getRewardKey(),safeIntent.getChoiceIndex(),System.currentTimeMillis()));}
+            catch(IllegalArgumentException invalid){message="奖励选择无效，任务状态没有改变。";}
+        }else if(actionType==TerminalActionType.QUEST_TOGGLE_TRACKING){
+            if(safeIntent.getQuestId().isEmpty())message="未选择要追踪的任务。";
+            else if(questTrackingService==null)message="任务追踪运行时尚未启用。";
+            else try{java.util.Optional<Boolean> tracked=questTrackingService.toggle(authenticatedPlayerId,
+                UUID.fromString(safeIntent.getQuestId()),System.currentTimeMillis());message=!tracked.isPresent()?"任务不存在或尚未发布。":tracked.get().booleanValue()?"已加入跨服任务追踪。":"已取消任务追踪。";}
+            catch(IllegalArgumentException invalid){message="任务标识无效，追踪状态没有改变。";}
+        }
+        QuestCenterPage page=questCenterQuery.loadPage(participant,request);
+        boolean detail=!safeIntent.getQuestId().isEmpty()&&actionType!=TerminalActionType.QUEST_BACK;
+        return questCenterMapper.map(page,safeIntent.getFilter(),safeIntent.getQuery(),safeIntent.getQuestId(),detail,message);
+    }
+
+    private static TerminalQuestCenterSectionSnapshot buildQuestManagementSnapshot(UUID playerId,String playerName,
+        TerminalQuestActionPayload intent,TerminalActionType actionType){
+        if(questDefinitionManagementQuery==null)return TerminalQuestCenterSectionSnapshot.unavailable("任务编辑管理运行时尚未启用。");
+        QuestEditorActor actor=new QuestEditorActor(playerId,playerName);
+        String message="任务定义由 PostgreSQL 跨服真源管理。";
+        return buildQuestManagementSnapshot(actor,intent,actionType,message);
+    }
+
+    private static TerminalQuestCenterSectionSnapshot buildQuestManagementSnapshot(QuestEditorActor actor,
+        TerminalQuestActionPayload intent,TerminalActionType actionType,String initialMessage){
+        String message=initialMessage;
+        if(actionType==TerminalActionType.QUEST_ADMIN_CREATE){
+            if(questDraftManagementService==null)message="任务定义写入运行时尚未启用，草稿没有创建。";
+            else try{message=managementMutationMessage(actionType,questDraftManagementService.createFromTemplate(actor,
+                QuestDraftTemplate.valueOf(intent.getManagementTemplate().toUpperCase(Locale.ROOT)),intent.getQuery()));}
+            catch(IllegalArgumentException invalid){message="草稿模板或名称无效，没有创建任务。";}
+        }
+        if(actionType==TerminalActionType.QUEST_ADMIN_PUBLISH||actionType==TerminalActionType.QUEST_ADMIN_RETIRE){
+            if(questDraftManagementService==null)message="任务定义写入运行时尚未启用，状态没有改变。";
+            else if(intent.getQuestId().isEmpty()||intent.getManagementVersion()<1)message="所选任务版本无效，状态没有改变。";
+            else try{
+                UUID questId=UUID.fromString(intent.getQuestId());
+                QuestDefinitionImpactReport impact=actionType==TerminalActionType.QUEST_ADMIN_RETIRE
+                    ?definitionImpact(actor,questId):null;
+                if(actionType==TerminalActionType.QUEST_ADMIN_RETIRE&&impact==null)
+                    message="影响预检不可用，任务没有退役。";
+                else if(actionType==TerminalActionType.QUEST_ADMIN_RETIRE&&!impact.isSafeToRetire())
+                    message=impact.isTruncated()?"影响范围超过安全上限，任务没有退役。"
+                        :"仍有 "+impact.getDependents().size()+" 个依赖任务和 "+impact.getPlacements().size()+" 个章节放置，任务没有退役。";
+                else {
+                    QuestDraftManagementResult result=actionType==TerminalActionType.QUEST_ADMIN_PUBLISH
+                        ?questDraftManagementService.publish(actor,questId,intent.getManagementVersion(),intent.getManagementHash(),System.currentTimeMillis())
+                        :questDraftManagementService.retire(actor,questId,intent.getManagementVersion());
+                    message=managementMutationMessage(actionType,result);
+                }
+            }catch(IllegalArgumentException invalid){message="所选任务标识无效，状态没有改变。";}
+        }
+        QuestDefinitionLifecycle lifecycle=null;String requested=intent.getManagementLifecycle();
+        if(!requested.isEmpty())try{lifecycle=QuestDefinitionLifecycle.valueOf(requested.toUpperCase(Locale.ROOT));}catch(IllegalArgumentException ignored){lifecycle=null;}
+        AuthenticatedQuestDefinitionManagementQuery.Result result=questDefinitionManagementQuery.load(
+            actor,new QuestDefinitionManagementRequest(intent.getQuery(),lifecycle,
+                intent.getManagementPage(),20));
+        if(result.getStatus()!=AuthenticatedQuestDefinitionManagementQuery.Status.SUCCESS)return new TerminalQuestCenterSectionSnapshot(
+            "FORBIDDEN","只有服务端授权的任务管理员可以打开编辑管理。",TerminalQuestCenterSectionSnapshot.View.BROWSE,
+            "","","all","",java.util.Collections.<TerminalQuestCenterSectionSnapshot.Chapter>emptyList(),0,6,0,
+            java.util.Collections.<TerminalQuestCenterSectionSnapshot.Quest>emptyList(),0,7,0,null);
+        QuestDefinitionManagementPage page=result.getPage();List<TerminalQuestCenterSectionSnapshot.Definition> definitions=new ArrayList<TerminalQuestCenterSectionSnapshot.Definition>();
+        for(StoredQuestDefinition stored:page.getDefinitions()){com.jsirgalaxybase.quest.core.QuestDefinition definition=stored.getDefinition();definitions.add(new TerminalQuestCenterSectionSnapshot.Definition(
+            definition.getId().toString(),definition.getVersion(),definition.getName(),stored.getLifecycle().name(),
+            stored.getContentHash(),stored.getPublishedAt(),definition.getTasks().size(),definition.getRewards().size()));}
+        TerminalQuestCenterSectionSnapshot.DefinitionDetail detail=null;
+        if(!intent.getQuestId().isEmpty()&&intent.getManagementVersion()>0)try{
+            AuthenticatedQuestDefinitionManagementQuery.DefinitionResult found=questDefinitionManagementQuery.find(
+                actor,UUID.fromString(intent.getQuestId()),intent.getManagementVersion());
+            if(found.getStatus()==AuthenticatedQuestDefinitionManagementQuery.DefinitionResult.Status.SUCCESS){
+                detail=managementDetail(found.getDefinition(),definitionImpact(actor,found.getDefinition().getDefinition().getId()));
+                AuthenticatedQuestDefinitionManagementQuery.Result candidates=questDefinitionManagementQuery.load(actor,
+                    new QuestDefinitionManagementRequest("",QuestDefinitionLifecycle.PUBLISHED,0,50));
+                if(candidates.getStatus()==AuthenticatedQuestDefinitionManagementQuery.Status.SUCCESS){definitions.clear();for(StoredQuestDefinition stored:candidates.getPage().getDefinitions()){
+                    com.jsirgalaxybase.quest.core.QuestDefinition definition=stored.getDefinition();if(definition.getId().toString().equals(intent.getQuestId()))continue;
+                    definitions.add(new TerminalQuestCenterSectionSnapshot.Definition(definition.getId().toString(),definition.getVersion(),definition.getName(),stored.getLifecycle().name(),stored.getContentHash(),stored.getPublishedAt(),definition.getTasks().size(),definition.getRewards().size()));}}
+            }
+            else if(found.getStatus()==AuthenticatedQuestDefinitionManagementQuery.DefinitionResult.Status.NOT_FOUND)message="所选任务版本不存在或已被移除。";
+            else message="当前玩家没有读取任务定义的权限。";
+        }catch(IllegalArgumentException invalid){message="所选任务标识无效。";}
+        TerminalQuestCenterSectionSnapshot.Management management=new TerminalQuestCenterSectionSnapshot.Management(
+            intent.getQuery(),lifecycle==null?"":lifecycle.name(),page.getPage(),page.getPageSize(),page.getTotal(),definitions,detail,
+            managementTypes(QuestElementKind.TASK),managementTypes(QuestElementKind.REWARD));
+        return new TerminalQuestCenterSectionSnapshot("READY",message,
+            TerminalQuestCenterSectionSnapshot.View.ADMIN,"","","all",intent.getQuery(),
+            java.util.Collections.<TerminalQuestCenterSectionSnapshot.Chapter>emptyList(),0,6,0,
+            java.util.Collections.<TerminalQuestCenterSectionSnapshot.Quest>emptyList(),0,7,0,null,management);
+    }
+
+    private static String managementMutationMessage(TerminalActionType actionType,QuestDraftManagementResult result){
+        if(result==null)return "任务定义操作没有返回结果，状态可能未改变。";
+        if(result.getStatus()==QuestDraftManagementResult.Status.SUCCESS)
+            return actionType==TerminalActionType.QUEST_ADMIN_CREATE?"新任务草稿已创建。":actionType==TerminalActionType.QUEST_ADMIN_PUBLISH?"任务版本已发布。":actionType==TerminalActionType.QUEST_ADMIN_RETIRE?"任务版本已退役。":"草稿修改已保存。";
+        if(result.getStatus()==QuestDraftManagementResult.Status.FORBIDDEN)return "当前玩家没有管理任务定义的权限。";
+        if(result.getStatus()==QuestDraftManagementResult.Status.NOT_FOUND)return "所选任务版本不存在。";
+        if(result.getStatus()==QuestDraftManagementResult.Status.CONFLICT)return "任务版本已经变化，请刷新后重试。";
+        if(!result.getIssues().isEmpty()){QuestEditorValidationIssue issue=result.getIssues().get(0);return "发布校验失败："+safeBounded(issue.getMessage(),256);}
+        return "任务定义校验失败，状态没有改变。";
+    }
+
+    private static QuestDefinitionImpactReport definitionImpact(QuestEditorActor actor,UUID questId){
+        if(questDefinitionImpactQuery==null)return null;
+        try{AuthenticatedQuestDefinitionImpactQuery.Result result=questDefinitionImpactQuery.load(actor,questId);
+            return result.getStatus()==AuthenticatedQuestDefinitionImpactQuery.Status.SUCCESS?result.getReport():null;
+        }catch(RuntimeException unavailable){GalaxyBase.LOG.warn("Quest definition impact preview failed closed for {}",questId,unavailable);return null;}
+    }
+
+    private static TerminalQuestCenterSectionSnapshot.DefinitionDetail managementDetail(StoredQuestDefinition stored,
+        QuestDefinitionImpactReport impact){
+        com.jsirgalaxybase.quest.core.QuestDefinition definition=stored.getDefinition();TerminalQuestCenterSectionSnapshot.Definition summary=new TerminalQuestCenterSectionSnapshot.Definition(definition.getId().toString(),definition.getVersion(),definition.getName(),stored.getLifecycle().name(),stored.getContentHash(),stored.getPublishedAt(),definition.getTasks().size(),definition.getRewards().size());
+        List<String> prerequisites=new ArrayList<String>();for(UUID value:definition.getPrerequisites()){if(prerequisites.size()>=64)break;prerequisites.add(value.toString());}
+        List<TerminalQuestCenterSectionSnapshot.Element> tasks=new ArrayList<TerminalQuestCenterSectionSnapshot.Element>();for(com.jsirgalaxybase.quest.core.TaskDefinition value:definition.getTasks()){if(tasks.size()>=64)break;tasks.add(new TerminalQuestCenterSectionSnapshot.Element(value.getKey(),value.getTypeId(),value.isOptional(),boundedParameters(value.getParameters())));}
+        List<TerminalQuestCenterSectionSnapshot.Element> rewards=new ArrayList<TerminalQuestCenterSectionSnapshot.Element>();for(com.jsirgalaxybase.quest.core.RewardDefinition value:definition.getRewards()){if(rewards.size()>=64)break;rewards.add(new TerminalQuestCenterSectionSnapshot.Element(value.getKey(),value.getTypeId(),false,boundedParameters(value.getParameters())));}
+        java.util.Map<String,String> options=new java.util.LinkedHashMap<String,String>();com.jsirgalaxybase.quest.core.QuestBehavior behavior=definition.getBehavior();options.put("repeat.cooldownMillis",String.valueOf(definition.getRepeatPolicy().getCooldownMillis()));options.put("repeat.relative",String.valueOf(definition.getRepeatPolicy().isRelative()));options.put("behavior.visibility",behavior.getVisibility().name());options.put("behavior.icon",safeBounded(behavior.getIconReference(),256));options.put("behavior.main",String.valueOf(behavior.isMain()));options.put("behavior.silent",String.valueOf(behavior.isSilent()));options.put("behavior.autoClaim",String.valueOf(behavior.isAutoClaim()));options.put("behavior.progressWhileLocked",String.valueOf(behavior.isProgressWhileLocked()));options.put("behavior.simultaneous",String.valueOf(behavior.isSimultaneous()));options.put("behavior.global",String.valueOf(behavior.isGlobal()));options.put("behavior.globalShare",String.valueOf(behavior.isGlobalShare()));options.put("behavior.updateSound",safeBounded(behavior.getUpdateSound(),256));options.put("behavior.completeSound",safeBounded(behavior.getCompleteSound(),256));
+        if(impact!=null){options.put("impact.direct",String.valueOf(directDependents(impact)));options.put("impact.transitive",String.valueOf(Math.max(0,impact.getDependents().size()-directDependents(impact))));options.put("impact.placements",String.valueOf(impact.getPlacements().size()));options.put("impact.truncated",String.valueOf(impact.isTruncated()));options.put("impact.safeToRetire",String.valueOf(impact.isSafeToRetire()));options.put("impact.summary",impactSummary(impact));}
+        return new TerminalQuestCenterSectionSnapshot.DefinitionDetail(summary,safeBounded(definition.getDescription(),4096),definition.getPrerequisiteLogic().name(),definition.getTaskLogic().name(),prerequisites,tasks,rewards,options);
+    }
+
+    private static int directDependents(QuestDefinitionImpactReport impact){int count=0;for(QuestDefinitionImpactReport.Dependent value:impact.getDependents())if(value.isDirect())count++;return count;}
+    private static String impactSummary(QuestDefinitionImpactReport impact){StringBuilder value=new StringBuilder();int count=0;for(QuestDefinitionImpactReport.Dependent dependent:impact.getDependents()){if(count++>=5)break;if(value.length()>0)value.append("、");value.append(dependent.getName());}for(QuestDefinitionImpactReport.Placement placement:impact.getPlacements()){if(count++>=8)break;if(value.length()>0)value.append("、");value.append("章节 ").append(placement.getChapterName());}return safeBounded(value.toString(),512);}
+
+    private static java.util.Map<String,String> boundedParameters(java.util.Map<String,String> source){java.util.Map<String,String> result=new java.util.LinkedHashMap<String,String>();if(source!=null)for(java.util.Map.Entry<String,String> entry:source.entrySet()){if(result.size()>=64)break;result.put(safeBounded(entry.getKey(),128),safeBounded(entry.getValue(),1024));}return result;}
+    private static List<TerminalQuestCenterSectionSnapshot.ElementType> managementTypes(QuestElementKind kind){List<TerminalQuestCenterSectionSnapshot.ElementType> result=new ArrayList<TerminalQuestCenterSectionSnapshot.ElementType>();if(questDraftManagementService==null)return result;for(QuestElementTypeDescriptor type:questDraftManagementService.listTypes(kind)){if(result.size()>=32)break;List<TerminalQuestCenterSectionSnapshot.Field> fields=new ArrayList<TerminalQuestCenterSectionSnapshot.Field>();for(QuestEditorFieldDescriptor field:type.getFields()){if(fields.size()>=32)break;fields.add(new TerminalQuestCenterSectionSnapshot.Field(safeBounded(field.getKey(),128),safeBounded(field.getLabel(),128),field.getType().name(),field.isRequired(),field.getMinimum(),field.getMaximum(),field.getOptions().size()>32?field.getOptions().subList(0,32):field.getOptions()));}result.add(new TerminalQuestCenterSectionSnapshot.ElementType(safeBounded(type.getTypeId(),128),safeBounded(type.getDisplayName(),128),kind.name(),fields));}return result;}
+    private static String safeBounded(String value,int max){String result=value==null?"":value;return result.length()<=max?result:result.substring(0,max);}
+
+    private static String claimMessage(RewardClaimStatus status){
+        if(status==RewardClaimStatus.CLAIMED)return "奖励已进入跨服交付队列。";
+        if(status==RewardClaimStatus.ALREADY_CLAIMED)return "该任务奖励已经领取。";
+        if(status==RewardClaimStatus.NEEDS_CHOICE)return "请先选择奖励内容。";
+        if(status==RewardClaimStatus.NOT_OWNED)return "该奖励不属于当前玩家。";
+        if(status==RewardClaimStatus.INVALID_STATE)return "奖励当前状态不可领取，请刷新后重试。";
+        return "未找到可领取的任务奖励。";
+    }
+
+    private static String choiceMessage(RewardChoiceSelectionStatus status){
+        if(status==RewardChoiceSelectionStatus.SELECTED)return "奖励选项已确认，可以领取任务奖励。";
+        if(status==RewardChoiceSelectionStatus.ALREADY_SELECTED)return "该奖励选项已经确认。";
+        if(status==RewardChoiceSelectionStatus.CONFLICT)return "奖励选项已经锁定，不能改选。";
+        if(status==RewardChoiceSelectionStatus.INVALID)return "该奖励选项不可用，请刷新后重试。";
+        return "未找到可选择的任务奖励。";
     }
 
     private static TerminalOpenApproval.PageSnapshot createPublicServicePageSnapshot(EntityPlayer player) {

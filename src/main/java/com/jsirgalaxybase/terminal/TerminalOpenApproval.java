@@ -169,6 +169,7 @@ public class TerminalOpenApproval {
         private final TerminalServerToolsSectionSnapshot serverToolsSectionSnapshot;
         private final TerminalLandSectionSnapshot landSectionSnapshot;
         private final TerminalNotificationCenterSnapshot notificationCenterSnapshot;
+        private final TerminalQuestCenterSectionSnapshot questCenterSnapshot;
 
         public PageSnapshot(String pageId, String title, String lead, List<Section> sections) {
             this(pageId, title, lead, sections, null, null);
@@ -219,6 +220,18 @@ public class TerminalOpenApproval {
             TerminalServerToolsSectionSnapshot serverToolsSectionSnapshot,
             TerminalLandSectionSnapshot landSectionSnapshot,
             TerminalNotificationCenterSnapshot notificationCenterSnapshot) {
+            this(pageId,title,lead,sections,bankSectionSnapshot,marketSectionSnapshot,customMarketSectionSnapshot,
+                exchangeMarketSectionSnapshot,serverToolsSectionSnapshot,landSectionSnapshot,notificationCenterSnapshot,null);
+        }
+
+        public PageSnapshot(String pageId, String title, String lead, List<Section> sections,
+            TerminalBankSectionSnapshot bankSectionSnapshot, TerminalMarketSectionSnapshot marketSectionSnapshot,
+            TerminalCustomMarketSectionSnapshot customMarketSectionSnapshot,
+            TerminalExchangeMarketSectionSnapshot exchangeMarketSectionSnapshot,
+            TerminalServerToolsSectionSnapshot serverToolsSectionSnapshot,
+            TerminalLandSectionSnapshot landSectionSnapshot,
+            TerminalNotificationCenterSnapshot notificationCenterSnapshot,
+            TerminalQuestCenterSectionSnapshot questCenterSnapshot) {
             this.pageId = normalize(pageId, "home");
             this.title = normalize(title, "制度总览");
             this.lead = normalize(lead, "当前玩家制度摘要");
@@ -240,6 +253,9 @@ public class TerminalOpenApproval {
             this.notificationCenterSnapshot = "notifications".equalsIgnoreCase(this.pageId)
                 ? (notificationCenterSnapshot == null ? TerminalNotificationCenterSnapshot.empty() : notificationCenterSnapshot)
                 : notificationCenterSnapshot;
+            this.questCenterSnapshot = "career".equalsIgnoreCase(this.pageId)
+                ? (questCenterSnapshot == null ? TerminalQuestCenterSectionSnapshot.unavailable("任务运行时尚未启用。") : questCenterSnapshot)
+                : questCenterSnapshot;
         }
 
         public static PageSnapshot placeholder(String pageId, String title, String lead) {
@@ -299,6 +315,8 @@ public class TerminalOpenApproval {
         public TerminalNotificationCenterSnapshot getNotificationCenterSnapshot() {
             return notificationCenterSnapshot;
         }
+
+        public TerminalQuestCenterSectionSnapshot getQuestCenterSnapshot() { return questCenterSnapshot; }
     }
 
     public static final class Section {

@@ -8,10 +8,9 @@ import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraftforge.client.event.RenderGameOverlayEvent;
 
-import com.jsirgalaxybase.client.gui.framework.CanvasScreen;
-import com.jsirgalaxybase.terminal.client.screen.TerminalHomeScreen;
 import com.jsirgalaxybase.terminal.ui.TerminalNotification;
 import com.jsirgalaxybase.terminal.ui.TerminalNotificationSeverity;
+import com.jsirgalaxybase.terminal.client.TrackedQuestHudState;
 
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.relauncher.Side;
@@ -37,16 +36,15 @@ public class TerminalHudOverlayHandler {
             return;
         }
 
-        if (minecraft.currentScreen instanceof TerminalHomeScreen) return;
+        if (minecraft.currentScreen instanceof com.jsirgalaxybase.terminal.client.screen.TerminalApplicationScreen)
+            return;
 
         List<TerminalHudNotificationManager.NotificationView> notifications = TerminalHudNotificationManager.pollVisible(
-            System.currentTimeMillis(),
-            MAX_VISIBLE);
-        if (notifications.isEmpty()) {
-            return;
-        }
+            System.currentTimeMillis(), MAX_VISIBLE);
 
         int screenWidth = event.resolution.getScaledWidth();
+        drawTrackedQuests(minecraft.fontRenderer,TrackedQuestHudState.get(),screenWidth,event.resolution.getScaledHeight());
+        if(notifications.isEmpty())return;
         int width = Math.min(320, Math.max(180, screenWidth / 3));
         width = Math.min(width, Math.max(120, screenWidth - 20));
         int x = screenWidth - width - 10;
@@ -54,6 +52,20 @@ public class TerminalHudOverlayHandler {
         for (TerminalHudNotificationManager.NotificationView notificationView : notifications) {
             int height = drawNotification(minecraft.fontRenderer, notificationView, x, y, width);
             y += height + 6;
+        }
+    }
+
+    private void drawTrackedQuests(FontRenderer font,TerminalTrackedQuestSnapshot snapshot,int screenWidth,int screenHeight){
+        if(font==null||snapshot==null||snapshot.getQuests().isEmpty()||screenWidth<180||screenHeight<100)return;
+        int width=Math.min(210,Math.max(140,screenWidth/4));int x=8,y=8;
+        int visible=Math.min(3,snapshot.getQuests().size());
+        for(int index=0;index<visible;index++){
+            TerminalTrackedQuestSnapshot.Quest quest=snapshot.getQuests().get(index);int tasks=Math.min(3,quest.getTasks().size());int height=18+tasks*10;
+            if(y+height>screenHeight-8)break;
+            Gui.drawRect(x,y,x+width,y+height,0xB0141A20);Gui.drawRect(x,y,x+2,y+height,0xE0529BED);
+            font.drawStringWithShadow(font.trimStringToWidth("★ "+quest.getName(),width-12),x+7,y+4,0xFFE8EDF2);
+            for(int taskIndex=0;taskIndex<tasks;taskIndex++){TerminalTrackedQuestSnapshot.Task task=quest.getTasks().get(taskIndex);String progress=task.getValue()+"/"+task.getTarget();int progressWidth=font.getStringWidth(progress);String label=font.trimStringToWidth(task.getLabel(),Math.max(24,width-progressWidth-18));font.drawStringWithShadow(label,x+7,y+15+taskIndex*10,0xFFB8C4D0);font.drawStringWithShadow(progress,x+width-progressWidth-6,y+15+taskIndex*10,task.getValue()>=task.getTarget()?0xFF62D88C:0xFFD0D7DE);}
+            y+=height+4;
         }
     }
 
@@ -125,7 +137,7 @@ public class TerminalHudOverlayHandler {
         if (currentScreen == null) {
             return true;
         }
-        return currentScreen instanceof CanvasScreen;
+        return false;
     }
 
     private int computeAlpha(TerminalNotification notification, long ageMillis) {

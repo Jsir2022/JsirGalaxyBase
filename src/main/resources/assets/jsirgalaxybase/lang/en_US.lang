@@ -117,3 +117,6 @@ jsirgalaxybase.warehouse.cell_not_empty=The Storage Cell still contains items, s
 jsirgalaxybase.warehouse.already_registered=A Warehouse Drive is already registered at this location.
 jsirgalaxybase.warehouse.request_conflict=This warehouse request conflicts with an existing operation record.
 jsirgalaxybase.warehouse.runtime_unavailable=The Galactic Warehouse runtime is not ready.
+key.jsirgalaxybase.terminalFrameworkTest=Open Galaxy UI 2 Lab
+key.jsirgalaxybase.captureUi2Debug=Save UI2 debug capture
+key.categories.jsirgalaxybase=JsirGalaxyBase

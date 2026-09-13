@@ -37,5 +37,7 @@ public final class TerminalNetwork {
             Side.CLIENT);
         CHANNEL.registerMessage(TerminalCellContentActionMessage.Handler.class, TerminalCellContentActionMessage.class, 7,
             Side.SERVER);
+        CHANNEL.registerMessage(TrackedQuestSnapshotMessage.Handler.class, TrackedQuestSnapshotMessage.class, 8,
+            Side.CLIENT);
     }
 }

@@ -6,6 +6,7 @@ import java.util.List;
 
 import com.jsirgalaxybase.terminal.ui.TerminalNotificationSeverity;
 import com.jsirgalaxybase.terminal.ui.TerminalPage;
+import com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot;
 
 public class TerminalHomeScreenModel {
 
@@ -326,6 +327,7 @@ public class TerminalHomeScreenModel {
         private final TerminalServerToolsSectionModel serverToolsSectionModel;
         private final TerminalLandSectionModel landSectionModel;
         private final TerminalNotificationCenterModel notificationCenterModel;
+        private final TerminalQuestCenterSectionSnapshot questCenterModel;
 
         public PageSnapshotModel(String pageId, String title, String lead, List<SectionModel> sections) {
             this(pageId, title, lead, sections, null, null);
@@ -373,6 +375,17 @@ public class TerminalHomeScreenModel {
             TerminalExchangeMarketSectionModel exchangeMarketSectionModel,
             TerminalServerToolsSectionModel serverToolsSectionModel, TerminalLandSectionModel landSectionModel,
             TerminalNotificationCenterModel notificationCenterModel) {
+            this(pageId,title,lead,sections,bankSectionModel,marketSectionModel,customMarketSectionModel,
+                exchangeMarketSectionModel,serverToolsSectionModel,landSectionModel,notificationCenterModel,null);
+        }
+
+        public PageSnapshotModel(String pageId, String title, String lead, List<SectionModel> sections,
+            TerminalBankSectionModel bankSectionModel, TerminalMarketSectionModel marketSectionModel,
+            TerminalCustomMarketSectionModel customMarketSectionModel,
+            TerminalExchangeMarketSectionModel exchangeMarketSectionModel,
+            TerminalServerToolsSectionModel serverToolsSectionModel, TerminalLandSectionModel landSectionModel,
+            TerminalNotificationCenterModel notificationCenterModel,
+            TerminalQuestCenterSectionSnapshot questCenterModel) {
             this.pageId = TerminalPage.fromId(normalize(pageId, "home")).toTopLevelPageId();
             TerminalPage page = TerminalPage.fromId(this.pageId);
             this.title = normalize(title, page.getTitle());
@@ -396,6 +409,9 @@ public class TerminalHomeScreenModel {
             this.notificationCenterModel = page == TerminalPage.NOTIFICATIONS
                 ? (notificationCenterModel == null ? TerminalNotificationCenterModel.empty() : notificationCenterModel)
                 : notificationCenterModel;
+            this.questCenterModel = page == TerminalPage.CAREER
+                ? (questCenterModel == null ? TerminalQuestCenterSectionSnapshot.unavailable("任务运行时尚未启用。") : questCenterModel)
+                : questCenterModel;
         }
 
         public static PageSnapshotModel placeholder(TerminalPage page) {
@@ -484,6 +500,8 @@ public class TerminalHomeScreenModel {
 
         public TerminalNotificationCenterModel getNotificationCenterModel() { return notificationCenterModel; }
         public boolean hasNotificationCenterModel() { return notificationCenterModel != null; }
+        public TerminalQuestCenterSectionSnapshot getQuestCenterModel() { return questCenterModel; }
+        public boolean hasQuestCenterModel() { return questCenterModel != null; }
     }
 
     public static final class SectionModel {

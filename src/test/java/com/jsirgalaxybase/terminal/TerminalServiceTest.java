@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 
 import org.junit.Test;
 
@@ -23,6 +24,11 @@ import com.jsirgalaxybase.modules.cluster.domain.TransferTicketStatus;
 import com.jsirgalaxybase.modules.servertools.domain.TeleportDispatchPlan;
 import com.jsirgalaxybase.modules.servertools.domain.TeleportKind;
 import com.jsirgalaxybase.modules.servertools.domain.ServerWarp;
+import com.jsirgalaxybase.quest.core.ParticipantId;
+import com.jsirgalaxybase.quest.core.QuestCenterPage;
+import com.jsirgalaxybase.quest.core.QuestCenterPageRequest;
+import com.jsirgalaxybase.quest.core.QuestCenterQuery;
+import com.jsirgalaxybase.quest.core.QuestCenterSnapshot;
 import com.jsirgalaxybase.terminal.client.TerminalClientScreenController;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalHomeScreenModel;
 import com.jsirgalaxybase.terminal.network.TerminalSnapshotMessage;
@@ -107,6 +113,114 @@ public class TerminalServiceTest {
         assertEquals("bank", model.getSelectedPageSnapshot().getPageId());
         assertNotNull(model.getSelectedPageSnapshot().getBankSectionModel());
         assertEquals("银行页摘要已刷新", model.getSelectedPageSnapshot().getBankSectionModel().getActionFeedback().getBody());
+    }
+
+    @Test
+    public void questCenterSnapshotRoundTripsThroughBaseTerminalProtocol() {
+        TerminalOpenApproval approval = TerminalService.buildTerminalSnapshot(
+            null,
+            "career",
+            "quest-session",
+            TerminalActionType.QUEST_CHANGE_QUERY,
+            new TerminalQuestActionPayload("chapter", "", "active", "steel", 1, 2).encode());
+
+        TerminalSnapshotMessage encoded = new TerminalSnapshotMessage(approval);
+        ByteBuf byteBuf = Unpooled.buffer();
+        encoded.toBytes(byteBuf);
+        TerminalSnapshotMessage decoded = new TerminalSnapshotMessage();
+        decoded.fromBytes(byteBuf);
+        TerminalHomeScreenModel.PageSnapshotModel career = decoded.toScreenModel().getSelectedPageSnapshot();
+
+        assertEquals("career", career.getPageId());
+        assertNotNull(career.getQuestCenterModel());
+        assertEquals("UNAVAILABLE", career.getQuestCenterModel().getServiceState());
+        assertTrue(career.getQuestCenterModel().getMessage().contains("任务"));
+    }
+
+    @Test
+    public void questCenterIdentityComesFromAuthenticatedServerPlayerAndIntentRemainsBounded() {
+        final UUID authenticatedPlayer = UUID.fromString("7a4f08d5-4180-487b-94d0-5c103f510f60");
+        final ParticipantId[] capturedParticipant = new ParticipantId[1];
+        final QuestCenterPageRequest[] capturedRequest = new QuestCenterPageRequest[1];
+        TerminalService.installQuestCenterQuery(new QuestCenterQuery() {
+            @Override
+            public QuestCenterSnapshot load(ParticipantId participantId) {
+                return new QuestCenterSnapshot(participantId, Collections.emptyList(), Collections.emptyList());
+            }
+
+            @Override
+            public QuestCenterPage loadPage(ParticipantId participantId, QuestCenterPageRequest request) {
+                capturedParticipant[0] = participantId;
+                capturedRequest[0] = request;
+                return new QuestCenterPage(participantId, request.getSelectedChapterId(), Collections.emptyList(),
+                    request.getChapterPageIndex(), request.getChapterPageSize(), 0, Collections.emptyList(),
+                    request.getQuestPageIndex(), request.getQuestPageSize(), 0);
+            }
+        });
+
+        try {
+            TerminalQuestCenterSectionSnapshot result = TerminalService.buildAuthenticatedQuestCenterSnapshot(
+                authenticatedPlayer, TerminalActionType.QUEST_CHANGE_QUERY,
+                new TerminalQuestActionPayload("chapter-a", "", "active", "steel", 2, 9));
+
+            assertEquals(authenticatedPlayer, capturedParticipant[0].getId());
+            assertEquals("player:" + authenticatedPlayer, capturedParticipant[0].asStableKey());
+            assertEquals("chapter-a", capturedRequest[0].getSelectedChapterId());
+            assertEquals("active", capturedRequest[0].getFilter());
+            assertEquals("steel", capturedRequest[0].getQuery());
+            assertEquals(2, capturedRequest[0].getChapterPageIndex());
+            assertEquals(9, capturedRequest[0].getQuestPageIndex());
+            assertEquals("EMPTY", result.getServiceState());
+        } finally {
+            TerminalService.installQuestCenterQuery(null);
+        }
+    }
+
+    @Test
+    public void questManagementUsesAuthenticatedActorAndBoundedServerQuery() {
+        final UUID player=UUID.randomUUID();final com.jsirgalaxybase.quest.core.QuestEditorActor[] actor={null};
+        final com.jsirgalaxybase.quest.core.QuestDefinitionManagementRequest[] request={null};
+        TerminalService.installQuestCenterQuery(new QuestCenterQuery(){public QuestCenterSnapshot load(ParticipantId id){return new QuestCenterSnapshot(id,Collections.emptyList(),Collections.emptyList());}});
+        TerminalService.installQuestDefinitionManagementQuery(new com.jsirgalaxybase.quest.core.AuthenticatedQuestDefinitionManagementQuery(
+            new com.jsirgalaxybase.quest.core.QuestDefinitionManagementQuery(){public com.jsirgalaxybase.quest.core.QuestDefinitionManagementPage load(com.jsirgalaxybase.quest.core.QuestDefinitionManagementRequest value){request[0]=value;return new com.jsirgalaxybase.quest.core.QuestDefinitionManagementPage(Collections.<com.jsirgalaxybase.quest.core.StoredQuestDefinition>emptyList(),value.getPage(),value.getPageSize(),0L);}public java.util.Optional<com.jsirgalaxybase.quest.core.StoredQuestDefinition> find(UUID id,int version){return java.util.Optional.empty();}},
+            new com.jsirgalaxybase.quest.core.QuestEditorAuthorization(){public boolean canManageDefinitions(com.jsirgalaxybase.quest.core.QuestEditorActor value){actor[0]=value;return true;}}));
+        try{
+            TerminalQuestCenterSectionSnapshot result=TerminalService.buildAuthenticatedQuestCenterSnapshot(player,"Admin",
+                TerminalActionType.QUEST_ADMIN_FILTER,new TerminalQuestActionPayload("","","all","steel",0,0,"",-1,"DRAFT",3));
+            assertEquals(player,actor[0].getId());assertEquals("Admin",actor[0].getDisplayName());
+            assertEquals("steel",request[0].getQuery());assertEquals(3,request[0].getPage());assertEquals(20,request[0].getPageSize());
+            assertEquals(TerminalQuestCenterSectionSnapshot.View.ADMIN,result.getView());assertNotNull(result.getManagement());
+        }finally{TerminalService.installQuestDefinitionManagementQuery(null);TerminalService.installQuestCenterQuery(null);}
+    }
+
+    @Test
+    public void chapterManagementUsesAuthenticatedActorAndReturnsSpatialDetail() {
+        final UUID player=UUID.randomUUID();final UUID chapterId=UUID.randomUUID();final UUID questId=UUID.randomUUID();
+        final com.jsirgalaxybase.quest.core.QuestEditorActor[] actor={null};
+        final com.jsirgalaxybase.quest.core.QuestDefinitionManagementRequest[] request={null};
+        final com.jsirgalaxybase.quest.core.StoredQuestChapter chapter=new com.jsirgalaxybase.quest.core.StoredQuestChapter(
+            new com.jsirgalaxybase.quest.core.QuestChapterDefinition(chapterId,1,"工业起步","跨服章节","item:book","",
+                Collections.singletonList(new com.jsirgalaxybase.quest.core.QuestChapterEntry(questId,-4,7,2,3))),
+            com.jsirgalaxybase.quest.core.QuestDefinitionLifecycle.DRAFT,"chapter-hash",0L);
+        TerminalService.installQuestCenterQuery(new QuestCenterQuery(){public QuestCenterSnapshot load(ParticipantId id){return new QuestCenterSnapshot(id,Collections.emptyList(),Collections.emptyList());}});
+        TerminalService.installQuestChapterManagementQuery(new com.jsirgalaxybase.quest.core.AuthenticatedQuestChapterManagementQuery(
+            new com.jsirgalaxybase.quest.core.QuestChapterManagementQuery(){
+                public com.jsirgalaxybase.quest.core.QuestChapterManagementPage load(com.jsirgalaxybase.quest.core.QuestDefinitionManagementRequest value){request[0]=value;return new com.jsirgalaxybase.quest.core.QuestChapterManagementPage(Collections.singletonList(chapter),value.getPage(),value.getPageSize(),1L);}
+                public java.util.Optional<com.jsirgalaxybase.quest.core.StoredQuestChapter> find(UUID id,int version){return chapterId.equals(id)&&version==1?java.util.Optional.of(chapter):java.util.Optional.<com.jsirgalaxybase.quest.core.StoredQuestChapter>empty();}},
+            new com.jsirgalaxybase.quest.core.QuestEditorAuthorization(){public boolean canManageDefinitions(com.jsirgalaxybase.quest.core.QuestEditorActor value){actor[0]=value;return true;}}));
+        try{
+            TerminalQuestCenterSectionSnapshot result=TerminalService.buildAuthenticatedQuestCenterSnapshot(player,"Admin",
+                TerminalActionType.QUEST_CHAPTER_ADMIN_SELECT,new TerminalQuestActionPayload(chapterId.toString(),"","all","industrial",0,0,"",-1,"DRAFT",2,1,"chapter-hash"));
+            assertEquals(player,actor[0].getId());assertEquals("Admin",actor[0].getDisplayName());
+            assertEquals("industrial",request[0].getQuery());assertEquals(2,request[0].getPage());assertEquals(20,request[0].getPageSize());
+            assertNotNull(result.getChapterManagement());assertEquals(1,result.getChapterManagement().getChapters().size());
+            assertNotNull(result.getChapterManagement().getDetail());
+            assertEquals(-4,result.getChapterManagement().getDetail().getPlacements().get(0).getX());
+            assertEquals(3,result.getChapterManagement().getDetail().getPlacements().get(0).getHeight());
+        }finally{
+            TerminalService.installQuestChapterManagementQuery(null);
+            TerminalService.installQuestCenterQuery(null);
+        }
     }
 
     @Test

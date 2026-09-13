@@ -117,3 +117,6 @@ jsirgalaxybase.warehouse.cell_not_empty=Storage Cell 内仍有物品，不能取
 jsirgalaxybase.warehouse.already_registered=该位置已经登记了 Warehouse Drive。
 jsirgalaxybase.warehouse.request_conflict=本次仓储请求与已有操作记录冲突。
 jsirgalaxybase.warehouse.runtime_unavailable=银河仓储运行时尚未就绪。
+key.jsirgalaxybase.terminalFrameworkTest=打开 Galaxy UI 2 实验室
+key.jsirgalaxybase.captureUi2Debug=保存 UI2 调试截图
+key.categories.jsirgalaxybase=JsirGalaxyBase

@@ -5,14 +5,14 @@ import static org.junit.Assert.assertEquals;
 
 import org.junit.Test;
 
-import com.jsirgalaxybase.client.gui.framework.GuiRect;
 import com.jsirgalaxybase.terminal.TerminalLandActionPayload;
+import com.jsirgalaxybase.ui2.geometry.UiRect;
 
 public class LandMapViewportTest {
 
     @Test
     public void mapsNegativeChunkCoordinatesAtEdgesAndCenter() {
-        GuiRect map = new GuiRect(10, 20, 300, 300);
+        UiRect map = new UiRect(10, 20, 300, 300);
         assertArrayEquals(new int[] { -17, -27 }, LandMapViewport.chunkAt(map, -10, -20,
             TerminalLandActionPayload.Zoom.MEDIUM, 10, 20));
         assertArrayEquals(new int[] { -10, -20 }, LandMapViewport.chunkAt(map, -10, -20,
@@ -21,7 +21,7 @@ public class LandMapViewportTest {
 
     @Test
     public void rectangularViewportKeepsSquareCellsAndUsesLongestSideDensity() {
-        GuiRect wide = new GuiRect(10, 20, 450, 270);
+        UiRect wide = new UiRect(10, 20, 450, 270);
         assertEquals(30D, LandMapViewport.cellSize(wide, TerminalLandActionPayload.Zoom.MEDIUM), 0.001D);
         assertEquals(15, LandMapViewport.visibleColumns(wide, TerminalLandActionPayload.Zoom.MEDIUM));
         assertEquals(9, LandMapViewport.visibleRows(wide, TerminalLandActionPayload.Zoom.MEDIUM));
@@ -30,7 +30,7 @@ public class LandMapViewportTest {
         assertArrayEquals(new int[] { 3, 16 }, LandMapViewport.chunkAt(wide, 10, 20,
             TerminalLandActionPayload.Zoom.MEDIUM, 10, 20));
 
-        GuiRect tall = new GuiRect(0, 0, 270, 450);
+        UiRect tall = new UiRect(0, 0, 270, 450);
         assertEquals(30D, LandMapViewport.cellSize(tall, TerminalLandActionPayload.Zoom.MEDIUM), 0.001D);
         assertEquals(9, LandMapViewport.visibleColumns(tall, TerminalLandActionPayload.Zoom.MEDIUM));
         assertEquals(15, LandMapViewport.visibleRows(tall, TerminalLandActionPayload.Zoom.MEDIUM));
@@ -38,7 +38,7 @@ public class LandMapViewportTest {
 
     @Test
     public void allZoomLevelsUseNineFifteenAndThirtyOneCellsOnLongestSide() {
-        GuiRect map = new GuiRect(0, 0, 620, 340);
+        UiRect map = new UiRect(0, 0, 620, 340);
         assertEquals(9, LandMapViewport.visibleColumns(map, TerminalLandActionPayload.Zoom.NEAR));
         assertEquals(15, LandMapViewport.visibleColumns(map, TerminalLandActionPayload.Zoom.MEDIUM));
         assertEquals(31, LandMapViewport.visibleColumns(map, TerminalLandActionPayload.Zoom.FAR));
@@ -46,7 +46,7 @@ public class LandMapViewportTest {
 
     @Test
     public void dragAndZoomKeepBoundedStableCoordinates() {
-        GuiRect map = new GuiRect(0, 0, 310, 310);
+        UiRect map = new UiRect(0, 0, 310, 310);
         assertArrayEquals(new int[] { 9, 12 }, LandMapViewport.panCenter(10, 10, map,
             TerminalLandActionPayload.Zoom.FAR, 10, -20));
         int[] centered = LandMapViewport.zoomCenter(-40, 70, map, TerminalLandActionPayload.Zoom.MEDIUM,

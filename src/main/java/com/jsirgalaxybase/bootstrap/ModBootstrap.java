@@ -12,6 +12,7 @@ import com.jsirgalaxybase.modules.warehouse.infrastructure.minecraft.TerminalAss
 import com.jsirgalaxybase.modules.diagnostics.ClientItemDumpModule;
 import com.jsirgalaxybase.modules.land.LandModule;
 import com.jsirgalaxybase.modules.itempolicy.ItemPolicyModule;
+import com.jsirgalaxybase.modules.quest.QuestModule;
 import com.jsirgalaxybase.modules.servertools.ServerToolsModule;
 import com.jsirgalaxybase.modules.terminal.TerminalModule;
 import com.jsirgalaxybase.modules.warehouse.WarehouseModule;
@@ -39,6 +40,7 @@ public class ModBootstrap {
         moduleContext = new ModuleContext(client, configuration, moduleManager);
 
         moduleManager.addModule(new InstitutionCoreModule());
+        moduleManager.addModule(new QuestModule());
         moduleManager.addModule(new ItemPolicyModule());
         moduleManager.addModule(new LandModule());
         moduleManager.addModule(new WarehouseModule());

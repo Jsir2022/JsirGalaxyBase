@@ -19,13 +19,15 @@ import net.minecraft.world.chunk.Chunk;
 import org.lwjgl.input.Keyboard;
 import org.lwjgl.opengl.GL11;
 
-import com.jsirgalaxybase.client.gui.framework.AbstractGuiPanel;
-import com.jsirgalaxybase.client.gui.framework.GuiRect;
-import com.jsirgalaxybase.client.gui.framework.GuiScene;
 import com.jsirgalaxybase.terminal.TerminalLandActionPayload;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalLandSectionModel;
+import com.jsirgalaxybase.ui2.geometry.UiRect;
 
-public final class TerminalLandMapPanel extends AbstractGuiPanel {
+/**
+ * Standalone client terrain surface.  It deliberately has no dependency on the
+ * legacy Canvas panel/runtime; UI2 and the temporary legacy adapter both host it.
+ */
+public final class TerminalLandMapPanel {
 
     private static final int TOOL_SIZE = 13;
     private static final int TOOL_GAP = 2;
@@ -45,6 +47,7 @@ public final class TerminalLandMapPanel extends AbstractGuiPanel {
     private final Handler handler;
     private final Map<Long, TerminalLandSectionModel.MapCellModel> cells =
         new HashMap<Long, TerminalLandSectionModel.MapCellModel>();
+    private UiRect bounds = new UiRect(0, 0, 0, 0);
     private int pressX;
     private int pressY;
     private boolean pressed;
@@ -66,10 +69,14 @@ public final class TerminalLandMapPanel extends AbstractGuiPanel {
         }
     }
 
-    @Override
-    public void draw(GuiScene scene, int mouseX, int mouseY, float partialTicks) {
-        if (!isVisible()) return;
-        GuiRect map = getBounds();
+    public UiRect getBounds() { return bounds; }
+
+    public void setBounds(UiRect value) {
+        bounds = value == null ? new UiRect(0, 0, 0, 0) : value;
+    }
+
+    public void draw(int mouseX, int mouseY, float partialTicks) {
+        UiRect map = getBounds();
         Gui.drawRect(map.getX(), map.getY(), map.getRight(), map.getBottom(), 0xFF0D1820);
         Gui.drawRect(map.getX(), map.getY(), map.getRight(), map.getY() + 1, 0xFF7995AA);
         Gui.drawRect(map.getX(), map.getBottom() - 1, map.getRight(), map.getBottom(), 0xFF7995AA);
@@ -115,9 +122,8 @@ public final class TerminalLandMapPanel extends AbstractGuiPanel {
         else drawHover(map, mouseX, mouseY);
     }
 
-    @Override
-    public boolean mouseClicked(GuiScene scene, int mouseX, int mouseY, int mouseButton) {
-        GuiRect map = getBounds();
+    public boolean mouseClicked(int mouseX, int mouseY, int mouseButton) {
+        UiRect map = getBounds();
         if (!map.contains(mouseX, mouseY)) {
             contextOpen = false;
             return false;
@@ -153,15 +159,14 @@ public final class TerminalLandMapPanel extends AbstractGuiPanel {
         return false;
     }
 
-    @Override
-    public boolean mouseReleased(GuiScene scene, int mouseX, int mouseY, int mouseButton) {
+    public boolean mouseReleased(int mouseX, int mouseY, int mouseButton) {
         if (mouseButton != 0 || !pressed) return false;
         pressed = false;
         int deltaX = mouseX - pressX;
         int deltaY = mouseY - pressY;
         boolean dragging = Math.abs(deltaX) >= LandMapViewport.DRAG_THRESHOLD
             || Math.abs(deltaY) >= LandMapViewport.DRAG_THRESHOLD;
-        GuiRect map = getBounds();
+        UiRect map = getBounds();
         if (dragging) {
             int[] center = LandMapViewport.panCenter(model.getViewportChunkX(), model.getViewportChunkZ(), map,
                 zoom(), deltaX, deltaY);
@@ -177,9 +182,8 @@ public final class TerminalLandMapPanel extends AbstractGuiPanel {
         return true;
     }
 
-    @Override
-    public boolean mouseScrolled(GuiScene scene, int mouseX, int mouseY, int wheelDelta) {
-        GuiRect map = getBounds();
+    public boolean mouseScrolled(int mouseX, int mouseY, int wheelDelta) {
+        UiRect map = getBounds();
         if (!map.contains(mouseX, mouseY)) return false;
         contextOpen = false;
         TerminalLandActionPayload.Zoom next = LandMapViewport.stepZoom(zoom(), wheelDelta > 0 ? 1 : -1);
@@ -190,8 +194,7 @@ public final class TerminalLandMapPanel extends AbstractGuiPanel {
         return true;
     }
 
-    @Override
-    public boolean keyTyped(GuiScene scene, char typedChar, int keyCode) {
+    public boolean keyTyped(char typedChar, int keyCode) {
         if (keyCode == Keyboard.KEY_ESCAPE && contextOpen) {
             contextOpen = false;
             return true;
@@ -266,7 +269,7 @@ public final class TerminalLandMapPanel extends AbstractGuiPanel {
         return cell.getTitleId() == 0L || cell.getTitleId() == neighbor.getTitleId();
     }
 
-    private void drawHover(GuiRect map, int mouseX, int mouseY) {
+    private void drawHover(UiRect map, int mouseX, int mouseY) {
         if (!map.contains(mouseX, mouseY) || toolAt(map, mouseX, mouseY) >= 0
             || mouseY >= map.getBottom() - STATUS_HEIGHT) return;
         int[] chunk = LandMapViewport.chunkAt(map, model.getViewportChunkX(), model.getViewportChunkZ(),
@@ -341,7 +344,7 @@ public final class TerminalLandMapPanel extends AbstractGuiPanel {
             : tr("jsirgalaxybase.land.feedback." + model.getFeedbackCode().toLowerCase());
     }
 
-    private void drawPlayer(GuiRect map, TerminalLandActionPayload.Zoom zoom) {
+    private void drawPlayer(UiRect map, TerminalLandActionPayload.Zoom zoom) {
         Minecraft minecraft = Minecraft.getMinecraft();
         if (minecraft.thePlayer == null) return;
         double cell = LandMapViewport.cellSize(map, zoom);
@@ -422,7 +425,7 @@ public final class TerminalLandMapPanel extends AbstractGuiPanel {
         tessellator.draw();
     }
 
-    private void drawTools(GuiRect map, int mouseX, int mouseY) {
+    private void drawTools(UiRect map, int mouseX, int mouseY) {
         FontRenderer font = Minecraft.getMinecraft().fontRenderer;
         String[] labels = { "+", "−", "⌖", "↻", tr("jsirgalaxybase.land.map.layer.short") };
         int x = map.getX() + 8;
@@ -442,7 +445,7 @@ public final class TerminalLandMapPanel extends AbstractGuiPanel {
         }
     }
 
-    private void drawStatusBar(GuiRect map, int mouseX, int mouseY) {
+    private void drawStatusBar(UiRect map, int mouseX, int mouseY) {
         FontRenderer font = Minecraft.getMinecraft().fontRenderer;
         int top = map.getBottom() - STATUS_HEIGHT;
         Gui.drawRect(map.getX() + 5, top, map.getRight() - 5, map.getBottom() - 4, 0xD912242F);
@@ -467,7 +470,7 @@ public final class TerminalLandMapPanel extends AbstractGuiPanel {
         return x + 13 + font.getStringWidth(label);
     }
 
-    private void drawContextMenu(GuiRect map, int mouseX, int mouseY) {
+    private void drawContextMenu(UiRect map, int mouseX, int mouseY) {
         FontRenderer font = Minecraft.getMinecraft().fontRenderer;
         int x = Math.max(map.getX() + 4, Math.min(contextX, map.getRight() - CONTEXT_WIDTH - 4));
         int height = CONTEXT_ROW_HEIGHT * 2 + 6;
@@ -511,13 +514,13 @@ public final class TerminalLandMapPanel extends AbstractGuiPanel {
         return true;
     }
 
-    private void openContext(GuiRect map, int mouseX, int mouseY) {
+    private void openContext(UiRect map, int mouseX, int mouseY) {
         contextOpen = true;
         contextX = Math.max(map.getX() + 4, Math.min(mouseX, map.getRight() - CONTEXT_WIDTH - 4));
         contextY = Math.max(map.getY() + 4, Math.min(mouseY, map.getBottom() - CONTEXT_ROW_HEIGHT * 2 - 10));
     }
 
-    private int toolAt(GuiRect map, int mouseX, int mouseY) {
+    private int toolAt(UiRect map, int mouseX, int mouseY) {
         int x = map.getX() + 8;
         int y = map.getY() + 8;
         if (mouseX < x || mouseX >= x + TOOL_SIZE || mouseY < y) return -1;

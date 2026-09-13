@@ -1,7 +1,7 @@
 package com.jsirgalaxybase.terminal.client.component;
 
-import com.jsirgalaxybase.client.gui.framework.GuiRect;
 import com.jsirgalaxybase.terminal.TerminalLandActionPayload;
+import com.jsirgalaxybase.ui2.geometry.UiRect;
 
 public final class LandMapViewport {
 
@@ -9,7 +9,7 @@ public final class LandMapViewport {
 
     private LandMapViewport() {}
 
-    public static int[] chunkAt(GuiRect map, int centerX, int centerZ,
+    public static int[] chunkAt(UiRect map, int centerX, int centerZ,
         TerminalLandActionPayload.Zoom zoom, int mouseX, int mouseY) {
         if (map == null || !map.contains(mouseX, mouseY)) return null;
         double cell = cellSize(map, zoom);
@@ -20,14 +20,14 @@ public final class LandMapViewport {
         return new int[] { saturatingAdd(centerX, offsetX), saturatingAdd(centerZ, offsetZ) };
     }
 
-    public static int[] panCenter(int centerX, int centerZ, GuiRect map,
+    public static int[] panCenter(int centerX, int centerZ, UiRect map,
         TerminalLandActionPayload.Zoom zoom, int deltaX, int deltaY) {
         double cell = cellSize(map, zoom);
         return new int[] { saturatingAdd(centerX, -(int) Math.round(deltaX / cell)),
             saturatingAdd(centerZ, -(int) Math.round(deltaY / cell)) };
     }
 
-    public static int[] zoomCenter(int centerX, int centerZ, GuiRect map,
+    public static int[] zoomCenter(int centerX, int centerZ, UiRect map,
         TerminalLandActionPayload.Zoom oldZoom, TerminalLandActionPayload.Zoom newZoom,
         int mouseX, int mouseY) {
         if (map == null || !map.contains(mouseX, mouseY)) return new int[] { centerX, centerZ };
@@ -57,33 +57,33 @@ public final class LandMapViewport {
         return clampLong(Math.max(min, Math.min(max, (long) requested)));
     }
 
-    public static double cellSize(GuiRect map, TerminalLandActionPayload.Zoom zoom) {
+    public static double cellSize(UiRect map, TerminalLandActionPayload.Zoom zoom) {
         if (map == null) return 1D;
         int side = safeZoom(zoom).getRadius() * 2 + 1;
         return Math.max(1D, Math.max(map.getWidth(), map.getHeight()) / (double) side);
     }
 
-    public static int visibleColumns(GuiRect map, TerminalLandActionPayload.Zoom zoom) {
+    public static int visibleColumns(UiRect map, TerminalLandActionPayload.Zoom zoom) {
         return visibleCells(map == null ? 0 : map.getWidth(), cellSize(map, zoom));
     }
 
-    public static int visibleRows(GuiRect map, TerminalLandActionPayload.Zoom zoom) {
+    public static int visibleRows(UiRect map, TerminalLandActionPayload.Zoom zoom) {
         return visibleCells(map == null ? 0 : map.getHeight(), cellSize(map, zoom));
     }
 
-    public static int cellLeft(GuiRect map, TerminalLandActionPayload.Zoom zoom, int offsetX) {
+    public static int cellLeft(UiRect map, TerminalLandActionPayload.Zoom zoom, int offsetX) {
         return (int) Math.floor(centerPixelX(map) + (offsetX - 0.5D) * cellSize(map, zoom));
     }
 
-    public static int cellTop(GuiRect map, TerminalLandActionPayload.Zoom zoom, int offsetZ) {
+    public static int cellTop(UiRect map, TerminalLandActionPayload.Zoom zoom, int offsetZ) {
         return (int) Math.floor(centerPixelY(map) + (offsetZ - 0.5D) * cellSize(map, zoom));
     }
 
-    public static int cellRight(GuiRect map, TerminalLandActionPayload.Zoom zoom, int offsetX) {
+    public static int cellRight(UiRect map, TerminalLandActionPayload.Zoom zoom, int offsetX) {
         return (int) Math.ceil(centerPixelX(map) + (offsetX + 0.5D) * cellSize(map, zoom));
     }
 
-    public static int cellBottom(GuiRect map, TerminalLandActionPayload.Zoom zoom, int offsetZ) {
+    public static int cellBottom(UiRect map, TerminalLandActionPayload.Zoom zoom, int offsetZ) {
         return (int) Math.ceil(centerPixelY(map) + (offsetZ + 0.5D) * cellSize(map, zoom));
     }
 
@@ -91,11 +91,11 @@ public final class LandMapViewport {
         return Math.max(1, (int) Math.min(Integer.MAX_VALUE, Math.ceil(Math.max(1, pixels) / cell)));
     }
 
-    private static double centerPixelX(GuiRect map) {
+    private static double centerPixelX(UiRect map) {
         return map.getX() + map.getWidth() / 2D;
     }
 
-    private static double centerPixelY(GuiRect map) {
+    private static double centerPixelY(UiRect map) {
         return map.getY() + map.getHeight() / 2D;
     }
 
