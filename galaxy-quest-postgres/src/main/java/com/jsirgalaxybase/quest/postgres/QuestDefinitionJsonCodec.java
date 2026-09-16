@@ -20,6 +20,7 @@ import com.google.gson.JsonObject;
 import com.jsirgalaxybase.quest.core.QuestDefinition;
 import com.jsirgalaxybase.quest.core.QuestBehavior;
 import com.jsirgalaxybase.quest.core.QuestLogic;
+import com.jsirgalaxybase.quest.core.QuestParticipantScope;
 import com.jsirgalaxybase.quest.core.RepeatPolicy;
 import com.jsirgalaxybase.quest.core.RewardDefinition;
 import com.jsirgalaxybase.quest.core.TaskDefinition;
@@ -106,6 +107,7 @@ final class QuestDefinitionJsonCodec {
         object.addProperty("globalShare", value.isGlobalShare());
         object.addProperty("updateSound", value.getUpdateSound());
         object.addProperty("completeSound", value.getCompleteSound());
+        object.addProperty("participantScope", value.getParticipantScope().name());
         return object;
     }
 
@@ -117,6 +119,8 @@ final class QuestDefinitionJsonCodec {
             .progressWhileLocked(bool(object, "progressWhileLocked")).simultaneous(bool(object, "simultaneous"))
             .global(bool(object, "global")).globalShare(bool(object, "globalShare"))
             .updateSound(string(object, "updateSound", "")).completeSound(string(object, "completeSound", ""))
+            .participantScope(QuestParticipantScope.valueOf(string(object, "participantScope",
+                QuestParticipantScope.PLAYER.name())))
             .build();
     }
 

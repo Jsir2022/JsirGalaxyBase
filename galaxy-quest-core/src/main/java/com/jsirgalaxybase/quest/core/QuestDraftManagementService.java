@@ -159,6 +159,7 @@ public final class QuestDraftManagementService {
         else if("behavior.simultaneous".equals(key))builder.simultaneous(strictBoolean(value));
         else if("behavior.global".equals(key))builder.global(strictBoolean(value));
         else if("behavior.globalShare".equals(key))builder.globalShare(strictBoolean(value));
+        else if("behavior.participantScope".equals(key))builder.participantScope(QuestParticipantScope.valueOf(value));
         else if("behavior.updateSound".equals(key))builder.updateSound(boundedOption(value));
         else if("behavior.completeSound".equals(key))builder.completeSound(boundedOption(value));
         else throw new IllegalArgumentException("unknown quest option: "+key);

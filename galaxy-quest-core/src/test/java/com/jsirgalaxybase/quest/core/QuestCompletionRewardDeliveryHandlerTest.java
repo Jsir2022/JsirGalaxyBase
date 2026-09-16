@@ -19,7 +19,7 @@ public class QuestCompletionRewardDeliveryHandlerTest {
             .deliver(lease(target.toString()));
         assertTrue(outcome.isDelivered());
         assertEquals("entitlement", port.entitlement);
-        assertEquals(new UUID(1L, 2L), port.participant.getId());
+        assertEquals(new UUID(1L, 2L), port.recipient);
         assertEquals(target, port.target);
         assertEquals(1234L, port.time);
     }
@@ -41,6 +41,11 @@ public class QuestCompletionRewardDeliveryHandlerTest {
                 .deliver(lease(new UUID(3L, 4L).toString()));
         assertFalse(missing.isDelivered());
         assertFalse(missing.isRetryable());
+        RewardDeliveryOutcome unavailable = new QuestCompletionRewardDeliveryHandler(
+            new Capture(QuestCompletionRewardPort.Result.TARGET_SCOPE_UNAVAILABLE), () -> 1L)
+                .deliver(lease(new UUID(3L, 4L).toString()));
+        assertFalse(unavailable.isDelivered());
+        assertFalse(unavailable.isRetryable());
     }
 
     private static RewardDeliveryLease lease(String target) {
@@ -53,14 +58,14 @@ public class QuestCompletionRewardDeliveryHandlerTest {
     private static final class Capture implements QuestCompletionRewardPort {
         private final Result result;
         private String entitlement;
-        private ParticipantId participant;
+        private UUID recipient;
         private UUID target;
         private long time;
         private Capture(Result result) { this.result = result; }
-        @Override public Result complete(String sourceEntitlementKey, ParticipantId participantId, UUID targetQuestId,
+        @Override public Result complete(String sourceEntitlementKey, UUID recipientPlayerId, UUID targetQuestId,
             long completedAt) {
             entitlement = sourceEntitlementKey;
-            participant = participantId;
+            recipient = recipientPlayerId;
             target = targetQuestId;
             time = completedAt;
             return result;

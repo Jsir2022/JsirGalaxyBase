@@ -33,11 +33,15 @@ public final class AuthenticatedRewardChoiceService {
             Optional<StoredQuestDefinition> stored = definitions.findPublished(questId);
             if (!stored.isPresent()) return RewardChoiceSelectionStatus.NOT_FOUND;
             QuestDefinition quest = stored.get().getDefinition();
+            RewardDefinition reward = findChoiceReward(quest, rewardKey);
+            if (reward == null) return RewardChoiceSelectionStatus.INVALID;
+            RewardChoiceSelectionStatus latest = choices.selectLatest(questId, quest.getVersion(), rewardKey,
+                authenticatedPlayerId, choiceIndex, selectedAt);
+            if (latest != RewardChoiceSelectionStatus.NOT_FOUND) return latest;
+            // Compatibility for entitlement rows created before recipient_player_id existed.
             Optional<QuestProgressSnapshot> progress = runtime.findProgress(
                 ParticipantId.player(authenticatedPlayerId), questId, quest.getVersion());
             if (!progress.isPresent()) return RewardChoiceSelectionStatus.NOT_FOUND;
-            RewardDefinition reward = findChoiceReward(quest, rewardKey);
-            if (reward == null) return RewardChoiceSelectionStatus.INVALID;
             RewardEntitlement entitlement = new RewardEntitlement(ParticipantId.player(authenticatedPlayerId),
                 quest, reward, progress.get().getCycle());
             return choices.select(entitlement.getEntitlementKey(), authenticatedPlayerId, choiceIndex, selectedAt);

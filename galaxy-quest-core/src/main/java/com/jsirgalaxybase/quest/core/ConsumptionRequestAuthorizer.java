@@ -13,16 +13,28 @@ public final class ConsumptionRequestAuthorizer {
     private final QuestRuntimeRepository progress;
     private final QuestCompletionQuery completions;
     private final QuestEngine engine;
+    private final ParticipantMembershipResolver memberships;
+    private final QuestAssignmentPolicy assignments;
 
     public ConsumptionRequestAuthorizer(PublishedQuestCatalog definitions, QuestRuntimeRepository progress,
         QuestCompletionQuery completions, QuestEngine engine) {
-        if (definitions == null || progress == null || completions == null || engine == null) {
+        this(definitions, progress, completions, engine, new PlayerOnlyMembershipResolver(),
+            new ScopedQuestAssignmentPolicy());
+    }
+
+    public ConsumptionRequestAuthorizer(PublishedQuestCatalog definitions, QuestRuntimeRepository progress,
+        QuestCompletionQuery completions, QuestEngine engine, ParticipantMembershipResolver memberships,
+        QuestAssignmentPolicy assignments) {
+        if (definitions == null || progress == null || completions == null || engine == null
+            || memberships == null || assignments == null) {
             throw new IllegalArgumentException("authorizer dependencies must not be null");
         }
         this.definitions = definitions;
         this.progress = progress;
         this.completions = completions;
         this.engine = engine;
+        this.memberships = memberships;
+        this.assignments = assignments;
     }
 
     public ConsumptionRequest authorize(ConsumptionIntent intent, long now) {
@@ -32,11 +44,14 @@ public final class ConsumptionRequestAuthorizer {
         if (!Boolean.parseBoolean(task.getParameters().get("consume"))) {
             throw new IllegalArgumentException("task does not consume resources");
         }
-        ParticipantId participant = ParticipantId.player(intent.getPlayerId());
+        List<ParticipantMembership> selected = assignments.select(definition, memberships.resolve(intent.getPlayerId()));
+        if (selected.isEmpty()) throw new IllegalArgumentException("player has no active participant for quest scope");
+        ParticipantMembership membership = selected.get(0);
+        ParticipantId participant = membership.getParticipantId();
         Optional<QuestProgressSnapshot> stored = progress.findProgress(participant, definition.getId(),
             definition.getVersion());
         Set<java.util.UUID> completed = completions.findCompletedQuestIds(participant);
-        QuestProgressSnapshot normalized = engine.evaluate(participant, definition, stored.orElse(null), null,
+        QuestProgressSnapshot normalized = engine.evaluate(membership, definition, stored.orElse(null), null,
             completed, now).getProgress();
         if (normalized.getStatus() == QuestStatus.LOCKED || normalized.getStatus() == QuestStatus.COMPLETED) {
             throw new IllegalArgumentException("quest is not accepting consumption in status " + normalized.getStatus());

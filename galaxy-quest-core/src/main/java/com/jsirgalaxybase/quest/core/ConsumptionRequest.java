@@ -29,8 +29,8 @@ public final class ConsumptionRequest {
         this.sourceServer = text(sourceServer, "sourceServer");
         this.playerId = Objects.requireNonNull(playerId, "playerId");
         this.participantId = Objects.requireNonNull(participantId, "participantId");
-        if (!participantId.getId().equals(playerId) || participantId.getType() != ParticipantType.PLAYER) {
-            throw new IllegalArgumentException("consumption is restricted to the submitting player's inventory");
+        if (participantId.getType() == ParticipantType.PLAYER && !participantId.getId().equals(playerId)) {
+            throw new IllegalArgumentException("player progress must belong to the submitting player");
         }
         this.questId = Objects.requireNonNull(questId, "questId");
         if (definitionVersion < 1) throw new IllegalArgumentException("definitionVersion must be positive");
@@ -74,6 +74,8 @@ public final class ConsumptionRequest {
         attributes.put("kind", kind);
         attributes.put("questId", questId.toString());
         attributes.put("definitionVersion", Integer.toString(definitionVersion));
+        attributes.put("progressParticipantType", participantId.getType().name());
+        attributes.put("progressParticipantId", participantId.getId().toString());
         attributes.put("value.count", Integer.toString(appliedAmounts.size()));
         for (int i = 0; i < appliedAmounts.size(); i++) {
             long value = appliedAmounts.get(i);

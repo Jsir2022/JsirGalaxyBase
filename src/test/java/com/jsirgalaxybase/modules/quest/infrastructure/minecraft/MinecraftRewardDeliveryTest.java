@@ -7,9 +7,17 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 
 import org.junit.Test;
+
+import com.jsirgalaxybase.quest.core.CommandRewardInvocation;
+import com.jsirgalaxybase.quest.core.ParticipantId;
+import com.jsirgalaxybase.quest.core.RewardDefinition;
+import com.jsirgalaxybase.quest.core.RewardDeliveryLease;
+import com.jsirgalaxybase.quest.core.RewardDeliveryOutcome;
 
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -67,5 +75,20 @@ public class MinecraftRewardDeliveryTest {
             MinecraftScoreboardRewardDeliveryHandler.targetScore(Integer.MAX_VALUE, 1, true));
         assertEquals(Integer.MIN_VALUE,
             MinecraftScoreboardRewardDeliveryHandler.targetScore(Integer.MIN_VALUE, -1, true));
+    }
+
+    @Test public void frozenGroupRecipientIsResolvedAsTheConcretePlayerAndOfflineDeliveryIsDeferred() {
+        UUID recipient=UUID.randomUUID();ParticipantId team=ParticipantId.team(UUID.randomUUID());
+        RewardDeliveryLease lease=new RewardDeliveryLease("team-entitlement",team,recipient,
+            new RewardDefinition("reward","bq_standard:item",Collections.<String,String>emptyMap()),1,"worker",10L);
+        QuestPlayerResolver offline=id->{assertEquals(recipient,id);return null;};
+        QuestPlayerDataFlusher unused=player->{throw new AssertionError("offline player must not be flushed");};
+        RewardDeliveryOutcome item=new MinecraftItemRewardDeliveryHandler("bq_standard:item",offline,unused).deliver(lease);
+        RewardDeliveryOutcome xp=new MinecraftXpRewardDeliveryHandler(offline,unused).deliver(lease);
+        RewardDeliveryOutcome score=new MinecraftScoreboardRewardDeliveryHandler(offline,unused).deliver(lease);
+        RewardDeliveryOutcome command=new MinecraftCommandRewardExecutor(offline,unused).execute(
+            new CommandRewardInvocation(lease.getEntitlementKey(),lease.getParticipantId(),"galaxyreward",false));
+        assertEquals(team,lease.getProgressParticipantId());assertEquals(ParticipantId.player(recipient),lease.getParticipantId());
+        assertTrue(item.isDeferred());assertTrue(xp.isDeferred());assertTrue(score.isDeferred());assertTrue(command.isDeferred());
     }
 }

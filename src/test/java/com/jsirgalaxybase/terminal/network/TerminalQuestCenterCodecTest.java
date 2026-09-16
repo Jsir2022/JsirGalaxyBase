@@ -73,6 +73,24 @@ public class TerminalQuestCenterCodecTest {
         assertEquals(24, decoded.getQuests().size());
     }
 
+    @Test public void roundTripsParticipantMembershipDirectory() {
+        TerminalQuestCenterSectionSnapshot.Member owner=new TerminalQuestCenterSectionSnapshot.Member(
+            "550e8400-e29b-41d4-a716-446655440010","OWNER",1000L,7L);
+        TerminalQuestCenterSectionSnapshot.Member member=new TerminalQuestCenterSectionSnapshot.Member(
+            "550e8400-e29b-41d4-a716-446655440011","MEMBER",2000L,8L);
+        TerminalQuestCenterSectionSnapshot.Participant participant=new TerminalQuestCenterSectionSnapshot.Participant(
+            "TEAM","550e8400-e29b-41d4-a716-446655440012","银河工业组","OWNER",9L,2,
+            Arrays.asList(owner,member));
+        TerminalQuestCenterSectionSnapshot original=TerminalQuestCenterSectionSnapshot.unavailable("test")
+            .withParticipants(Arrays.asList(participant));
+        ByteBuf buffer=Unpooled.buffer();OpenTerminalApprovedMessage.writeQuestCenter(buffer,original);
+        TerminalQuestCenterSectionSnapshot decoded=OpenTerminalApprovedMessage.readQuestCenter(buffer);
+        assertEquals(1,decoded.getParticipants().size());
+        assertEquals(2,decoded.getParticipants().get(0).getMembers().size());
+        assertEquals("MEMBER",decoded.getParticipants().get(0).getMembers().get(1).getRole());
+        assertEquals(8L,decoded.getParticipants().get(0).getMembers().get(1).getMembershipVersion());
+    }
+
     @Test
     public void roundTripsBoundedManagementProjection() {
         List<TerminalQuestCenterSectionSnapshot.Definition> rows=new ArrayList<TerminalQuestCenterSectionSnapshot.Definition>();

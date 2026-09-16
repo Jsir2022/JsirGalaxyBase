@@ -49,6 +49,25 @@ public class AuthenticatedRewardChoiceServiceTest {
         assertEquals(RewardChoiceSelectionStatus.INVALID, service.select(player, questId, "coins", 0, 1L));
     }
 
+    @Test public void frozenGroupRecipientEntitlementWinsOverLegacyPersonalCycle(){
+        UUID player=UUID.randomUUID(),questId=UUID.randomUUID();RewardDefinition choice=new RewardDefinition(
+            "pick","bq_standard:choice",Collections.singletonMap("item.count","2"));
+        QuestDefinition quest=new QuestDefinition(questId,3,"Quest","",QuestLogic.AND,QuestLogic.AND,
+            Collections.<UUID>emptySet(),Collections.<TaskDefinition>emptyList(),Arrays.asList(choice));
+        RewardChoiceSelectionRepository repository=new RewardChoiceSelectionRepository(){
+            public RewardChoiceSelectionStatus select(String key,UUID owner,int index,long time){
+                throw new AssertionError("legacy personal entitlement must not be selected");
+            }
+            public RewardChoiceSelectionStatus selectLatest(UUID q,int version,String reward,UUID owner,int index,long time){
+                assertEquals(questId,q);assertEquals(3,version);assertEquals("pick",reward);assertEquals(player,owner);
+                return RewardChoiceSelectionStatus.SELECTED;
+            }
+        };
+        AuthenticatedRewardChoiceService service=new AuthenticatedRewardChoiceService(new Definitions(quest),
+            new RuntimeStub(player,questId,3,7),repository,new DirectTransaction());
+        assertEquals(RewardChoiceSelectionStatus.SELECTED,service.select(player,questId,"pick",1,99L));
+    }
+
     private static final class RuntimeStub implements QuestRuntimeRepository {
         private final UUID player, quest; private final int version, cycle;
         RuntimeStub(UUID player, UUID quest, int version, int cycle) {

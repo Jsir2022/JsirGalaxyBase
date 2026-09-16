@@ -55,7 +55,7 @@ public final class QuestRuntimeService {
                 .findProgress(participant, definition.getId(), definition.getVersion()).orElse(null);
             Map<String, TaskProgress> observations = projector
                 .project(definition, previousOrEmpty(participant, definition, previous), request.getMembership(), fact);
-            QuestEvaluation evaluation = engine.evaluate(participant, definition, previous, observations,
+            QuestEvaluation evaluation = engine.evaluate(request.getMembership(), definition, previous, observations,
                 request.getCompletedPrerequisites(), now);
             repository.saveProgress(evaluation.getProgress());
             entitlements.addAll(evaluation.getEntitlements());

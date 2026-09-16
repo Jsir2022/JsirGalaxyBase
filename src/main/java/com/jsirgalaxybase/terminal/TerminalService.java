@@ -113,6 +113,8 @@ public final class TerminalService {
     static final TerminalLandPageService landPageService = new TerminalLandPageService();
     static final TerminalPlayerNotificationCenter notificationCenter = new TerminalPlayerNotificationCenter();
     private static volatile QuestCenterQuery questCenterQuery;
+    private static volatile com.jsirgalaxybase.quest.core.ParticipantDirectoryQuery questParticipantDirectoryQuery;
+    private static volatile com.jsirgalaxybase.quest.core.AuthenticatedParticipantAdministrationService questParticipantAdministrationService;
     private static volatile AuthenticatedQuestClaimService questClaimService;
     private static volatile AuthenticatedRewardChoiceService rewardChoiceService;
     private static volatile AuthenticatedQuestTrackingService questTrackingService;
@@ -196,6 +198,8 @@ public final class TerminalService {
 
     /** Installs Base's own quest read model. The caller owns lifecycle; null disables the terminal task center. */
     public static void installQuestCenterQuery(QuestCenterQuery query) { questCenterQuery = query; }
+    public static void installQuestParticipantDirectoryQuery(com.jsirgalaxybase.quest.core.ParticipantDirectoryQuery query) { questParticipantDirectoryQuery = query; }
+    public static void installQuestParticipantAdministrationService(com.jsirgalaxybase.quest.core.AuthenticatedParticipantAdministrationService service) { questParticipantAdministrationService = service; }
     public static void installQuestClaimService(AuthenticatedQuestClaimService service) { questClaimService = service; }
     public static void installRewardChoiceService(AuthenticatedRewardChoiceService service) { rewardChoiceService = service; }
     public static void installQuestTrackingService(AuthenticatedQuestTrackingService service) { questTrackingService = service; }
@@ -846,6 +850,8 @@ public final class TerminalService {
                     ((EntityPlayerMP)player).getUniqueID(),player.getCommandSenderName(),TerminalQuestChapterAlignmentPayload.decode(payload));
                 else if(actionType==TerminalActionType.QUEST_CHAPTER_ADMIN_MOVE_BEFORE)questSnapshot=buildAuthenticatedQuestChapterMoveBefore(
                     ((EntityPlayerMP)player).getUniqueID(),player.getCommandSenderName(),TerminalQuestChapterOrderPayload.decode(payload));
+                else if(isParticipantMutationAction(actionType))questSnapshot=buildAuthenticatedParticipantMutation(
+                    (EntityPlayerMP)player,actionType,TerminalQuestParticipantActionPayload.decode(payload));
                 else questSnapshot=buildAuthenticatedQuestCenterSnapshot(((EntityPlayerMP)player).getUniqueID(),
                     player.getCommandSenderName(),actionType,TerminalQuestActionPayload.decode(payload));
             }catch(RuntimeException failure){
@@ -859,6 +865,90 @@ public final class TerminalService {
             questSnapshot.getServiceState(),questSnapshot.getMessage()));
         return new TerminalOpenApproval.PageSnapshot(TerminalPage.CAREER.getId(),TerminalPage.CAREER.getTitle(),
             TerminalPage.CAREER.getLead(),sections,null,null,null,null,null,null,null,questSnapshot);
+    }
+
+    private static boolean isParticipantMutationAction(TerminalActionType action) {
+        return action == TerminalActionType.QUEST_PARTICIPANT_CREATE
+            || action == TerminalActionType.QUEST_PARTICIPANT_ADD_MEMBER
+            || action == TerminalActionType.QUEST_PARTICIPANT_REMOVE_MEMBER
+            || action == TerminalActionType.QUEST_PARTICIPANT_LEAVE
+            || action == TerminalActionType.QUEST_PARTICIPANT_TRANSFER_OWNER;
+    }
+
+    static TerminalQuestCenterSectionSnapshot buildAuthenticatedParticipantMutation(EntityPlayerMP actor,
+        TerminalActionType action, TerminalQuestParticipantActionPayload payload) {
+        if (actor == null || payload == null || questParticipantAdministrationService == null) {
+            return TerminalQuestCenterSectionSnapshot.unavailable("跨服任务主体管理运行时尚未启用。");
+        }
+        com.jsirgalaxybase.quest.core.ParticipantMutationStatus status;
+        try {
+            com.jsirgalaxybase.quest.core.ParticipantType type = com.jsirgalaxybase.quest.core.ParticipantType
+                .valueOf(payload.getParticipantType().toUpperCase(Locale.ROOT));
+            if (type == com.jsirgalaxybase.quest.core.ParticipantType.PLAYER) {
+                return TerminalQuestCenterSectionSnapshot.unavailable("个人进度主体不能被创建或修改。");
+            }
+            ParticipantId participant = action == TerminalActionType.QUEST_PARTICIPANT_CREATE
+                ? new ParticipantId(type, UUID.randomUUID())
+                : new ParticipantId(type, UUID.fromString(payload.getParticipantId()));
+            UUID actorId = actor.getUniqueID();
+            long now = System.currentTimeMillis();
+            if (action == TerminalActionType.QUEST_PARTICIPANT_CREATE) {
+                status = questParticipantAdministrationService.create(participant, payload.getDisplayName(), actorId,
+                    now);
+            } else if (action == TerminalActionType.QUEST_PARTICIPANT_LEAVE) {
+                status = questParticipantAdministrationService.removeMember(participant, actorId, actorId,
+                    payload.getExpectedRevision(), now);
+            } else {
+                UUID target = resolveQuestParticipantTarget(payload.getTargetPlayer());
+                if (target == null) {
+                    return buildAuthenticatedQuestCenterSnapshot(actorId, actor.getCommandSenderName(),
+                        TerminalActionType.REFRESH_PAGE, TerminalQuestActionPayload.empty())
+                        .withMessage("找不到目标玩家。请输入在线玩家名、服务器缓存中的玩家名或 UUID。");
+                }
+                if (action == TerminalActionType.QUEST_PARTICIPANT_ADD_MEMBER) {
+                    com.jsirgalaxybase.quest.core.ParticipantMemberRole role = com.jsirgalaxybase.quest.core.ParticipantMemberRole
+                        .valueOf(payload.getTargetRole().toUpperCase(Locale.ROOT));
+                    status = questParticipantAdministrationService.addMember(participant, actorId, target, role,
+                        payload.getExpectedRevision(), now);
+                } else if (action == TerminalActionType.QUEST_PARTICIPANT_REMOVE_MEMBER) {
+                    status = questParticipantAdministrationService.removeMember(participant, actorId, target,
+                        payload.getExpectedRevision(), now);
+                } else if (action == TerminalActionType.QUEST_PARTICIPANT_TRANSFER_OWNER) {
+                    status = questParticipantAdministrationService.transferOwnership(participant, actorId, target,
+                        payload.getExpectedRevision(), now);
+                } else {
+                    status = com.jsirgalaxybase.quest.core.ParticipantMutationStatus.INVALID;
+                }
+            }
+        } catch (IllegalArgumentException invalid) {
+            status = com.jsirgalaxybase.quest.core.ParticipantMutationStatus.INVALID;
+        }
+        return buildAuthenticatedQuestCenterSnapshot(actor.getUniqueID(), actor.getCommandSenderName(),
+            TerminalActionType.REFRESH_PAGE, TerminalQuestActionPayload.empty())
+            .withMessage(participantMutationMessage(status));
+    }
+
+    private static UUID resolveQuestParticipantTarget(String value) {
+        if (value == null || value.trim().isEmpty()) return null;
+        try { return UUID.fromString(value.trim()); } catch (IllegalArgumentException ignored) {}
+        net.minecraft.server.MinecraftServer server = net.minecraft.server.MinecraftServer.getServer();
+        if (server == null) return null;
+        EntityPlayerMP online = server.getConfigurationManager() == null ? null
+            : server.getConfigurationManager().func_152612_a(value.trim());
+        if (online != null) return online.getUniqueID();
+        com.mojang.authlib.GameProfile cached = server.func_152358_ax() == null ? null
+            : server.func_152358_ax().func_152655_a(value.trim());
+        return cached == null ? null : cached.getId();
+    }
+
+    private static String participantMutationMessage(com.jsirgalaxybase.quest.core.ParticipantMutationStatus status) {
+        if (status == com.jsirgalaxybase.quest.core.ParticipantMutationStatus.APPLIED) return "任务主体成员关系已更新。";
+        if (status == com.jsirgalaxybase.quest.core.ParticipantMutationStatus.ALREADY_ACTIVE) return "目标玩家已有同类型的有效主体关系。";
+        if (status == com.jsirgalaxybase.quest.core.ParticipantMutationStatus.NOT_AUTHORIZED) return "当前玩家没有修改该任务主体的权限。";
+        if (status == com.jsirgalaxybase.quest.core.ParticipantMutationStatus.VERSION_CONFLICT) return "主体成员版本已变化，请刷新后重试。";
+        if (status == com.jsirgalaxybase.quest.core.ParticipantMutationStatus.OWNER_TRANSFER_REQUIRED) return "所有者离开前必须先转让所有权。";
+        if (status == com.jsirgalaxybase.quest.core.ParticipantMutationStatus.NOT_FOUND) return "任务主体或目标成员不存在。";
+        return "任务主体请求无效，状态没有改变。";
     }
 
     static TerminalQuestCenterSectionSnapshot buildAuthenticatedQuestDraftEdit(UUID playerId,String playerName,
@@ -1094,7 +1184,7 @@ public final class TerminalService {
         QuestCenterPageRequest request=new QuestCenterPageRequest(safeIntent.getChapterId(),safeIntent.getFilter(),
             safeIntent.getQuery(),safeIntent.getChapterPage(),6,safeIntent.getQuestPage(),7);
         ParticipantId participant=ParticipantId.player(authenticatedPlayerId);
-        String message="";
+        String message=participantSummary(authenticatedPlayerId);
         if(actionType==TerminalActionType.QUEST_CLAIM){
             if(safeIntent.getQuestId().isEmpty())message="未选择要领取奖励的任务。";
             else if(questClaimService==null)message="奖励领取运行时尚未启用，任务状态没有改变。";
@@ -1115,9 +1205,41 @@ public final class TerminalService {
                 UUID.fromString(safeIntent.getQuestId()),System.currentTimeMillis());message=!tracked.isPresent()?"任务不存在或尚未发布。":tracked.get().booleanValue()?"已加入跨服任务追踪。":"已取消任务追踪。";}
             catch(IllegalArgumentException invalid){message="任务标识无效，追踪状态没有改变。";}
         }
-        QuestCenterPage page=questCenterQuery.loadPage(participant,request);
+        QuestCenterPage page=questCenterQuery instanceof com.jsirgalaxybase.quest.core.AuthenticatedQuestCenterQuery
+            ?((com.jsirgalaxybase.quest.core.AuthenticatedQuestCenterQuery)questCenterQuery)
+                .loadPageForPlayer(authenticatedPlayerId,request)
+            :questCenterQuery.loadPage(participant,request);
         boolean detail=!safeIntent.getQuestId().isEmpty()&&actionType!=TerminalActionType.QUEST_BACK;
-        return questCenterMapper.map(page,safeIntent.getFilter(),safeIntent.getQuery(),safeIntent.getQuestId(),detail,message);
+        return questCenterMapper.map(page,safeIntent.getFilter(),safeIntent.getQuery(),safeIntent.getQuestId(),detail,message)
+            .withParticipants(participantSnapshots(authenticatedPlayerId));
+    }
+
+    private static String participantSummary(UUID playerId){
+        if(questParticipantDirectoryQuery==null)return "进度主体：个人";
+        java.util.List<com.jsirgalaxybase.quest.core.ParticipantDirectoryEntry> entries=
+            questParticipantDirectoryQuery.findActiveForPlayer(playerId);StringBuilder value=new StringBuilder("进度主体：个人");
+        for(com.jsirgalaxybase.quest.core.ParticipantDirectoryEntry entry:entries)value.append(" · ")
+            .append(entry.getParticipantId().getType().name()).append(' ').append(entry.getDisplayName())
+            .append(" (").append(entry.getMemberCount()).append("人/").append(entry.getRole().name()).append(')');
+        return value.toString();
+    }
+
+    private static java.util.List<TerminalQuestCenterSectionSnapshot.Participant> participantSnapshots(UUID playerId){
+        if(questParticipantDirectoryQuery==null)return java.util.Collections.emptyList();
+        java.util.List<TerminalQuestCenterSectionSnapshot.Participant> result=new java.util.ArrayList<TerminalQuestCenterSectionSnapshot.Participant>();
+        for(com.jsirgalaxybase.quest.core.ParticipantDirectoryEntry entry:questParticipantDirectoryQuery.findActiveForPlayer(playerId)){
+            if(result.size()>=3)break;
+            java.util.List<TerminalQuestCenterSectionSnapshot.Member> members=new java.util.ArrayList<TerminalQuestCenterSectionSnapshot.Member>();
+            for(com.jsirgalaxybase.quest.core.ParticipantMemberEntry member:questParticipantDirectoryQuery.findMembers(playerId,entry.getParticipantId())){
+                if(members.size()>=64)break;
+                members.add(new TerminalQuestCenterSectionSnapshot.Member(member.getPlayerId().toString(),
+                    member.getRole().name(),member.getJoinedAt(),member.getMembershipVersion()));
+            }
+            result.add(new TerminalQuestCenterSectionSnapshot.Participant(entry.getParticipantId().getType().name(),
+                entry.getParticipantId().getId().toString(),entry.getDisplayName(),entry.getRole().name(),
+                entry.getRevision(),entry.getMemberCount(),members));
+        }
+        return result;
     }
 
     private static TerminalQuestCenterSectionSnapshot buildQuestManagementSnapshot(UUID playerId,String playerName,
@@ -1218,7 +1340,7 @@ public final class TerminalService {
         List<String> prerequisites=new ArrayList<String>();for(UUID value:definition.getPrerequisites()){if(prerequisites.size()>=64)break;prerequisites.add(value.toString());}
         List<TerminalQuestCenterSectionSnapshot.Element> tasks=new ArrayList<TerminalQuestCenterSectionSnapshot.Element>();for(com.jsirgalaxybase.quest.core.TaskDefinition value:definition.getTasks()){if(tasks.size()>=64)break;tasks.add(new TerminalQuestCenterSectionSnapshot.Element(value.getKey(),value.getTypeId(),value.isOptional(),boundedParameters(value.getParameters())));}
         List<TerminalQuestCenterSectionSnapshot.Element> rewards=new ArrayList<TerminalQuestCenterSectionSnapshot.Element>();for(com.jsirgalaxybase.quest.core.RewardDefinition value:definition.getRewards()){if(rewards.size()>=64)break;rewards.add(new TerminalQuestCenterSectionSnapshot.Element(value.getKey(),value.getTypeId(),false,boundedParameters(value.getParameters())));}
-        java.util.Map<String,String> options=new java.util.LinkedHashMap<String,String>();com.jsirgalaxybase.quest.core.QuestBehavior behavior=definition.getBehavior();options.put("repeat.cooldownMillis",String.valueOf(definition.getRepeatPolicy().getCooldownMillis()));options.put("repeat.relative",String.valueOf(definition.getRepeatPolicy().isRelative()));options.put("behavior.visibility",behavior.getVisibility().name());options.put("behavior.icon",safeBounded(behavior.getIconReference(),256));options.put("behavior.main",String.valueOf(behavior.isMain()));options.put("behavior.silent",String.valueOf(behavior.isSilent()));options.put("behavior.autoClaim",String.valueOf(behavior.isAutoClaim()));options.put("behavior.progressWhileLocked",String.valueOf(behavior.isProgressWhileLocked()));options.put("behavior.simultaneous",String.valueOf(behavior.isSimultaneous()));options.put("behavior.global",String.valueOf(behavior.isGlobal()));options.put("behavior.globalShare",String.valueOf(behavior.isGlobalShare()));options.put("behavior.updateSound",safeBounded(behavior.getUpdateSound(),256));options.put("behavior.completeSound",safeBounded(behavior.getCompleteSound(),256));
+        java.util.Map<String,String> options=new java.util.LinkedHashMap<String,String>();com.jsirgalaxybase.quest.core.QuestBehavior behavior=definition.getBehavior();options.put("repeat.cooldownMillis",String.valueOf(definition.getRepeatPolicy().getCooldownMillis()));options.put("repeat.relative",String.valueOf(definition.getRepeatPolicy().isRelative()));options.put("behavior.visibility",behavior.getVisibility().name());options.put("behavior.icon",safeBounded(behavior.getIconReference(),256));options.put("behavior.main",String.valueOf(behavior.isMain()));options.put("behavior.silent",String.valueOf(behavior.isSilent()));options.put("behavior.autoClaim",String.valueOf(behavior.isAutoClaim()));options.put("behavior.progressWhileLocked",String.valueOf(behavior.isProgressWhileLocked()));options.put("behavior.simultaneous",String.valueOf(behavior.isSimultaneous()));options.put("behavior.global",String.valueOf(behavior.isGlobal()));options.put("behavior.globalShare",String.valueOf(behavior.isGlobalShare()));options.put("behavior.participantScope",behavior.getParticipantScope().name());options.put("behavior.updateSound",safeBounded(behavior.getUpdateSound(),256));options.put("behavior.completeSound",safeBounded(behavior.getCompleteSound(),256));
         if(impact!=null){options.put("impact.direct",String.valueOf(directDependents(impact)));options.put("impact.transitive",String.valueOf(Math.max(0,impact.getDependents().size()-directDependents(impact))));options.put("impact.placements",String.valueOf(impact.getPlacements().size()));options.put("impact.truncated",String.valueOf(impact.isTruncated()));options.put("impact.safeToRetire",String.valueOf(impact.isSafeToRetire()));options.put("impact.summary",impactSummary(impact));}
         return new TerminalQuestCenterSectionSnapshot.DefinitionDetail(summary,safeBounded(definition.getDescription(),4096),definition.getPrerequisiteLogic().name(),definition.getTaskLogic().name(),prerequisites,tasks,rewards,options);
     }

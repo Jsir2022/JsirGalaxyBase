@@ -1,6 +1,7 @@
 package com.jsirgalaxybase.quest.core;
 
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.UUID;
 
 /** Resolves version and cycle on the server before claiming rewards for the authenticated player. */
@@ -22,9 +23,19 @@ public final class AuthenticatedQuestClaimService {
             Optional<StoredQuestDefinition> published=definitions.findPublished(questId);
             if(!published.isPresent())return RewardClaimStatus.NOT_FOUND;
             int version=published.get().getDefinition().getVersion();
-            Optional<QuestProgressSnapshot> progress=runtime.findProgress(ParticipantId.player(authenticatedPlayerId),questId,version);
-            if(!progress.isPresent())return RewardClaimStatus.NOT_FOUND;
-            return claims.claim(questId,version,progress.get().getCycle(),authenticatedPlayerId,claimedAt);
+            Optional<RewardClaimTarget> target=claims.findNextRecipientTarget(questId,version,authenticatedPlayerId);
+            if(target.isPresent()) return claims.claim(target.get(),questId,version,authenticatedPlayerId,claimedAt);
+            OptionalInt recipientCycle=claims.findLatestRecipientCycle(questId,version,authenticatedPlayerId);
+            int cycle;
+            if(recipientCycle.isPresent()) cycle=recipientCycle.getAsInt();
+            else {
+                // Compatibility for entitlement rows created before recipient_player_id existed.
+                Optional<QuestProgressSnapshot> progress=runtime.findProgress(
+                    ParticipantId.player(authenticatedPlayerId),questId,version);
+                if(!progress.isPresent())return RewardClaimStatus.NOT_FOUND;
+                cycle=progress.get().getCycle();
+            }
+            return claims.claim(questId,version,cycle,authenticatedPlayerId,claimedAt);
         });
     }
 }

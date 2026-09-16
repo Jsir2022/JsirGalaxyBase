@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 
 import java.util.Collections;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.UUID;
 
@@ -25,9 +26,32 @@ public class AuthenticatedQuestClaimServiceTest {
         assertEquals(RewardClaimStatus.NOT_FOUND,service.claim(UUID.randomUUID(),UUID.randomUUID(),0L));
         assertEquals(null,claims.quest);
     }
+    @Test public void frozenGroupRecipientCycleWinsOverLegacyPersonalProgress(){
+        UUID player=UUID.randomUUID(),quest=UUID.randomUUID();QuestDefinition definition=definition(quest,7);
+        RecordingClaims claims=new RecordingClaims();claims.recipientCycle=OptionalInt.of(9);
+        AuthenticatedQuestClaimService service=new AuthenticatedQuestClaimService(new Definitions(definition),
+            new Runtime(new QuestProgressSnapshot(ParticipantId.player(player),quest,7,QuestStatus.COMPLETED,
+                Collections.emptyMap(),10L,4)),claims,new DirectTransaction());
+        assertEquals(RewardClaimStatus.CLAIMED,service.claim(player,quest,123L));
+        assertEquals(9,claims.cycle);
+    }
+    @Test public void exactFrozenGroupTargetIsUsedInsteadOfAmbiguousCycleClaim(){
+        UUID player=UUID.randomUUID(),quest=UUID.randomUUID();QuestDefinition definition=definition(quest,7);
+        RecordingClaims claims=new RecordingClaims();claims.target=Optional.of(new RewardClaimTarget(
+            new ParticipantId(ParticipantType.TEAM,UUID.randomUUID()),2));
+        AuthenticatedQuestClaimService service=new AuthenticatedQuestClaimService(new Definitions(definition),
+            new Runtime(null),claims,new DirectTransaction());
+        assertEquals(RewardClaimStatus.CLAIMED,service.claim(player,quest,123L));
+        assertEquals(claims.target.get().getParticipantId(),claims.claimedTarget.getParticipantId());
+        assertEquals(2,claims.claimedTarget.getCycle());
+    }
     private static QuestDefinition definition(UUID id,int version){return new QuestDefinition(id,version,"Q","",
         QuestLogic.AND,QuestLogic.AND,Collections.emptySet(),Collections.emptyList(),Collections.emptyList(),RepeatPolicy.never());}
     private static final class RecordingClaims implements RewardClaimRepository{private UUID quest,player;private int version,cycle;private long time;
+        private OptionalInt recipientCycle=OptionalInt.empty();private Optional<RewardClaimTarget> target=Optional.empty();private RewardClaimTarget claimedTarget;
+        public Optional<RewardClaimTarget> findNextRecipientTarget(UUID q,int v,UUID p){return target;}
+        public RewardClaimStatus claim(RewardClaimTarget target,UUID q,int v,UUID p,long t){claimedTarget=target;return claim(q,v,target.getCycle(),p,t);}
+        public OptionalInt findLatestRecipientCycle(UUID q,int v,UUID p){return recipientCycle;}
         public RewardClaimStatus claim(UUID q,int v,int c,UUID p,long t){quest=q;version=v;cycle=c;player=p;time=t;return RewardClaimStatus.CLAIMED;}}
     private static final class DirectTransaction implements QuestTransaction{public <T>T inTransaction(Work<T> work){return work.execute();}}
     private static final class Runtime implements QuestRuntimeRepository{private final QuestProgressSnapshot value;private Runtime(QuestProgressSnapshot value){this.value=value;}

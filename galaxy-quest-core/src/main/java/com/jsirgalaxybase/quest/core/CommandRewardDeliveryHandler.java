@@ -21,7 +21,7 @@ public final class CommandRewardDeliveryHandler implements RewardDeliveryHandler
         String template = lease.getReward().getParameters().get("command");
         if (template == null) return RewardDeliveryOutcome.failed("invalid-reward:command", false);
         String name = participants.displayName(lease.getParticipantId());
-        if (name == null || name.isEmpty()) return RewardDeliveryOutcome.failed("participant-unavailable", true);
+        if (name == null || name.isEmpty()) return RewardDeliveryOutcome.deferred("participant-unavailable");
         String command = normalize(template.replace("VAR_NAME", name)
             .replace("VAR_UUID", lease.getParticipantId().getId().toString()));
         boolean viaPlayer = bool(lease.getReward().getParameters().get("viaPlayer"), false);

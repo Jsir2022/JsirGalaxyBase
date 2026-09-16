@@ -159,8 +159,8 @@ public final class JdbcQuestChapterRepository implements QuestChapterRepository,
             List<StoredQuestChapter> result = new ArrayList<StoredQuestChapter>();
             String sql = "SELECT lifecycle,content_json::text,content_hash,"
                 + "COALESCE(EXTRACT(EPOCH FROM published_at)*1000,0)::bigint "
-                + "FROM galaxy_quest_chapter_definition" + where
-                + " LEFT JOIN galaxy_quest_chapter_catalog catalog ON catalog.chapter_id=galaxy_quest_chapter_definition.chapter_id"
+                + "FROM galaxy_quest_chapter_definition"
+                + " LEFT JOIN galaxy_quest_chapter_catalog catalog ON catalog.chapter_id=galaxy_quest_chapter_definition.chapter_id" + where
                 + " ORDER BY COALESCE(catalog.sort_order,9223372036854775807),galaxy_quest_chapter_definition.created_at DESC,galaxy_quest_chapter_definition.chapter_id,definition_version DESC LIMIT ? OFFSET ?";
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 int index = bind(statement, request);

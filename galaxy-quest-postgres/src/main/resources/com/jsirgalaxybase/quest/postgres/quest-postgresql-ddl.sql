@@ -48,6 +48,39 @@ CREATE TABLE IF NOT EXISTS galaxy_quest_fact (
     PRIMARY KEY (source_server, event_id)
 );
 
+CREATE TABLE IF NOT EXISTS galaxy_quest_participant (
+    participant_type VARCHAR(16) NOT NULL CHECK (participant_type IN ('PARTY', 'TEAM', 'PUBLIC')),
+    participant_id UUID NOT NULL,
+    display_name VARCHAR(128) NOT NULL,
+    lifecycle VARCHAR(16) NOT NULL DEFAULT 'ACTIVE' CHECK (lifecycle IN ('ACTIVE', 'ARCHIVED')),
+    revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (participant_type, participant_id)
+);
+
+CREATE TABLE IF NOT EXISTS galaxy_quest_participant_membership (
+    participant_type VARCHAR(16) NOT NULL CHECK (participant_type IN ('PARTY', 'TEAM', 'PUBLIC')),
+    participant_id UUID NOT NULL,
+    player_id UUID NOT NULL,
+    member_role VARCHAR(16) NOT NULL DEFAULT 'MEMBER' CHECK (member_role IN ('OWNER', 'ADMIN', 'MEMBER')),
+    joined_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    left_at TIMESTAMPTZ,
+    membership_version BIGINT NOT NULL DEFAULT 0 CHECK (membership_version >= 0),
+    CHECK (left_at IS NULL OR left_at >= joined_at),
+    FOREIGN KEY (participant_type, participant_id)
+        REFERENCES galaxy_quest_participant (participant_type, participant_id),
+    PRIMARY KEY (participant_type, participant_id, player_id, joined_at)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS galaxy_quest_one_active_scoped_membership_idx
+    ON galaxy_quest_participant_membership (participant_type, player_id)
+    WHERE left_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS galaxy_quest_participant_active_members_idx
+    ON galaxy_quest_participant_membership (participant_type, participant_id, joined_at, player_id)
+    WHERE left_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS galaxy_quest_progress (
     participant_type VARCHAR(16) NOT NULL CHECK (participant_type IN ('PLAYER', 'PARTY', 'TEAM', 'PUBLIC')),
     participant_id UUID NOT NULL,
@@ -80,6 +113,7 @@ CREATE TABLE IF NOT EXISTS galaxy_quest_reward_entitlement (
     entitlement_key VARCHAR(512) PRIMARY KEY,
     participant_type VARCHAR(16) NOT NULL,
     participant_id UUID NOT NULL,
+    recipient_player_id UUID NOT NULL,
     quest_id UUID NOT NULL,
     definition_version INTEGER NOT NULL,
     cycle INTEGER NOT NULL CHECK (cycle >= 0),
@@ -89,6 +123,7 @@ CREATE TABLE IF NOT EXISTS galaxy_quest_reward_entitlement (
     delivery_status VARCHAR(16) NOT NULL DEFAULT 'PENDING'
         CHECK (delivery_status IN ('CLAIMABLE', 'PENDING', 'DELIVERING', 'DELIVERED', 'FAILED', 'ABANDONED')),
     attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    failure_count INTEGER NOT NULL DEFAULT 0 CHECK (failure_count >= 0),
     lease_owner VARCHAR(128),
     lease_until TIMESTAMPTZ,
     next_attempt_at TIMESTAMPTZ,
@@ -96,7 +131,7 @@ CREATE TABLE IF NOT EXISTS galaxy_quest_reward_entitlement (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     claimed_at TIMESTAMPTZ,
     delivered_at TIMESTAMPTZ,
-    UNIQUE (participant_type, participant_id, quest_id, definition_version, cycle, reward_key)
+    UNIQUE (participant_type, participant_id, recipient_player_id, quest_id, definition_version, cycle, reward_key)
 );
 
 CREATE TABLE IF NOT EXISTS galaxy_quest_reward_delivery_attempt (
@@ -129,8 +164,8 @@ CREATE TABLE IF NOT EXISTS galaxy_quest_consumption_submission (
     submission_key VARCHAR(512) PRIMARY KEY,
     source_server VARCHAR(64) NOT NULL,
     player_id UUID NOT NULL,
-    participant_type VARCHAR(16) NOT NULL CHECK (participant_type = 'PLAYER'),
-    participant_id UUID NOT NULL CHECK (participant_id = player_id),
+    participant_type VARCHAR(16) NOT NULL CHECK (participant_type IN ('PLAYER','PARTY','TEAM','PUBLIC')),
+    participant_id UUID NOT NULL,
     quest_id UUID NOT NULL,
     definition_version INTEGER NOT NULL CHECK (definition_version > 0),
     task_key VARCHAR(128) NOT NULL,

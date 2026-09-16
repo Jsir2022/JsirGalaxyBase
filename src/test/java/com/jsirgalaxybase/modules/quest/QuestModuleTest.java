@@ -19,13 +19,14 @@ import com.jsirgalaxybase.modules.core.InstitutionCoreModule;
 import com.jsirgalaxybase.modules.core.banking.infrastructure.BankingInfrastructure;
 import com.jsirgalaxybase.modules.core.banking.infrastructure.jdbc.JdbcConnectionManager;
 import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.QuestGameplayEventHandler;
+import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.QuestRewardDeliveryController;
 import com.jsirgalaxybase.quest.core.ParticipantId;
 import com.jsirgalaxybase.quest.core.QuestCenterQuery;
 import com.jsirgalaxybase.quest.core.QuestCenterSnapshot;
 import com.jsirgalaxybase.terminal.TerminalService;
 
 public class QuestModuleTest {
-    @After public void resetTerminalQuery(){TerminalService.installQuestCenterQuery(null);TerminalService.installQuestClaimService(null);TerminalService.installRewardChoiceService(null);TerminalService.installQuestTrackingService(null);TerminalService.installQuestDefinitionManagementQuery(null);TerminalService.installQuestDraftManagementService(null);TerminalService.installQuestChapterManagementQuery(null);TerminalService.installQuestChapterDependencyQuery(null);TerminalService.installQuestChapterManagementService(null);TerminalService.installQuestChapterCloneService(null);TerminalService.installQuestChapterOrderingService(null);TerminalService.installQuestChapterAlignmentService(null);}
+    @After public void resetTerminalQuery(){TerminalService.installQuestCenterQuery(null);TerminalService.installQuestClaimService(null);TerminalService.installRewardChoiceService(null);TerminalService.installQuestTrackingService(null);TerminalService.installQuestDefinitionManagementQuery(null);TerminalService.installQuestDraftManagementService(null);TerminalService.installQuestChapterManagementQuery(null);TerminalService.installQuestChapterDependencyQuery(null);TerminalService.installQuestChapterManagementService(null);TerminalService.installQuestChapterCloneService(null);TerminalService.installQuestChapterOrderingService(null);TerminalService.installQuestChapterAlignmentService(null);TerminalService.installQuestParticipantDirectoryQuery(null);TerminalService.installQuestParticipantAdministrationService(null);}
 
     @Test
     public void disabledConfigurationDoesNotPrepareQuestDatabase() throws Exception {
@@ -65,6 +66,8 @@ public class QuestModuleTest {
         assertNotNull(quest.getDraftManagementService());assertNotNull(quest.getDefinitionManagementQuery());
         assertNotNull(quest.getChapterManagementQuery());assertNotNull(quest.getChapterManagementService());
         assertNotNull(quest.getChapterAlignmentService());
+        assertNotNull(quest.getParticipantAdministrationService());
+        assertNotNull(quest.getRewardDeliveryController());
     }
 
     private static ModConfiguration configuration(boolean enabled)throws Exception{
@@ -85,6 +88,8 @@ public class QuestModuleTest {
         @Override protected QuestCenterQuery createAndValidateQuery(JdbcConnectionManager shared){createCalled=true;return query;}
         @Override protected void registerTrackingSync(QuestCenterQuery query){}
         @Override protected void registerGameplayEvents(QuestGameplayEventHandler handler){}
+        @Override protected void registerRewardDelivery(QuestRewardDeliveryController controller){}
+        @Override protected void unregisterRewardDelivery(QuestRewardDeliveryController controller){}
     }
     private static final class FixedInstitutionModule extends InstitutionCoreModule{
         private final BankingInfrastructure banking;private FixedInstitutionModule(BankingInfrastructure banking){this.banking=banking;}

@@ -49,10 +49,14 @@ public final class RewardDeliveryWorker {
                     workerId, lease.getAttempt(), finishedAt));
                 if (confirmed) deliveredCount++; else stale++;
             } else {
-                final boolean retryable = outcome.isRetryable() && lease.getAttempt() < maxAttempts;
                 final long retryAt = saturatingAdd(finishedAt, retryDelayMillis);
-                confirmed = transaction.inTransaction(() -> repository.markFailed(lease.getEntitlementKey(), workerId,
-                    lease.getAttempt(), finalOutcome.getError(), finishedAt, retryAt, retryable));
+                final boolean retryable = outcome.isDeferred()
+                    || outcome.isRetryable() && lease.getFailureCount() + 1 < maxAttempts;
+                confirmed = outcome.isDeferred()
+                    ?transaction.inTransaction(() -> repository.markDeferred(lease.getEntitlementKey(),workerId,
+                        lease.getAttempt(),finalOutcome.getError(),finishedAt,retryAt))
+                    :transaction.inTransaction(() -> repository.markFailed(lease.getEntitlementKey(), workerId,
+                        lease.getAttempt(), finalOutcome.getError(), finishedAt, retryAt, retryable));
                 if (!confirmed) stale++;
                 else if (retryable) retryCount++;
                 else abandonedCount++;

@@ -28,7 +28,7 @@ public final class MinecraftScoreboardRewardDeliveryHandler implements RewardDel
         if (lease.getParticipantId().getType() != ParticipantType.PLAYER) return RewardDeliveryOutcome.failed(
             "unsupported-participant:" + lease.getParticipantId().getType(), false);
         EntityPlayerMP player = players.findOnline(lease.getParticipantId().getId());
-        if (player == null) return RewardDeliveryOutcome.failed("player-offline", true);
+        if (player == null) return RewardDeliveryOutcome.deferred("player-offline");
         String objectiveName = lease.getReward().getParameters().get("score");
         if (objectiveName == null || objectiveName.trim().isEmpty()) return RewardDeliveryOutcome.failed(
             "invalid-reward:score", false);

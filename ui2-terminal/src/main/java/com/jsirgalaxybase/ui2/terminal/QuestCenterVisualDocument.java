@@ -7,10 +7,15 @@ import com.jsirgalaxybase.ui2.component.StandardWidgets;
 import com.jsirgalaxybase.ui2.component.UiActionHandler;
 import com.jsirgalaxybase.ui2.core.UiContext;
 import com.jsirgalaxybase.ui2.core.UiElement;
+import com.jsirgalaxybase.ui2.core.UiNode;
 import com.jsirgalaxybase.ui2.geometry.Insets;
+import com.jsirgalaxybase.ui2.geometry.UiRect;
 import com.jsirgalaxybase.ui2.geometry.UiSize;
 import com.jsirgalaxybase.ui2.input.InputResult;
 import com.jsirgalaxybase.ui2.input.UiEvent;
+import com.jsirgalaxybase.ui2.input.UiInputHandler;
+import com.jsirgalaxybase.ui2.input.UiInputNode;
+import com.jsirgalaxybase.ui2.input.UiKeyCode;
 import com.jsirgalaxybase.ui2.layout.LayoutKind;
 import com.jsirgalaxybase.ui2.layout.LayoutSpec;
 
@@ -19,15 +24,27 @@ public class QuestCenterVisualDocument extends ComponentUiDocument {
     private QuestCenterVisualModel model;
     private final TerminalActionPort shellActions;
     private final QuestCenterActionPort actions;
+    private final Runnable invalidation;
     private TerminalWindowProfile profile;
+    private boolean participantManagementOpen;
+    private int selectedParticipant;
+    private String createType="PARTY",createName="",targetPlayer="",targetRole="MEMBER";
+    private int focusedField=-1,width,height;
+    private PendingParticipantAction pendingParticipantAction;
 
     public QuestCenterVisualDocument(QuestCenterVisualModel model, TerminalActionPort shellActions,
         QuestCenterActionPort actions, TerminalWindowProfile profile) {
+        this(model,shellActions,actions,profile,new Runnable(){public void run(){}});
+    }
+
+    public QuestCenterVisualDocument(QuestCenterVisualModel model, TerminalActionPort shellActions,
+        QuestCenterActionPort actions, TerminalWindowProfile profile,Runnable invalidation) {
         super(StandardWidgets.create());
         if (model == null) throw new IllegalArgumentException("model is required");
         this.model=model;this.shellActions=shellActions==null?TerminalActionPort.NONE:shellActions;
         this.actions=actions==null?QuestCenterActionPort.NONE:actions;
         this.profile=profile==null?TerminalWindowProfile.STANDARD:profile;
+        this.invalidation=invalidation==null?new Runnable(){public void run(){}}:invalidation;
     }
 
     public final void updateVisualModel(QuestCenterVisualModel value) {
@@ -36,7 +53,13 @@ public class QuestCenterVisualDocument extends ComponentUiDocument {
     }
 
     @Override public UiElement build(UiContext context) {
-        UiElement content=model.getView()==QuestCenterVisualModel.View.DETAIL&&model.getDetail()!=null?detail():browse();
+        UiElement content=participantManagementOpen?participantManagement()
+            :model.getView()==QuestCenterVisualModel.View.DETAIL&&model.getDetail()!=null?detail():browse();
+        if(pendingParticipantAction!=null)content=UiElement.type("Stack").key("quest-participant-confirm-stack")
+            .child(content).child(UiElement.type("Dialog").key("quest-participant-confirm")
+                .prop(StandardWidgets.TEXT,pendingParticipantAction.title)
+                .prop(StandardWidgets.DETAIL,pendingParticipantAction.detail)
+                .prop(StandardWidgets.CANCEL_TEXT,"取消").prop(StandardWidgets.CONFIRM_TEXT,"确认").build()).build();
         return TerminalVisualShell.build(model.getShell(),content,shellActions,"任务中心","career");
     }
 
@@ -46,7 +69,14 @@ public class QuestCenterVisualDocument extends ComponentUiDocument {
             .child(filter("quest-filter-all","全部","all"))
             .child(filter("quest-filter-active","进行中","active"))
             .child(filter("quest-filter-claim","待领取","claimable"))
+            .child(button("quest-participant-open","主体管理",new Runnable(){public void run(){participantManagementOpen=true;selectedParticipant=0;invalidation.run();}},true))
             .child(button("quest-admin-open","任务管理",new Runnable(){public void run(){actions.openManagement();}},true)).build();
+        UiElement.Builder participants=UiElement.type("Row").key("quest-participants")
+            .child(label("quest-participant-personal","个人进度","caption",1,true));
+        for(int i=0;i<model.getParticipants().size();i++){
+            QuestCenterVisualModel.Participant value=model.getParticipants().get(i);
+            participants.child(badge("quest-participant-"+i,value.getType()+" · "+value.getName()+" · "+value.getMemberCount()+"人 / "+value.getRole(),"border"));
+        }
         UiElement.Builder chapters=UiElement.type("Card").key("quest-chapters")
             .child(label("quest-chapters-title","任务章节","caption",1,true));
         for(int i=0;i<model.getChapters().size();i++){
@@ -66,7 +96,7 @@ public class QuestCenterVisualDocument extends ComponentUiDocument {
         else for(int i=0;i<model.getQuests().size();i++) quests.child(questCard(model.getQuests().get(i)));
         quests.child(pager("quest-list-pager",model.getQuestPageIndex(),model.getQuestTotalPages(),
             model.hasPreviousQuestPage(),model.hasNextQuestPage(),false));
-        return UiElement.type("Column").key("quest-browse").child(tools)
+        return UiElement.type("Column").key("quest-browse").child(tools).child(participants.build())
             .child(UiElement.type("Row").key("quest-browser").child(chapters.build()).child(quests.build()).build()).build();
     }
 
@@ -140,9 +170,72 @@ public class QuestCenterVisualDocument extends ComponentUiDocument {
             .child(UiElement.type("Row").key("quest-detail-columns").child(tasks.build()).child(rewards.build()).build()).build();
     }
 
+    private UiElement participantManagement(){
+        UiElement header=UiElement.type("Row").key("quest-participant-head")
+            .child(button("quest-participant-back","‹ 返回任务",new Runnable(){public void run(){participantManagementOpen=false;pendingParticipantAction=null;invalidation.run();}},true))
+            .child(label("quest-participant-title","跨服任务主体","section",1,true)).build();
+        UiElement create=UiElement.type("Card").key("quest-participant-create")
+            .child(button("quest-participant-type",createType,new Runnable(){public void run(){createType="PARTY".equals(createType)?"TEAM":"TEAM".equals(createType)?"PUBLIC":"PARTY";invalidation.run();}},true))
+            .child(textField("quest-participant-name",createName,"主体名称",0,128))
+            .child(button("quest-participant-create-submit","创建",new Runnable(){public void run(){if(!createName.trim().isEmpty())actions.createParticipant(createType,createName);}},!createName.trim().isEmpty())).build();
+        UiElement.Builder selectors=UiElement.type("Row").key("quest-participant-selectors");
+        for(int i=0;i<model.getParticipants().size();i++){
+            final int index=i;QuestCenterVisualModel.Participant participant=model.getParticipants().get(i);
+            selectors.child(UiElement.type("Button").key("quest-participant-select-"+i)
+                .prop(StandardWidgets.TEXT,participant.getType()+" · "+participant.getName())
+                .prop(StandardWidgets.SELECTED,i==selectedParticipant)
+                .prop(StandardWidgets.ACTION,handler(new Runnable(){public void run(){selectedParticipant=index;invalidation.run();}})).build());
+        }
+        UiElement body;
+        QuestCenterVisualModel.Participant selected=selectedParticipant();
+        if(selected==null)body=UiElement.type("EmptyState").key("quest-participant-empty")
+            .prop(StandardWidgets.TEXT,"你尚未加入任何 PARTY / TEAM / PUBLIC 主体，可在上方创建。").build();
+        else{
+            UiElement.Builder members=UiElement.type("Card").key("quest-participant-members")
+                .child(label("quest-participant-summary",selected.getType()+" · "+selected.getName()+" · "+selected.getMemberCount()+" 人 · 你的角色 "+selected.getRole(),"caption",1,true));
+            int shown=Math.min(8,selected.getMembers().size());
+            for(int i=0;i<shown;i++){
+                final QuestCenterVisualModel.Member member=selected.getMembers().get(i);final QuestCenterVisualModel.Participant group=selected;
+                String shortId=member.getPlayerId().length()>12?member.getPlayerId().substring(0,8)+"…":member.getPlayerId();
+                UiElement.Builder row=UiElement.type("Row").key("quest-participant-member-"+i)
+                    .child(label("quest-participant-member-label-"+i,member.getRole()+" · "+shortId,"caption",1,false));
+                boolean canAdmin="OWNER".equals(group.getRole())||"ADMIN".equals(group.getRole());
+                boolean targetOwner="OWNER".equals(member.getRole());
+                if("OWNER".equals(group.getRole())&&!targetOwner)row.child(button("quest-participant-transfer-"+i,"转让",new Runnable(){public void run(){pendingParticipantAction=PendingParticipantAction.transfer(group,member.getPlayerId());invalidation.run();}},true));
+                if(canAdmin&&!targetOwner)row.child(button("quest-participant-remove-"+i,"移除",new Runnable(){public void run(){pendingParticipantAction=PendingParticipantAction.remove(group,member.getPlayerId());invalidation.run();}},true));
+                members.child(row.build());
+            }
+            if(selected.getMembers().size()>shown)members.child(label("quest-participant-member-more","另有 "+(selected.getMembers().size()-shown)+" 名成员，请在宽窗查看完整目录。","caption",1,false));
+            UiElement manage=UiElement.type("Card").key("quest-participant-manage")
+                .child(textField("quest-participant-target",targetPlayer,"玩家名或 UUID",1,64))
+                .child(button("quest-participant-role",targetRole,new Runnable(){public void run(){targetRole="MEMBER".equals(targetRole)?"ADMIN":"MEMBER";invalidation.run();}},true))
+                .child(button("quest-participant-add","添加成员",new Runnable(){public void run(){QuestCenterVisualModel.Participant group=selectedParticipant();if(group!=null&&!targetPlayer.trim().isEmpty())actions.addParticipantMember(group.getType(),group.getId(),group.getRevision(),targetPlayer,targetRole);}},("OWNER".equals(selected.getRole())||"ADMIN".equals(selected.getRole()))&&!targetPlayer.trim().isEmpty()))
+                .child(button("quest-participant-leave","离开主体",new Runnable(){public void run(){QuestCenterVisualModel.Participant group=selectedParticipant();if(group!=null){pendingParticipantAction=PendingParticipantAction.leave(group);invalidation.run();}}},true)).build();
+            body=UiElement.type("Row").key("quest-participant-body").child(members.build()).child(manage).build();
+        }
+        return UiElement.type("Column").key("quest-participant-management").child(header).child(create)
+            .child(selectors.build()).child(body).build();
+    }
+
+    private QuestCenterVisualModel.Participant selectedParticipant(){
+        if(model.getParticipants().isEmpty())return null;
+        selectedParticipant=Math.max(0,Math.min(selectedParticipant,model.getParticipants().size()-1));
+        return model.getParticipants().get(selectedParticipant);
+    }
+
+    private UiElement textField(String key,String value,String placeholder,final int field,final int maximum){
+        return UiElement.type("TextField").key(key).prop(StandardWidgets.TEXT,value)
+            .prop(StandardWidgets.PLACEHOLDER,placeholder).prop(StandardWidgets.FOCUSED,focusedField==field)
+            .prop(StandardWidgets.ACTION,new UiActionHandler(){public InputResult handle(UiEvent event){String current=field==0?createName:targetPlayer;if(event.getType()==UiEvent.Type.POINTER_DOWN)focusedField=field;else if(event.getType()==UiEvent.Type.TEXT_INPUT&&!Character.isISOControl(event.getTypedChar())&&current.length()<maximum)current+=event.getTypedChar();else if(event.getType()==UiEvent.Type.KEY_DOWN&&(event.getKeyCode()==UiKeyCode.BACKSPACE||event.getKeyCode()==UiKeyCode.DELETE)&&!current.isEmpty())current=current.substring(0,current.length()-1);if(field==0)createName=current;else targetPlayer=current;invalidation.run();return InputResult.CONSUMED;}}).build();
+    }
+
     @Override public LayoutSpec layout(UiElement root,UiSize viewport,UiContext context){
+        width=viewport.getWidth();height=viewport.getHeight();
         TerminalVisualMetrics metrics=TerminalVisualMetrics.compute(viewport,profile);boolean compact=metrics.getBounds().getHeight()<=220;
-        LayoutSpec body=model.getView()==QuestCenterVisualModel.View.DETAIL&&model.getDetail()!=null?detailLayout(compact):browseLayout(compact);
+        LayoutSpec body=participantManagementOpen?participantManagementLayout(compact)
+            :model.getView()==QuestCenterVisualModel.View.DETAIL&&model.getDetail()!=null?detailLayout(compact):browseLayout(compact);
+        if(pendingParticipantAction!=null)body=LayoutSpec.of("quest-participant-confirm-stack",LayoutKind.STACK).flex(1)
+            .child(body).child(LayoutSpec.of("quest-participant-confirm",LayoutKind.LEAF).build()).build();
         return TerminalVisualShell.layout(viewport,model.getShell(),body,profile);
     }
 
@@ -152,7 +245,11 @@ public class QuestCenterVisualDocument extends ComponentUiDocument {
             .child(LayoutSpec.of("quest-filter-all",LayoutKind.LEAF).preferred(36,0).build())
             .child(LayoutSpec.of("quest-filter-active",LayoutKind.LEAF).preferred(46,0).build())
             .child(LayoutSpec.of("quest-filter-claim",LayoutKind.LEAF).preferred(46,0).build())
+            .child(LayoutSpec.of("quest-participant-open",LayoutKind.LEAF).preferred(compact?48:58,0).build())
             .child(LayoutSpec.of("quest-admin-open",LayoutKind.LEAF).preferred(compact?48:58,0).build()).build();
+        LayoutSpec.Builder participants=LayoutSpec.of("quest-participants",LayoutKind.ROW).preferred(0,compact?14:17).gap(2)
+            .child(LayoutSpec.of("quest-participant-personal",LayoutKind.LEAF).preferred(compact?42:52,0).build());
+        for(int i=0;i<model.getParticipants().size();i++)participants.child(LayoutSpec.of("quest-participant-"+i,LayoutKind.LEAF).flex(1).build());
         LayoutSpec.Builder chapters=LayoutSpec.of("quest-chapters",LayoutKind.COLUMN).preferred(compact?86:104,0).padding(new Insets(3,3,3,3)).gap(2)
             .child(LayoutSpec.of("quest-chapters-title",LayoutKind.LEAF).preferred(0,12).build());
         int chapterCount=model.getChapters().size();
@@ -168,7 +265,42 @@ public class QuestCenterVisualDocument extends ComponentUiDocument {
         }
         quests.child(pagerLayout("quest-list-pager",compact));
         LayoutSpec browser=LayoutSpec.of("quest-browser",LayoutKind.ROW).flex(1).gap(3).child(chapters.build()).child(quests.build()).build();
-        return LayoutSpec.of("quest-browse",LayoutKind.COLUMN).flex(1).padding(new Insets(3,3,3,3)).gap(3).child(tools).child(browser).build();
+        return LayoutSpec.of("quest-browse",LayoutKind.COLUMN).flex(1).padding(new Insets(3,3,3,3)).gap(3).child(tools).child(participants.build()).child(browser).build();
+    }
+
+    private LayoutSpec participantManagementLayout(boolean compact){
+        LayoutSpec head=LayoutSpec.of("quest-participant-head",LayoutKind.ROW).preferred(0,compact?17:21).gap(3)
+            .child(LayoutSpec.of("quest-participant-back",LayoutKind.LEAF).preferred(compact?54:68,0).build())
+            .child(LayoutSpec.of("quest-participant-title",LayoutKind.LEAF).flex(1).build()).build();
+        LayoutSpec create=LayoutSpec.of("quest-participant-create",LayoutKind.ROW).preferred(0,compact?22:26)
+            .padding(new Insets(2,3,2,3)).gap(3)
+            .child(LayoutSpec.of("quest-participant-type",LayoutKind.LEAF).preferred(45,0).build())
+            .child(LayoutSpec.of("quest-participant-name",LayoutKind.LEAF).flex(1).build())
+            .child(LayoutSpec.of("quest-participant-create-submit",LayoutKind.LEAF).preferred(44,0).build()).build();
+        LayoutSpec.Builder selectors=LayoutSpec.of("quest-participant-selectors",LayoutKind.ROW).preferred(0,compact?17:20).gap(2);
+        for(int i=0;i<model.getParticipants().size();i++)selectors.child(LayoutSpec.of("quest-participant-select-"+i,LayoutKind.LEAF).flex(1).build());
+        LayoutSpec body;
+        QuestCenterVisualModel.Participant selected=selectedParticipant();
+        if(selected==null)body=LayoutSpec.of("quest-participant-empty",LayoutKind.LEAF).flex(1).build();
+        else{
+            LayoutSpec.Builder members=LayoutSpec.of("quest-participant-members",LayoutKind.COLUMN).flex(2).padding(new Insets(3,4,3,4)).gap(2)
+                .child(LayoutSpec.of("quest-participant-summary",LayoutKind.LEAF).preferred(0,12).build());
+            int shown=Math.min(8,selected.getMembers().size());
+            for(int i=0;i<shown;i++){QuestCenterVisualModel.Member member=selected.getMembers().get(i);LayoutSpec.Builder row=LayoutSpec.of("quest-participant-member-"+i,LayoutKind.ROW).preferred(0,compact?15:18).gap(2)
+                .child(LayoutSpec.of("quest-participant-member-label-"+i,LayoutKind.LEAF).flex(1).build());
+                boolean canAdmin="OWNER".equals(selected.getRole())||"ADMIN".equals(selected.getRole()),targetOwner="OWNER".equals(member.getRole());
+                if("OWNER".equals(selected.getRole())&&!targetOwner)row.child(LayoutSpec.of("quest-participant-transfer-"+i,LayoutKind.LEAF).preferred(36,0).build());
+                if(canAdmin&&!targetOwner)row.child(LayoutSpec.of("quest-participant-remove-"+i,LayoutKind.LEAF).preferred(36,0).build());members.child(row.build());}
+            if(selected.getMembers().size()>shown)members.child(LayoutSpec.of("quest-participant-member-more",LayoutKind.LEAF).preferred(0,12).build());
+            LayoutSpec manage=LayoutSpec.of("quest-participant-manage",LayoutKind.COLUMN).flex(1).padding(new Insets(4,4,4,4)).gap(3)
+                .child(LayoutSpec.of("quest-participant-target",LayoutKind.LEAF).preferred(0,compact?16:19).build())
+                .child(LayoutSpec.of("quest-participant-role",LayoutKind.LEAF).preferred(0,compact?16:19).build())
+                .child(LayoutSpec.of("quest-participant-add",LayoutKind.LEAF).preferred(0,compact?17:21).build())
+                .child(LayoutSpec.of("quest-participant-leave",LayoutKind.LEAF).preferred(0,compact?17:21).build()).build();
+            body=LayoutSpec.of("quest-participant-body",LayoutKind.ROW).flex(1).gap(3).child(members.build()).child(manage).build();
+        }
+        return LayoutSpec.of("quest-participant-management",LayoutKind.COLUMN).flex(1).padding(new Insets(3,3,3,3)).gap(3)
+            .child(head).child(create).child(selectors.build()).child(body).build();
     }
 
     private static LayoutSpec pagerLayout(String key,boolean compact){return LayoutSpec.of(key,LayoutKind.ROW).preferred(0,compact?15:17).gap(2)
@@ -197,6 +329,42 @@ public class QuestCenterVisualDocument extends ComponentUiDocument {
         return LayoutSpec.of("quest-detail",LayoutKind.COLUMN).flex(1).padding(new Insets(3,3,3,3)).gap(3).child(heading.build())
             .child(LayoutSpec.of("quest-detail-columns",LayoutKind.ROW).flex(1).gap(3).child(tasks.build()).child(rewards.build()).build()).build();
     }
+
+    @Override public UiInputNode modalInput(UiNode root,UiContext context){
+        if(pendingParticipantAction==null)return null;
+        final UiNode node=find(root,"quest-participant-confirm");
+        if(node==null)return null;
+        return new UiInputNode("quest-participant-confirm",node.getBounds(),true,new UiInputHandler(){
+            public InputResult handle(UiInputNode target,UiEvent event){
+                if(event.getPhase()!=UiEvent.Phase.TARGET)return InputResult.PASS;
+                if(event.getType()==UiEvent.Type.KEY_DOWN&&event.getKeyCode()==UiKeyCode.ENTER){confirmParticipantAction();return InputResult.CONSUMED;}
+                if(event.getType()==UiEvent.Type.KEY_DOWN&&event.getKeyCode()==UiKeyCode.ESCAPE){pendingParticipantAction=null;invalidation.run();return InputResult.CONSUMED;}
+                if(event.getType()==UiEvent.Type.POINTER_DOWN){UiRect b=node.getBounds();int dw=Math.min(230,Math.max(80,b.getWidth()-40)),dh=Math.min(90,Math.max(50,b.getHeight()-30)),dx=b.getX()+(b.getWidth()-dw)/2,dy=b.getY()+(b.getHeight()-dh)/2,half=Math.max(0,(dw-28)/2);if(new UiRect(dx+10+half+8,dy+dh-22,half,16).contains(event.getX(),event.getY()))confirmParticipantAction();else{pendingParticipantAction=null;invalidation.run();}return InputResult.CONSUMED;}
+                return InputResult.PASS;
+            }});
+    }
+
+    private void confirmParticipantAction(){
+        PendingParticipantAction pending=pendingParticipantAction;pendingParticipantAction=null;
+        if(pending==null)return;
+        if(pending.kind==1)actions.removeParticipantMember(pending.participant.getType(),pending.participant.getId(),pending.participant.getRevision(),pending.player);
+        else if(pending.kind==2)actions.leaveParticipant(pending.participant.getType(),pending.participant.getId(),pending.participant.getRevision());
+        else if(pending.kind==3)actions.transferParticipantOwner(pending.participant.getType(),pending.participant.getId(),pending.participant.getRevision(),pending.player);
+        invalidation.run();
+    }
+
+    private static UiNode find(UiNode node,String key){if(node==null)return null;if(node.getElement().getKey()!=null&&key.equals(node.getElement().getKey().getValue()))return node;for(UiNode child:node.getChildren()){UiNode found=find(child,key);if(found!=null)return found;}return null;}
+
+    private static final class PendingParticipantAction{
+        private final int kind;private final QuestCenterVisualModel.Participant participant;private final String player,title,detail;
+        private PendingParticipantAction(int kind,QuestCenterVisualModel.Participant participant,String player,String title,String detail){this.kind=kind;this.participant=participant;this.player=player;this.title=title;this.detail=detail;}
+        private static PendingParticipantAction remove(QuestCenterVisualModel.Participant p,String player){return new PendingParticipantAction(1,p,player,"确认移除成员","成员 "+player+" 将停止参与 "+p.getName()+" 的后续共享进度；已经冻结给他的奖励不会被收回。");}
+        private static PendingParticipantAction leave(QuestCenterVisualModel.Participant p){return new PendingParticipantAction(2,p,"","确认离开主体","离开 "+p.getName()+" 后不再参与后续共享进度；既有个人奖励归属保持不变。所有者必须先转让所有权。");}
+        private static PendingParticipantAction transfer(QuestCenterVisualModel.Participant p,String player){return new PendingParticipantAction(3,p,player,"确认转让所有权","将 "+p.getName()+" 的所有权转让给 "+player+"；你将降级为管理员。");}
+    }
+
+    void openParticipantManagementForPreview(){participantManagementOpen=true;invalidation.run();}
+    boolean requestLeaveForPreview(){QuestCenterVisualModel.Participant participant=selectedParticipant();if(participant==null)return false;pendingParticipantAction=PendingParticipantAction.leave(participant);invalidation.run();return true;}
 
     private UiElement filter(String key,String text,final String value){return UiElement.type("Button").key(key).prop(StandardWidgets.TEXT,text).prop(StandardWidgets.SELECTED,value.equals(model.getFilter())).prop(StandardWidgets.ACTION,handler(new Runnable(){public void run(){actions.changeFilter(value);}})).build();}
     private static UiElement state(String key,String type,String text){return UiElement.type(type).key(key).prop(StandardWidgets.TEXT,text).build();}

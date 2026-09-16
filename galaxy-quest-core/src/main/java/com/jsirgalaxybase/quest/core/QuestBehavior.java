@@ -17,6 +17,7 @@ public final class QuestBehavior {
     private final boolean globalShare;
     private final String updateSound;
     private final String completeSound;
+    private final QuestParticipantScope participantScope;
 
     private QuestBehavior(Builder builder) {
         visibility = Objects.requireNonNull(builder.visibility, "visibility");
@@ -30,13 +31,15 @@ public final class QuestBehavior {
         globalShare = builder.globalShare;
         updateSound = safe(builder.updateSound);
         completeSound = safe(builder.completeSound);
+        participantScope = Objects.requireNonNull(builder.participantScope, "participantScope");
     }
 
     public static Builder builder() { return new Builder(); }
     public Builder toBuilder() {
         return builder().visibility(visibility).iconReference(iconReference).main(main).silent(silent)
             .autoClaim(autoClaim).progressWhileLocked(progressWhileLocked).simultaneous(simultaneous)
-            .global(global).globalShare(globalShare).updateSound(updateSound).completeSound(completeSound);
+            .global(global).globalShare(globalShare).updateSound(updateSound).completeSound(completeSound)
+            .participantScope(participantScope);
     }
 
     public QuestVisibility getVisibility() { return visibility; }
@@ -50,6 +53,7 @@ public final class QuestBehavior {
     public boolean isGlobalShare() { return globalShare; }
     public String getUpdateSound() { return updateSound; }
     public String getCompleteSound() { return completeSound; }
+    public QuestParticipantScope getParticipantScope() { return participantScope; }
 
     private static String safe(String value) { return value == null ? "" : value; }
 
@@ -65,6 +69,7 @@ public final class QuestBehavior {
         private boolean globalShare;
         private String updateSound = "";
         private String completeSound = "";
+        private QuestParticipantScope participantScope = QuestParticipantScope.PLAYER;
 
         public Builder visibility(QuestVisibility value) { visibility = value; return this; }
         public Builder iconReference(String value) { iconReference = value; return this; }
@@ -77,6 +82,7 @@ public final class QuestBehavior {
         public Builder globalShare(boolean value) { globalShare = value; return this; }
         public Builder updateSound(String value) { updateSound = value; return this; }
         public Builder completeSound(String value) { completeSound = value; return this; }
+        public Builder participantScope(QuestParticipantScope value) { participantScope = value; return this; }
         public QuestBehavior build() { return new QuestBehavior(this); }
     }
 }

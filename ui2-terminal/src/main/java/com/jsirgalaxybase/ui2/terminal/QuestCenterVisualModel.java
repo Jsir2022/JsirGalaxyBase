@@ -23,6 +23,7 @@ public final class QuestCenterVisualModel {
     private final List<Chapter> chapters;
     private final List<QuestSummary> quests;
     private final QuestDetail detail;
+    private final List<Participant> participants;
 
     public QuestCenterVisualModel(TerminalVisualModel shell, View view, LoadState loadState,
         String selectedChapterId, String selectedQuestId, String filter, String message,
@@ -55,7 +56,20 @@ public final class QuestCenterVisualModel {
         this.questTotalEntries = Math.max(this.quests.size(), questTotalEntries);
         this.questPageIndex = clampPage(questPageIndex, this.questTotalEntries, this.questPageSize);
         this.detail = detail;
+        this.participants = Collections.emptyList();
     }
+
+    private QuestCenterVisualModel(QuestCenterVisualModel source,List<Participant> participants){
+        this.shell=source.shell;this.view=source.view;this.loadState=source.loadState;
+        this.selectedChapterId=source.selectedChapterId;this.selectedQuestId=source.selectedQuestId;
+        this.filter=source.filter;this.query=source.query;this.message=source.message;
+        this.chapterPageIndex=source.chapterPageIndex;this.chapterPageSize=source.chapterPageSize;
+        this.chapterTotalEntries=source.chapterTotalEntries;this.questPageIndex=source.questPageIndex;
+        this.questPageSize=source.questPageSize;this.questTotalEntries=source.questTotalEntries;
+        this.chapters=source.chapters;this.quests=source.quests;this.detail=source.detail;
+        this.participants=immutable(participants);
+    }
+    public QuestCenterVisualModel withParticipants(List<Participant> values){return new QuestCenterVisualModel(this,values);}
 
     private static int clampPage(int page, int total, int size) {
         int last = total <= 0 ? 0 : (total - 1) / size;
@@ -77,6 +91,20 @@ public final class QuestCenterVisualModel {
     public List<Chapter> getChapters() { return chapters; }
     public List<QuestSummary> getQuests() { return quests; }
     public QuestDetail getDetail() { return detail; }
+    public List<Participant> getParticipants(){return participants;}
+
+    public static final class Participant {
+        private final String type,id,name,role;private final long revision;private final int memberCount;private final List<Member> members;
+        public Participant(String type,String id,String name,String role,long revision,int memberCount){this(type,id,name,role,revision,memberCount,Collections.<Member>emptyList());}
+        public Participant(String type,String id,String name,String role,long revision,int memberCount,List<Member> members){this.type=text(type);this.id=text(id);this.name=text(name);this.role=text(role);this.revision=Math.max(0L,revision);this.memberCount=Math.max(1,memberCount);this.members=immutable(members);}
+        public String getType(){return type;}public String getId(){return id;}public String getName(){return name;}
+        public String getRole(){return role;}public long getRevision(){return revision;}public int getMemberCount(){return memberCount;}public List<Member> getMembers(){return members;}
+    }
+    public static final class Member {
+        private final String playerId,role;private final long joinedAt,membershipVersion;
+        public Member(String playerId,String role,long joinedAt,long membershipVersion){this.playerId=text(playerId);this.role=text(role);this.joinedAt=Math.max(0L,joinedAt);this.membershipVersion=Math.max(0L,membershipVersion);}
+        public String getPlayerId(){return playerId;}public String getRole(){return role;}public long getJoinedAt(){return joinedAt;}public long getMembershipVersion(){return membershipVersion;}
+    }
     public int getChapterPageIndex() { return chapterPageIndex; }
     public int getChapterPageSize() { return chapterPageSize; }
     public int getChapterTotalEntries() { return chapterTotalEntries; }

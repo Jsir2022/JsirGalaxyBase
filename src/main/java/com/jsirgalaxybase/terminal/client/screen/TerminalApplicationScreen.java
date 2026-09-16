@@ -76,6 +76,11 @@ public final class TerminalApplicationScreen extends TerminalScreenV2Base {
                         com.jsirgalaxybase.terminal.ui.TerminalPage.CAREER.getId(), action.getId(),
                         (payload == null ? TerminalQuestActionPayload.empty() : payload).encode()));
                 }
+                @Override public void sendQuestParticipant(TerminalActionType action, com.jsirgalaxybase.terminal.TerminalQuestParticipantActionPayload payload) {
+                    TerminalNetwork.CHANNEL.sendToServer(new TerminalActionMessage(shellModel().getSessionToken(),
+                        com.jsirgalaxybase.terminal.ui.TerminalPage.CAREER.getId(), action.getId(),
+                        (payload == null ? com.jsirgalaxybase.terminal.TerminalQuestParticipantActionPayload.empty() : payload).encode()));
+                }
                 @Override public void sendQuestEdit(com.jsirgalaxybase.terminal.TerminalQuestDraftEditPayload payload) {
                     if(payload==null)return;
                     TerminalNetwork.CHANNEL.sendToServer(new TerminalActionMessage(shellModel().getSessionToken(),

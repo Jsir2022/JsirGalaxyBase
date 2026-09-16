@@ -38,7 +38,7 @@ public final class MinecraftItemRewardDeliveryHandler implements RewardDeliveryH
             return RewardDeliveryOutcome.failed("unsupported-participant:" + lease.getParticipantId().getType(), false);
         }
         EntityPlayerMP player = players.findOnline(lease.getParticipantId().getId());
-        if (player == null) return RewardDeliveryOutcome.failed("player-offline", true);
+        if (player == null) return RewardDeliveryOutcome.deferred("player-offline");
         String marker = QuestRewardMarker.key(lease.getEntitlementKey());
         NBTTagCompound persisted = QuestRewardMarker.persisted(player);
         NBTTagCompound markers = persisted.getCompoundTag(QuestRewardMarker.ROOT);

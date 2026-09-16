@@ -10,6 +10,7 @@ import net.minecraft.item.ItemStack;
 import com.jsirgalaxybase.terminal.TerminalActionType;
 import com.jsirgalaxybase.terminal.TerminalQuestActionPayload;
 import com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot;
+import com.jsirgalaxybase.terminal.TerminalQuestParticipantActionPayload;
 import com.jsirgalaxybase.terminal.TerminalQuestDraftEditPayload;
 import com.jsirgalaxybase.terminal.client.viewmodel.TerminalHomeScreenModel;
 import com.jsirgalaxybase.ui2.terminal.QuestCenterActionPort;
@@ -28,7 +29,7 @@ import com.jsirgalaxybase.ui2.layout.LayoutSpec;
 
 /** Live Minecraft adapter for the shared platform-neutral player quest center. */
 public final class TerminalQuestCenterDocument extends QuestCenterVisualDocument implements TerminalPageDocument {
-    public interface Actions { void sendQuest(TerminalActionType action,TerminalQuestActionPayload payload);void sendQuestEdit(TerminalQuestDraftEditPayload payload);void sendQuestBatchRetire(com.jsirgalaxybase.terminal.TerminalQuestBatchRetirePayload payload);void sendQuestChapterEdit(com.jsirgalaxybase.terminal.TerminalQuestChapterEditPayload payload);void sendQuestChapterClone(com.jsirgalaxybase.terminal.TerminalQuestChapterClonePayload payload);void sendQuestChapterAlignment(com.jsirgalaxybase.terminal.TerminalQuestChapterAlignmentPayload payload);void sendQuestChapterOrder(com.jsirgalaxybase.terminal.TerminalQuestChapterOrderPayload payload); }
+    public interface Actions { void sendQuest(TerminalActionType action,TerminalQuestActionPayload payload);void sendQuestParticipant(TerminalActionType action,TerminalQuestParticipantActionPayload payload);void sendQuestEdit(TerminalQuestDraftEditPayload payload);void sendQuestBatchRetire(com.jsirgalaxybase.terminal.TerminalQuestBatchRetirePayload payload);void sendQuestChapterEdit(com.jsirgalaxybase.terminal.TerminalQuestChapterEditPayload payload);void sendQuestChapterClone(com.jsirgalaxybase.terminal.TerminalQuestChapterClonePayload payload);void sendQuestChapterAlignment(com.jsirgalaxybase.terminal.TerminalQuestChapterAlignmentPayload payload);void sendQuestChapterOrder(com.jsirgalaxybase.terminal.TerminalQuestChapterOrderPayload payload); }
     private TerminalHomeScreenModel screenModel;private final Actions business;private final QuestActionsBridge questActions;private final ManagementActionsBridge managementActions;private final QuestManagementVisualDocument managementDocument;private final ChapterActionsBridge chapterActions;private final QuestChapterManagementVisualDocument chapterDocument;
 
     public TerminalQuestCenterDocument(TerminalHomeScreenModel model,final TerminalAppShell.Actions shell,final Actions business){
@@ -43,7 +44,7 @@ public final class TerminalQuestCenterDocument extends QuestCenterVisualDocument
         public void help(){shell.help();}
         public void back(){shell.back();}
         public void close(){shell.close();}},
-            bridge,TerminalVisualModelAdapter.windowProfile());this.screenModel=model;this.business=business;this.questActions=bridge;
+            bridge,TerminalVisualModelAdapter.windowProfile(),invalidation);this.screenModel=model;this.business=business;this.questActions=bridge;
         TerminalActionPort shellPort=new TerminalActionPort(){public void navigate(String id){shell.navigate(id);}
         public void refresh(){shell.refresh();}
         public void help(){shell.help();}
@@ -74,6 +75,11 @@ public final class TerminalQuestCenterDocument extends QuestCenterVisualDocument
         public void selectRewardChoice(String questId,String rewardKey,int choiceIndex){TerminalQuestActionPayload p=payload();actions.sendQuest(TerminalActionType.QUEST_SELECT_REWARD_CHOICE,new TerminalQuestActionPayload(p.getChapterId(),questId,p.getFilter(),p.getQuery(),p.getChapterPage(),p.getQuestPage(),rewardKey,choiceIndex));}
         public void toggleTracking(String questId){TerminalQuestActionPayload p=payload();actions.sendQuest(TerminalActionType.QUEST_TOGGLE_TRACKING,new TerminalQuestActionPayload(p.getChapterId(),questId,p.getFilter(),p.getQuery(),p.getChapterPage(),p.getQuestPage()));}
         public void openManagement(){TerminalQuestActionPayload p=payload();actions.sendQuest(TerminalActionType.QUEST_ADMIN_OPEN,new TerminalQuestActionPayload(p.getChapterId(),"",p.getFilter(),p.getQuery(),p.getChapterPage(),p.getQuestPage(),"",-1,"",0));}
+        public void createParticipant(String type,String name){actions.sendQuestParticipant(TerminalActionType.QUEST_PARTICIPANT_CREATE,new TerminalQuestParticipantActionPayload(type,"",name,"","",0L));}
+        public void addParticipantMember(String type,String id,long revision,String player,String role){actions.sendQuestParticipant(TerminalActionType.QUEST_PARTICIPANT_ADD_MEMBER,new TerminalQuestParticipantActionPayload(type,id,"",player,role,revision));}
+        public void removeParticipantMember(String type,String id,long revision,String player){actions.sendQuestParticipant(TerminalActionType.QUEST_PARTICIPANT_REMOVE_MEMBER,new TerminalQuestParticipantActionPayload(type,id,"",player,"",revision));}
+        public void leaveParticipant(String type,String id,long revision){actions.sendQuestParticipant(TerminalActionType.QUEST_PARTICIPANT_LEAVE,new TerminalQuestParticipantActionPayload(type,id,"","","",revision));}
+        public void transferParticipantOwner(String type,String id,long revision,String player){actions.sendQuestParticipant(TerminalActionType.QUEST_PARTICIPANT_TRANSFER_OWNER,new TerminalQuestParticipantActionPayload(type,id,"",player,"",revision));}
         public void retry(){actions.sendQuest(TerminalActionType.REFRESH_PAGE,payload());}}
     private static final class ManagementActionsBridge implements QuestManagementActionPort{private TerminalHomeScreenModel model;private final Actions actions;private ManagementActionsBridge(TerminalHomeScreenModel model,Actions actions){this.model=model;this.actions=actions;}
         private void update(TerminalHomeScreenModel value){model=value;}

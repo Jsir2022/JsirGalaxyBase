@@ -60,6 +60,33 @@ public class QuestEvaluationPlannerTest {
             "galaxy:consumption_applied", 1L, attributes)).isEmpty());
     }
 
+    @Test
+    public void authorizedConsumptionKeepsOriginalGroupAfterSubmittingPlayerLeaves() {
+        UUID player = UUID.randomUUID(), remaining = UUID.randomUUID();
+        ParticipantId team = new ParticipantId(ParticipantType.TEAM, UUID.randomUUID());
+        QuestDefinition definition = consumingQuest(QuestParticipantScope.TEAM);
+        ParticipantMembershipResolver resolver = new ParticipantMembershipResolver() {
+            @Override public List<ParticipantMembership> resolve(UUID ignored) { return Collections.emptyList(); }
+            @Override public ParticipantMembership resolveParticipant(ParticipantId requested) {
+                assertEquals(team, requested);
+                return new ParticipantMembership(team, Collections.singleton(remaining));
+            }
+        };
+        QuestEvaluationPlanner planner = new QuestEvaluationPlanner(() -> Collections.singletonList(stored(definition)),
+            participant -> Collections.emptySet(), resolver, new ScopedQuestAssignmentPolicy());
+        Map<String, String> attributes = new LinkedHashMap<String, String>();
+        attributes.put("questId", definition.getId().toString());
+        attributes.put("definitionVersion", Integer.toString(definition.getVersion()));
+        attributes.put("taskKey", "consume");
+        attributes.put("progressParticipantType", "TEAM");
+        attributes.put("progressParticipantId", team.getId().toString());
+        List<QuestEvaluationRequest> result = planner.requestsFor(new GameplayFact("s2", "consume", player,
+            "galaxy:consumption_applied", 1L, attributes));
+        assertEquals(1, result.size());
+        assertEquals(team, result.get(0).getMembership().getParticipantId());
+        assertEquals(Collections.singleton(remaining), result.get(0).getMembership().getPlayerIds());
+    }
+
     private static StoredQuestDefinition stored(QuestDefinition definition) {
         return new StoredQuestDefinition(definition, QuestDefinitionLifecycle.PUBLISHED, "hash", 1L);
     }
@@ -74,11 +101,16 @@ public class QuestEvaluationPlannerTest {
     }
 
     private static QuestDefinition consumingQuest() {
+        return consumingQuest(QuestParticipantScope.PLAYER);
+    }
+
+    private static QuestDefinition consumingQuest(QuestParticipantScope scope) {
         Map<String, String> parameters = new LinkedHashMap<String, String>();
         parameters.put("target", "1");
         parameters.put("consume", "true");
         return new QuestDefinition(UUID.randomUUID(), 1, "Consume", "", QuestLogic.AND, QuestLogic.AND,
             Collections.<UUID>emptySet(), Collections.singletonList(new TaskDefinition("consume",
-                "bq_standard:retrieval", false, parameters)), Collections.<RewardDefinition>emptyList());
+                "bq_standard:retrieval", false, parameters)), Collections.<RewardDefinition>emptyList(),
+            RepeatPolicy.never(), QuestBehavior.builder().participantScope(scope).build());
     }
 }

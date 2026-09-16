@@ -44,7 +44,8 @@ public final class JdbcRewardDeliveryRepository implements RewardDeliveryReposit
                 + "UPDATE galaxy_quest_reward_entitlement e SET delivery_status='DELIVERING',attempt_count=e.attempt_count+1,"
                 + "lease_owner=?,lease_until=to_timestamp(?/1000.0),next_attempt_at=NULL,last_error=NULL FROM candidates c "
                 + "WHERE e.entitlement_key=c.entitlement_key RETURNING e.entitlement_key,e.participant_type,e.participant_id,"
-                + "e.reward_key,e.reward_type,e.reward_parameters_json::text,e.attempt_count,c.choice_index";
+                + "e.recipient_player_id,e.reward_key,e.reward_type,e.reward_parameters_json::text,e.attempt_count,e.failure_count,"
+                + "c.choice_index";
             List<RewardDeliveryLease> result = new ArrayList<RewardDeliveryLease>();
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 statement.setLong(1, now);
@@ -54,13 +55,14 @@ public final class JdbcRewardDeliveryRepository implements RewardDeliveryReposit
                 statement.setLong(5, leaseUntil);
                 try (ResultSet rows = statement.executeQuery()) {
                     while (rows.next()) {
-                        Map<String, String> rewardParameters = parameters(rows.getString(6));
-                        int selectedChoice = rows.getInt(8);
+                        Map<String, String> rewardParameters = parameters(rows.getString(7));
+                        int selectedChoice = rows.getInt(10);
                         if (!rows.wasNull()) rewardParameters.put("choice.index", Integer.toString(selectedChoice));
                         RewardDeliveryLease lease = new RewardDeliveryLease(rows.getString(1),
                             new ParticipantId(ParticipantType.valueOf(rows.getString(2)), (java.util.UUID) rows.getObject(3)),
-                            new RewardDefinition(rows.getString(4), rows.getString(5), rewardParameters),
-                            rows.getInt(7), workerId, leaseUntil);
+                            (java.util.UUID) rows.getObject(4),
+                            new RewardDefinition(rows.getString(5), rows.getString(6), rewardParameters),
+                            rows.getInt(8),rows.getInt(9),workerId, leaseUntil);
                         expirePreviousAttempt(connection, lease, now);
                         insertAttempt(connection, lease, now);
                         result.add(lease);
@@ -75,7 +77,14 @@ public final class JdbcRewardDeliveryRepository implements RewardDeliveryReposit
     public boolean markDelivered(final String entitlementKey, final String workerId, final int attempt,
         final long deliveredAt) {
         requireTransaction();
-        return complete(entitlementKey, workerId, attempt, deliveredAt, "DELIVERED", null, 0L);
+        return complete(entitlementKey, workerId, attempt, deliveredAt, "DELIVERED", null, 0L,false);
+    }
+
+    @Override
+    public boolean markDeferred(final String entitlementKey, final String workerId, final int attempt,
+        final String reason, final long deferredAt, final long retryAt) {
+        requireTransaction();
+        return complete(entitlementKey, workerId, attempt, deferredAt, "FAILED", reason, retryAt,false);
     }
 
     @Override
@@ -83,15 +92,15 @@ public final class JdbcRewardDeliveryRepository implements RewardDeliveryReposit
         final String error, final long failedAt, final long retryAt, final boolean retryable) {
         requireTransaction();
         return complete(entitlementKey, workerId, attempt, failedAt,
-            retryable ? "FAILED" : "ABANDONED", error, retryAt);
+            retryable ? "FAILED" : "ABANDONED", error, retryAt,true);
     }
 
     private boolean complete(final String key, final String worker, final int attempt, final long completedAt,
-        final String status, final String error, final long retryAt) {
+        final String status, final String error, final long retryAt,final boolean countFailure) {
         return connections.withConnection(connection -> {
             String sql = "UPDATE galaxy_quest_reward_entitlement SET delivery_status=?,lease_owner=NULL,lease_until=NULL,"
                 + "next_attempt_at=" + ("FAILED".equals(status) ? "to_timestamp(?/1000.0)" : "NULL")
-                + ",last_error=?,delivered_at=" + ("DELIVERED".equals(status) ? "to_timestamp(?/1000.0)" : "NULL")
+                + ",last_error=?,failure_count=failure_count+"+(countFailure?"1":"0")+",delivered_at=" + ("DELIVERED".equals(status) ? "to_timestamp(?/1000.0)" : "NULL")
                 + " WHERE entitlement_key=? AND delivery_status='DELIVERING' AND lease_owner=? AND attempt_count=?";
             int updated;
             try (PreparedStatement statement = connection.prepareStatement(sql)) {

@@ -23,9 +23,12 @@ public final class QuestCompletionRewardDeliveryHandler implements RewardDeliver
             return RewardDeliveryOutcome.failed("invalid-reward:questUuid", false);
         }
         QuestCompletionRewardPort.Result result = completion.complete(lease.getEntitlementKey(),
-            lease.getParticipantId(), target, clock.currentTimeMillis());
+            lease.getParticipantId().getId(), target, clock.currentTimeMillis());
         if (result == QuestCompletionRewardPort.Result.TARGET_NOT_FOUND) {
             return RewardDeliveryOutcome.failed("target-quest-not-published:" + target, false);
+        }
+        if (result == QuestCompletionRewardPort.Result.TARGET_SCOPE_UNAVAILABLE) {
+            return RewardDeliveryOutcome.failed("target-scope-unavailable:" + target, false);
         }
         return RewardDeliveryOutcome.delivered();
     }

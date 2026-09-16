@@ -23,9 +23,9 @@ public final class QuestEvaluationPlanner implements QuestEvaluationRequestProvi
 
     @Override
     public List<QuestEvaluationRequest> requestsFor(GameplayFact fact) {
-        List<ParticipantMembership> resolved = memberships.resolve(fact.getPlayerId());
+        List<ParticipantMembership> resolved = forcedMemberships(fact);
         if (resolved == null) resolved = Collections.emptyList();
-        validateMemberships(fact.getPlayerId(), resolved);
+        validateMemberships(fact.getPlayerId(), resolved, isForcedConsumption(fact));
         List<QuestEvaluationRequest> result = new ArrayList<QuestEvaluationRequest>();
         for (StoredQuestDefinition stored : definitions.findAllPublished()) {
             QuestDefinition definition = stored.getDefinition();
@@ -36,6 +36,25 @@ public final class QuestEvaluationPlanner implements QuestEvaluationRequestProvi
             }
         }
         return result;
+    }
+
+    private List<ParticipantMembership> forcedMemberships(GameplayFact fact) {
+        if (!"galaxy:consumption_applied".equals(fact.getTypeId())) return memberships.resolve(fact.getPlayerId());
+        String type = fact.getAttributes().get("progressParticipantType");
+        String id = fact.getAttributes().get("progressParticipantId");
+        if (type == null || id == null) return memberships.resolve(fact.getPlayerId());
+        ParticipantId participant;
+        try { participant = new ParticipantId(ParticipantType.valueOf(type), UUID.fromString(id)); }
+        catch (RuntimeException invalid) { throw new IllegalArgumentException("invalid authorized consumption participant", invalid); }
+        ParticipantMembership membership = memberships.resolveParticipant(participant);
+        if (membership == null) throw new IllegalArgumentException("authorized consumption participant is unavailable");
+        return Collections.singletonList(membership);
+    }
+
+    private boolean isForcedConsumption(GameplayFact fact) {
+        return "galaxy:consumption_applied".equals(fact.getTypeId())
+            && fact.getAttributes().containsKey("progressParticipantType")
+            && fact.getAttributes().containsKey("progressParticipantId");
     }
 
     private boolean accepts(QuestDefinition definition, GameplayFact fact) {
@@ -58,11 +77,13 @@ public final class QuestEvaluationPlanner implements QuestEvaluationRequestProvi
         return false;
     }
 
-    private void validateMemberships(UUID playerId, List<ParticipantMembership> values) {
+    private void validateMemberships(UUID playerId, List<ParticipantMembership> values, boolean authorizedConsumption) {
         Set<ParticipantId> ids = new HashSet<ParticipantId>();
         for (ParticipantMembership membership : values) {
-            if (membership == null || !membership.contains(playerId)) throw new IllegalArgumentException(
-                "resolved membership must contain fact player");
+            if (membership == null || !membership.contains(playerId) && !authorizedConsumption)
+                throw new IllegalArgumentException("resolved membership must contain fact player");
+            if (membership.getParticipantId().getType() == ParticipantType.PLAYER && !membership.contains(playerId))
+                throw new IllegalArgumentException("resolved player membership must contain fact player");
             if (!ids.add(membership.getParticipantId())) throw new IllegalArgumentException(
                 "duplicate participant membership: " + membership.getParticipantId());
         }

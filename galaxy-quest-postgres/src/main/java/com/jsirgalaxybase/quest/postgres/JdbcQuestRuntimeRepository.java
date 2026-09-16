@@ -115,20 +115,22 @@ public final class JdbcQuestRuntimeRepository implements QuestRuntimeRepository 
             @Override
             public Void execute(Connection connection) throws SQLException {
                 try (PreparedStatement statement = connection.prepareStatement(
-                    "INSERT INTO galaxy_quest_reward_entitlement(entitlement_key,participant_type,participant_id,quest_id,"
-                        + "definition_version,cycle,reward_key,reward_type,reward_parameters_json,delivery_status) "
-                        + "VALUES (?,?,?,?,?,?,?,?,?::jsonb,?) ON CONFLICT DO NOTHING")) {
+                    "INSERT INTO galaxy_quest_reward_entitlement(entitlement_key,participant_type,participant_id,"
+                        + "recipient_player_id,quest_id,definition_version,cycle,reward_key,reward_type,"
+                        + "reward_parameters_json,delivery_status) VALUES (?,?,?,?,?,?,?,?,?,?::jsonb,?) "
+                        + "ON CONFLICT DO NOTHING")) {
                     for (RewardEntitlement entitlement : entitlements) {
                         statement.setString(1, entitlement.getEntitlementKey());
                         statement.setString(2, entitlement.getParticipantId().getType().name());
                         statement.setObject(3, entitlement.getParticipantId().getId());
-                        statement.setObject(4, entitlement.getQuestId());
-                        statement.setInt(5, entitlement.getQuestVersion());
-                        statement.setInt(6, entitlement.getCycle());
-                        statement.setString(7, entitlement.getReward().getKey());
-                        statement.setString(8, entitlement.getReward().getTypeId());
-                        statement.setString(9, gson.toJson(entitlement.getReward().getParameters()));
-                        statement.setString(10, entitlement.getInitialDeliveryStatus().name());
+                        statement.setObject(4, entitlement.getRecipientPlayerId());
+                        statement.setObject(5, entitlement.getQuestId());
+                        statement.setInt(6, entitlement.getQuestVersion());
+                        statement.setInt(7, entitlement.getCycle());
+                        statement.setString(8, entitlement.getReward().getKey());
+                        statement.setString(9, entitlement.getReward().getTypeId());
+                        statement.setString(10, gson.toJson(entitlement.getReward().getParameters()));
+                        statement.setString(11, entitlement.getInitialDeliveryStatus().name());
                         statement.addBatch();
                     }
                     statement.executeBatch();

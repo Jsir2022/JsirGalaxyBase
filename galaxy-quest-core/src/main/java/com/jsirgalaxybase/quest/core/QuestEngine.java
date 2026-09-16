@@ -16,6 +16,16 @@ public final class QuestEngine {
     public QuestEvaluation evaluate(ParticipantId participantId, QuestDefinition definition,
         QuestProgressSnapshot previous, Map<String, TaskProgress> observations, Set<UUID> completedPrerequisites,
         long now) {
+        if (participantId.getType() != ParticipantType.PLAYER) throw new IllegalArgumentException(
+            "group evaluation requires an explicit membership snapshot");
+        return evaluate(new ParticipantMembership(participantId, java.util.Collections.singleton(participantId.getId())),
+            definition, previous, observations, completedPrerequisites, now);
+    }
+
+    public QuestEvaluation evaluate(ParticipantMembership membership, QuestDefinition definition,
+        QuestProgressSnapshot previous, Map<String, TaskProgress> observations, Set<UUID> completedPrerequisites,
+        long now) {
+        ParticipantId participantId = membership.getParticipantId();
         if (previous != null && !previous.getParticipantId().equals(participantId)) {
             throw new IllegalArgumentException("progress participant does not match evaluation participant");
         }
@@ -65,9 +75,11 @@ public final class QuestEngine {
             definition.getVersion(), status, merged, completedAt, cycle);
         List<RewardEntitlement> entitlements = new ArrayList<RewardEntitlement>();
         if (completed && !alreadyComplete) {
-            for (RewardDefinition reward : definition.getRewards()) {
-                entitlements.add(new RewardEntitlement(participantId, definition, reward, cycle,
-                    definition.getBehavior().isAutoClaim()));
+            for (UUID recipient : membership.getPlayerIds()) {
+                for (RewardDefinition reward : definition.getRewards()) {
+                    entitlements.add(new RewardEntitlement(participantId, recipient, definition, reward, cycle,
+                        definition.getBehavior().isAutoClaim()));
+                }
             }
         }
         return new QuestEvaluation(next, entitlements);

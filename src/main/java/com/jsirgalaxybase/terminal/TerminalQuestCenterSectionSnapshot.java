@@ -19,6 +19,7 @@ public final class TerminalQuestCenterSectionSnapshot {
     private final Detail detail;
     private final Management management;
     private final ChapterManagement chapterManagement;
+    private final List<Participant> participants;
 
     public TerminalQuestCenterSectionSnapshot(String serviceState,String message,View view,
         String selectedChapterId,String selectedQuestId,String filter,String query,List<Chapter> chapters,
@@ -44,7 +45,21 @@ public final class TerminalQuestCenterSectionSnapshot {
         this.questPageIndex=Math.max(0,questPageIndex);this.questPageSize=Math.max(1,questPageSize);
         this.questTotalEntries=Math.max(this.quests.size(),questTotalEntries);this.detail=detail;this.management=management;
         this.chapterManagement=chapterManagement;
+        this.participants=Collections.emptyList();
     }
+    private TerminalQuestCenterSectionSnapshot(TerminalQuestCenterSectionSnapshot source,List<Participant> participants,
+        String message){
+        this.serviceState=source.serviceState;this.message=message==null?source.message:text(message);this.view=source.view;
+        this.selectedChapterId=source.selectedChapterId;this.selectedQuestId=source.selectedQuestId;
+        this.filter=source.filter;this.query=source.query;this.chapters=source.chapters;
+        this.chapterPageIndex=source.chapterPageIndex;this.chapterPageSize=source.chapterPageSize;
+        this.chapterTotalEntries=source.chapterTotalEntries;this.quests=source.quests;
+        this.questPageIndex=source.questPageIndex;this.questPageSize=source.questPageSize;
+        this.questTotalEntries=source.questTotalEntries;this.detail=source.detail;this.management=source.management;
+        this.chapterManagement=source.chapterManagement;this.participants=immutable(participants);
+    }
+    public TerminalQuestCenterSectionSnapshot withParticipants(List<Participant> values){return new TerminalQuestCenterSectionSnapshot(this,values,null);}
+    public TerminalQuestCenterSectionSnapshot withMessage(String value){return new TerminalQuestCenterSectionSnapshot(this,participants,value);}
     public static TerminalQuestCenterSectionSnapshot unavailable(String message){return new TerminalQuestCenterSectionSnapshot(
         "UNAVAILABLE",message,View.BROWSE,"","","all","",Collections.<Chapter>emptyList(),0,6,0,
         Collections.<Quest>emptyList(),0,7,0,null);}
@@ -59,6 +74,21 @@ public final class TerminalQuestCenterSectionSnapshot {
     public int getQuestTotalEntries(){return questTotalEntries;} public Detail getDetail(){return detail;}
     public Management getManagement(){return management;}
     public ChapterManagement getChapterManagement(){return chapterManagement;}
+    public List<Participant> getParticipants(){return participants;}
+
+    public static final class Participant {
+        private final String type,id,name,role;private final long revision;private final int memberCount;private final List<Member> members;
+        public Participant(String type,String id,String name,String role,long revision,int memberCount){this(type,id,name,role,revision,memberCount,Collections.<Member>emptyList());}
+        public Participant(String type,String id,String name,String role,long revision,int memberCount,List<Member> members){this.type=text(type);this.id=text(id);this.name=text(name);this.role=text(role);this.revision=Math.max(0L,revision);this.memberCount=Math.max(1,memberCount);this.members=immutable(members);}
+        public String getType(){return type;}public String getId(){return id;}public String getName(){return name;}
+        public String getRole(){return role;}public long getRevision(){return revision;}public int getMemberCount(){return memberCount;}public List<Member> getMembers(){return members;}
+    }
+
+    public static final class Member {
+        private final String playerId,role;private final long joinedAt,membershipVersion;
+        public Member(String playerId,String role,long joinedAt,long membershipVersion){this.playerId=text(playerId);this.role=text(role);this.joinedAt=Math.max(0L,joinedAt);this.membershipVersion=Math.max(0L,membershipVersion);}
+        public String getPlayerId(){return playerId;}public String getRole(){return role;}public long getJoinedAt(){return joinedAt;}public long getMembershipVersion(){return membershipVersion;}
+    }
 
     public static final class Chapter {
         private final String id,name;private final int completed,total;

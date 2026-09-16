@@ -43,6 +43,17 @@ public class RewardDeliveryWorkerTest {
     }
 
     @Test
+    public void deferredExternalConditionNeverExhaustsAttempts() {
+        FakeRepository repository = new FakeRepository(lease(99,0));
+        RewardDeliveryBatchResult result = worker(repository, new ArrayList<String>(),
+            RewardDeliveryOutcome.deferred("player-offline"), 3).runOnce("worker-a", 1);
+        assertEquals(1, result.getRetryScheduled());
+        assertEquals(0, result.getAbandoned());
+        assertTrue(repository.deferred);
+        assertTrue(repository.retryable);
+    }
+
+    @Test
     public void staleConfirmationIsReportedWithoutCountingSuccess() {
         FakeRepository repository = new FakeRepository(lease(1));
         repository.acceptConfirmation = false;
@@ -66,9 +77,13 @@ public class RewardDeliveryWorkerTest {
     }
 
     private static RewardDeliveryLease lease(int attempt) {
-        return new RewardDeliveryLease("entitlement-1", ParticipantId.player(UUID.randomUUID()),
+        return lease(attempt,Math.max(0,attempt-1));
+    }
+
+    private static RewardDeliveryLease lease(int attempt,int failureCount) {
+        UUID player=UUID.randomUUID();return new RewardDeliveryLease("entitlement-1", ParticipantId.player(player),player,
             new RewardDefinition("reward", "item", Collections.<String, String>emptyMap()), attempt,
-            "worker-a", 1100L);
+            failureCount,"worker-a", 1100L);
     }
 
     private static final class FakeRepository implements RewardDeliveryRepository {
@@ -77,6 +92,7 @@ public class RewardDeliveryWorkerTest {
         private String completedKey;
         private int completedAttempt;
         private boolean retryable;
+        private boolean deferred;
         private long retryAt;
 
         private FakeRepository(RewardDeliveryLease lease) {
@@ -94,6 +110,10 @@ public class RewardDeliveryWorkerTest {
             completedAttempt = attempt;
             return acceptConfirmation;
         }
+
+        @Override public boolean markDeferred(String entitlementKey,String workerId,int attempt,String error,
+            long deferredAt,long retryAt){completedKey=entitlementKey;completedAttempt=attempt;this.retryAt=retryAt;
+            this.retryable=true;this.deferred=true;return acceptConfirmation;}
 
         @Override
         public boolean markFailed(String entitlementKey, String workerId, int attempt, String error,

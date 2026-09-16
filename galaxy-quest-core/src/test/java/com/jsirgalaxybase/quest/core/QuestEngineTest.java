@@ -51,6 +51,27 @@ public class QuestEngineTest {
     }
 
     @Test
+    public void groupCompletionFreezesOneIndependentEntitlementPerCurrentMember() {
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        UUID party = UUID.randomUUID();
+        QuestDefinition quest = quest(QuestLogic.OR);
+        ParticipantMembership membership = new ParticipantMembership(ParticipantId.party(party),
+            new java.util.LinkedHashSet<UUID>(Arrays.asList(first, second)));
+        QuestEvaluation result = new QuestEngine().evaluate(membership, quest, null,
+            Collections.singletonMap("collect", new TaskProgress("collect", 8, 8, true)),
+            Collections.<UUID>emptySet(), 1234L);
+
+        assertEquals(ParticipantId.party(party), result.getProgress().getParticipantId());
+        assertEquals(2, result.getEntitlements().size());
+        assertEquals(first, result.getEntitlements().get(0).getRecipientPlayerId());
+        assertEquals(second, result.getEntitlements().get(1).getRecipientPlayerId());
+        assertNotEquals(result.getEntitlements().get(0).getEntitlementKey(),
+            result.getEntitlements().get(1).getEntitlementKey());
+        assertTrue(result.getEntitlements().get(0).getEntitlementKey().startsWith("party:" + party + ":"));
+    }
+
+    @Test
     public void repeatableQuestStartsNewCycleAndGetsDistinctEntitlements() {
         UUID player = UUID.randomUUID();
         QuestDefinition base = quest(QuestLogic.OR);
@@ -68,6 +89,35 @@ public class QuestEngineTest {
             Collections.<UUID>emptySet(), 1100L);
         assertEquals(1, second.getProgress().getCycle());
         assertTrue(second.getEntitlements().get(0).getEntitlementKey().contains(":1:coins"));
+    }
+
+    @Test
+    public void repeatCycleFreezesRecipientsAgainFromCurrentMembership() {
+        UUID first = UUID.randomUUID(), second = UUID.randomUUID(), late = UUID.randomUUID();
+        ParticipantId team = new ParticipantId(ParticipantType.TEAM, UUID.randomUUID());
+        QuestDefinition base = quest(QuestLogic.OR);
+        QuestDefinition repeatable = new QuestDefinition(base.getId(), 1, base.getName(), "", QuestLogic.AND,
+            QuestLogic.OR, Collections.<UUID>emptySet(), base.getTasks(), base.getRewards(), RepeatPolicy.after(10L),
+            QuestBehavior.builder().participantScope(QuestParticipantScope.TEAM).build());
+        Map<String, TaskProgress> observed = Collections.singletonMap("collect",
+            new TaskProgress("collect", 8, 8, true));
+        QuestEvaluation firstCycle = new QuestEngine().evaluate(new ParticipantMembership(team,
+            new java.util.LinkedHashSet<UUID>(Arrays.asList(first, second))), repeatable, null, observed,
+            Collections.<UUID>emptySet(), 100L);
+        QuestEvaluation secondCycle = new QuestEngine().evaluate(new ParticipantMembership(team,
+            new java.util.LinkedHashSet<UUID>(Arrays.asList(second, late))), repeatable, firstCycle.getProgress(),
+            observed, Collections.<UUID>emptySet(), 110L);
+        assertEquals(1, secondCycle.getProgress().getCycle());
+        assertEquals(2, secondCycle.getEntitlements().size());
+        assertEquals(second, secondCycle.getEntitlements().get(0).getRecipientPlayerId());
+        assertEquals(late, secondCycle.getEntitlements().get(1).getRecipientPlayerId());
+    }
+
+    @Test(expected=IllegalArgumentException.class)
+    public void groupEntitlementCannotImplicitlyTreatTheGroupUuidAsAPlayerRecipient() {
+        QuestDefinition definition=quest(QuestLogic.OR);
+        new RewardEntitlement(ParticipantId.publicGroup(UUID.randomUUID()),definition,
+            definition.getRewards().get(0),0);
     }
 
     @Test

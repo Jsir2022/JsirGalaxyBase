@@ -12,6 +12,7 @@ import org.junit.Test;
 import com.jsirgalaxybase.quest.core.QuestBehavior;
 import com.jsirgalaxybase.quest.core.QuestDefinition;
 import com.jsirgalaxybase.quest.core.QuestLogic;
+import com.jsirgalaxybase.quest.core.QuestParticipantScope;
 import com.jsirgalaxybase.quest.core.QuestVisibility;
 import com.jsirgalaxybase.quest.core.RepeatPolicy;
 
@@ -20,7 +21,8 @@ public class QuestDefinitionJsonCodecTest {
     public void roundTripPreservesBehaviorAndFixedRepeatPolicy() {
         QuestBehavior behavior = QuestBehavior.builder().visibility(QuestVisibility.CHAIN)
             .iconReference("{item}").main(true).silent(true).autoClaim(true).progressWhileLocked(true)
-            .simultaneous(true).global(true).globalShare(true).updateSound("update").completeSound("complete").build();
+            .simultaneous(true).global(true).globalShare(true).participantScope(QuestParticipantScope.PUBLIC)
+            .updateSound("update").completeSound("complete").build();
         QuestDefinition source = new QuestDefinition(UUID.randomUUID(), 2, "Quest", "Description", QuestLogic.OR,
             QuestLogic.AND, Collections.<UUID>emptySet(), Collections.emptyList(), Collections.emptyList(),
             RepeatPolicy.after(5000L, false), behavior);
@@ -39,6 +41,7 @@ public class QuestDefinitionJsonCodecTest {
         assertTrue(restored.getBehavior().isSimultaneous());
         assertTrue(restored.getBehavior().isGlobal());
         assertTrue(restored.getBehavior().isGlobalShare());
+        assertEquals(QuestParticipantScope.PUBLIC, restored.getBehavior().getParticipantScope());
         assertEquals("complete", restored.getBehavior().getCompleteSound());
     }
 
@@ -51,6 +54,7 @@ public class QuestDefinitionJsonCodecTest {
         QuestDefinition restored = new QuestDefinitionJsonCodec().decode(legacy);
         assertEquals(QuestVisibility.NORMAL, restored.getBehavior().getVisibility());
         assertFalse(restored.getBehavior().isAutoClaim());
+        assertEquals(QuestParticipantScope.PLAYER, restored.getBehavior().getParticipantScope());
         assertTrue(restored.getRepeatPolicy().isRelative());
     }
 }

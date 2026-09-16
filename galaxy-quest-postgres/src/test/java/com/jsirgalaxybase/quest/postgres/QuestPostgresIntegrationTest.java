@@ -6,6 +6,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -48,6 +49,11 @@ import com.jsirgalaxybase.quest.core.QuestRuntimeService;
 import com.jsirgalaxybase.quest.core.FactCountTaskEvaluator;
 import com.jsirgalaxybase.quest.core.FactProcessingResult;
 import com.jsirgalaxybase.quest.core.ParticipantMembership;
+import com.jsirgalaxybase.quest.core.ParticipantMemberRole;
+import com.jsirgalaxybase.quest.core.ParticipantMutationStatus;
+import com.jsirgalaxybase.quest.core.ParticipantType;
+import com.jsirgalaxybase.quest.core.QuestBehavior;
+import com.jsirgalaxybase.quest.core.QuestParticipantScope;
 import com.jsirgalaxybase.quest.core.RepeatPolicy;
 import com.jsirgalaxybase.quest.core.RewardDefinition;
 import com.jsirgalaxybase.quest.core.RewardDeliveryLease;
@@ -97,6 +103,89 @@ public class QuestPostgresIntegrationTest {
     }
 
     @Test
+    public void scopedMembershipFreezesRecipientsAndSurvivesLeaveAndLaterJoin() throws Exception {
+        JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(scoped);JdbcQuestTransaction transaction=new JdbcQuestTransaction(manager);
+        JdbcParticipantAdministrationRepository administration=new JdbcParticipantAdministrationRepository(manager);
+        JdbcParticipantMembershipResolver memberships=new JdbcParticipantMembershipResolver(manager);
+        JdbcQuestDefinitionRepository definitions=new JdbcQuestDefinitionRepository(manager);JdbcQuestRuntimeRepository runtime=new JdbcQuestRuntimeRepository(manager);
+        JdbcRewardClaimRepository claims=new JdbcRewardClaimRepository(manager);JdbcRewardDeliveryRepository delivery=new JdbcRewardDeliveryRepository(manager);
+        UUID owner=UUID.randomUUID(),member=UUID.randomUUID(),late=UUID.randomUUID(),teamId=UUID.randomUUID(),questId=UUID.randomUUID();
+        ParticipantId team=new ParticipantId(ParticipantType.TEAM,teamId);
+        assertEquals(ParticipantMutationStatus.APPLIED,transaction.inTransaction(()->administration.create(team,"Builders",owner,1000L)));
+        assertEquals(ParticipantMutationStatus.APPLIED,transaction.inTransaction(()->administration.addMember(team,owner,member,ParticipantMemberRole.MEMBER,0L,2000L)));
+        assertEquals(2,memberships.resolve(owner).get(1).getPlayerIds().size());
+        com.jsirgalaxybase.quest.core.ParticipantDirectoryEntry ownerDirectory=
+            new JdbcParticipantDirectoryQuery(manager).findActiveForPlayer(owner).get(0);
+        assertEquals(team,ownerDirectory.getParticipantId());assertEquals(ParticipantMemberRole.OWNER,ownerDirectory.getRole());
+        assertEquals(1L,ownerDirectory.getRevision());assertEquals(2,ownerDirectory.getMemberCount());
+        RewardDefinition reward=new RewardDefinition("item","bq_standard:item",Collections.singletonMap("item.count","2"));
+        QuestDefinition quest=new QuestDefinition(questId,1,"Team quest","",QuestLogic.AND,QuestLogic.AND,Collections.<UUID>emptySet(),Collections.<TaskDefinition>emptyList(),Collections.singletonList(reward),RepeatPolicy.never(),QuestBehavior.builder().participantScope(QuestParticipantScope.TEAM).build());
+        transaction.inTransaction(()->{com.jsirgalaxybase.quest.core.StoredQuestDefinition draft=definitions.createDraft(quest);assertTrue(definitions.publish(questId,1,draft.getContentHash(),1L));
+            runtime.saveProgress(new QuestProgressSnapshot(team,questId,1,QuestStatus.COMPLETED,Collections.<String,TaskProgress>emptyMap(),3L,0));
+            runtime.insertEntitlementsIfAbsent(new java.util.LinkedHashSet<RewardEntitlement>(Arrays.asList(new RewardEntitlement(team,owner,quest,reward,0,false),new RewardEntitlement(team,member,quest,reward,0,false))));return null;});
+        assertEquals(ParticipantMutationStatus.APPLIED,transaction.inTransaction(()->administration.removeMember(team,member,member,1L,3000L)));
+        assertEquals(ParticipantMutationStatus.APPLIED,transaction.inTransaction(()->administration.addMember(team,owner,late,ParticipantMemberRole.MEMBER,2L,4000L)));
+        assertTrue(memberships.resolve(member).size()==1);assertEquals(2,memberships.resolve(late).get(1).getPlayerIds().size());
+        com.jsirgalaxybase.quest.core.QuestCenterSnapshot departedCenter=new JdbcQuestCenterQuery(manager).loadForPlayer(member);
+        assertNull(departedCenter.getQuests().get(0).getProgress());
+        assertEquals(1,departedCenter.getQuests().get(0).getRewards().getClaimable());
+        assertEquals(team,departedCenter.getQuests().get(0).getRewards().getSourceParticipant());
+        assertEquals(0,departedCenter.getQuests().get(0).getRewards().getCycle());
+        assertEquals(RewardClaimStatus.CLAIMED,transaction.inTransaction(()->claims.claim(questId,1,0,member,5000L)));
+        assertEquals(RewardClaimStatus.NOT_OWNED,transaction.inTransaction(()->claims.claim(questId,1,0,late,5000L)));
+        RewardDeliveryLease lease=transaction.inTransaction(()->delivery.leaseAvailable("worker",5001L,6000L,10)).get(0);
+        assertEquals(ParticipantId.player(member),lease.getParticipantId());assertEquals(team,lease.getProgressParticipantId());
+        com.jsirgalaxybase.quest.core.QuestCenterSnapshot ownerCenter=new JdbcQuestCenterQuery(manager).loadForPlayer(owner);
+        assertEquals(team,ownerCenter.getQuests().get(0).getProgress().getParticipantId());assertEquals(1,ownerCenter.getQuests().get(0).getRewards().getClaimable());
+        com.jsirgalaxybase.quest.core.QuestCenterSnapshot lateCenter=new JdbcQuestCenterQuery(manager).loadForPlayer(late);
+        assertEquals(team,lateCenter.getQuests().get(0).getProgress().getParticipantId());assertEquals(0,lateCenter.getQuests().get(0).getRewards().getTotal());
+    }
+
+    @Test
+    public void exactRewardTargetDoesNotClaimAnotherGroupWithTheSameCycle() throws Exception {
+        JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(scoped);JdbcQuestTransaction transaction=new JdbcQuestTransaction(manager);
+        JdbcQuestDefinitionRepository definitions=new JdbcQuestDefinitionRepository(manager);JdbcQuestRuntimeRepository runtime=new JdbcQuestRuntimeRepository(manager);
+        JdbcRewardClaimRepository claims=new JdbcRewardClaimRepository(manager);UUID player=UUID.randomUUID(),questId=UUID.randomUUID();
+        ParticipantId first=new ParticipantId(ParticipantType.TEAM,UUID.fromString("00000000-0000-0000-0000-000000000001"));
+        ParticipantId second=new ParticipantId(ParticipantType.TEAM,UUID.fromString("00000000-0000-0000-0000-000000000002"));
+        RewardDefinition reward=new RewardDefinition("item","bq_standard:item",Collections.singletonMap("item.count","1"));
+        QuestDefinition quest=new QuestDefinition(questId,1,"Shared reward","",QuestLogic.AND,QuestLogic.AND,
+            Collections.<UUID>emptySet(),Collections.<TaskDefinition>emptyList(),Collections.singletonList(reward),RepeatPolicy.never(),
+            QuestBehavior.builder().participantScope(QuestParticipantScope.TEAM).build());
+        transaction.inTransaction(()->{com.jsirgalaxybase.quest.core.StoredQuestDefinition draft=definitions.createDraft(quest);
+            assertTrue(definitions.publish(questId,1,draft.getContentHash(),1L));runtime.insertEntitlementsIfAbsent(
+                new java.util.LinkedHashSet<RewardEntitlement>(Arrays.asList(new RewardEntitlement(first,player,quest,reward,0,false),
+                    new RewardEntitlement(second,player,quest,reward,0,false))));return null;});
+        com.jsirgalaxybase.quest.core.RewardClaimTarget target=claims.findNextRecipientTarget(questId,1,player).get();
+        assertEquals(first,target.getParticipantId());
+        assertEquals(RewardClaimStatus.CLAIMED,transaction.inTransaction(()->claims.claim(target,questId,1,player,10L)));
+        try(Connection connection=scoped.getConnection();PreparedStatement statement=connection.prepareStatement(
+            "SELECT participant_id,delivery_status FROM galaxy_quest_reward_entitlement WHERE recipient_player_id=? ORDER BY participant_id")){
+            statement.setObject(1,player);try(ResultSet rows=statement.executeQuery()){assertTrue(rows.next());assertEquals(first.getId(),rows.getObject(1));assertEquals("PENDING",rows.getString(2));
+                assertTrue(rows.next());assertEquals(second.getId(),rows.getObject(1));assertEquals("CLAIMABLE",rows.getString(2));assertFalse(rows.next());}}
+    }
+
+    @Test
+    public void ownershipTransferIsAtomicAndOldOwnerCannotAdministerAfterward() throws Exception {
+        JdbcQuestConnectionManager manager = new JdbcQuestConnectionManager(scoped);
+        JdbcQuestTransaction transaction = new JdbcQuestTransaction(manager);
+        JdbcParticipantAdministrationRepository administration = new JdbcParticipantAdministrationRepository(manager);
+        JdbcParticipantDirectoryQuery directory = new JdbcParticipantDirectoryQuery(manager);
+        UUID oldOwner = UUID.randomUUID(), newOwner = UUID.randomUUID();
+        ParticipantId party = new ParticipantId(ParticipantType.PARTY, UUID.randomUUID());
+        assertEquals(ParticipantMutationStatus.APPLIED, transaction.inTransaction(
+            () -> administration.create(party, "Explorers", oldOwner, 1000L)));
+        assertEquals(ParticipantMutationStatus.APPLIED, transaction.inTransaction(() -> administration.addMember(
+            party, oldOwner, newOwner, ParticipantMemberRole.MEMBER, 0L, 1100L)));
+        assertEquals(ParticipantMutationStatus.APPLIED, transaction.inTransaction(() -> administration.transferOwnership(
+            party, oldOwner, newOwner, 1L, 1200L)));
+        assertEquals(ParticipantMemberRole.ADMIN, directory.findActiveForPlayer(oldOwner).get(0).getRole());
+        assertEquals(ParticipantMemberRole.OWNER, directory.findActiveForPlayer(newOwner).get(0).getRole());
+        assertEquals(ParticipantMutationStatus.NOT_AUTHORIZED, transaction.inTransaction(() ->
+            administration.transferOwnership(party, oldOwner, UUID.randomUUID(), 2L, 1300L)));
+    }
+
+    @Test
     public void chapterCatalogOrderIsSeparateFromDefinitionVersionAndReplacesAtomically() {
         JdbcQuestConnectionManager manager = new JdbcQuestConnectionManager(scoped);
         JdbcQuestTransaction transaction = new JdbcQuestTransaction(manager);
@@ -134,9 +223,9 @@ public class QuestPostgresIntegrationTest {
         assertTrue(transaction.inTransaction(() -> definitions.publish(targetId, 1, draft.getContentHash(), 10L)));
 
         assertEquals(QuestCompletionRewardPort.Result.COMPLETED,
-            completion.complete("source-entitlement", ParticipantId.player(player), targetId, 20L));
+            completion.complete("source-entitlement", player, targetId, 20L));
         assertEquals(QuestCompletionRewardPort.Result.ALREADY_COMPLETED,
-            completion.complete("source-entitlement", ParticipantId.player(player), targetId, 30L));
+            completion.complete("source-entitlement", player, targetId, 30L));
 
         QuestProgressSnapshot progress = runtime.findProgress(ParticipantId.player(player), targetId, 1).get();
         assertEquals(QuestStatus.COMPLETED, progress.getStatus());
@@ -144,6 +233,37 @@ public class QuestPostgresIntegrationTest {
         assertTrue(progress.getTasks().get("task").isComplete());
         assertEquals(Collections.singletonList(3L), progress.getTasks().get("task").getValues());
         assertEquals(1L, count("galaxy_quest_reward_entitlement"));
+    }
+
+    @Test
+    public void questCompletionRewardSelectsTargetScopeAndFreezesItsCurrentMembers() throws Exception {
+        JdbcQuestConnectionManager manager = new JdbcQuestConnectionManager(scoped);
+        JdbcQuestTransaction transaction = new JdbcQuestTransaction(manager);
+        JdbcQuestDefinitionRepository definitions = new JdbcQuestDefinitionRepository(manager);
+        JdbcQuestRuntimeRepository runtime = new JdbcQuestRuntimeRepository(manager);
+        JdbcParticipantAdministrationRepository administration = new JdbcParticipantAdministrationRepository(manager);
+        JdbcParticipantMembershipResolver memberships = new JdbcParticipantMembershipResolver(manager);
+        UUID owner = UUID.randomUUID(), member = UUID.randomUUID();
+        ParticipantId team = new ParticipantId(ParticipantType.TEAM, UUID.randomUUID());
+        assertEquals(ParticipantMutationStatus.APPLIED, transaction.inTransaction(
+            () -> administration.create(team, "Builders", owner, 1L)));
+        assertEquals(ParticipantMutationStatus.APPLIED, transaction.inTransaction(() -> administration.addMember(
+            team, owner, member, ParticipantMemberRole.MEMBER, 0L, 2L)));
+        UUID targetId = UUID.randomUUID();
+        RewardDefinition reward = new RewardDefinition("xp", "bq_standard:xp",
+            Collections.singletonMap("amount", "5"));
+        QuestDefinition target = new QuestDefinition(targetId, 1, "Team target", "", QuestLogic.AND,
+            QuestLogic.AND, Collections.<UUID>emptySet(), Collections.<TaskDefinition>emptyList(),
+            Collections.singletonList(reward), RepeatPolicy.never(),
+            QuestBehavior.builder().participantScope(QuestParticipantScope.TEAM).build());
+        transaction.inTransaction(() -> { com.jsirgalaxybase.quest.core.StoredQuestDefinition draft = definitions.createDraft(target);
+            assertTrue(definitions.publish(targetId, 1, draft.getContentHash(), 3L)); return null; });
+        JdbcQuestCompletionRewardPort completion = new JdbcQuestCompletionRewardPort(definitions, runtime,
+            transaction, memberships);
+        assertEquals(QuestCompletionRewardPort.Result.COMPLETED,
+            completion.complete("source", owner, targetId, 4L));
+        assertTrue(runtime.findProgress(team, targetId, 1).isPresent());
+        assertEquals(2L, count("galaxy_quest_reward_entitlement"));
     }
 
     @Test
@@ -392,6 +512,24 @@ public class QuestPostgresIntegrationTest {
             "worker-b", 2, 350L)));
         assertEquals(2L, count("galaxy_quest_reward_delivery_attempt"));
         assertEquals(1L, scalar("SELECT COUNT(*) FROM galaxy_quest_reward_delivery_attempt WHERE status='DELIVERED'"));
+    }
+
+    @Test public void deferredDeliveryDoesNotConsumeFailureBudget() throws Exception {
+        JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(scoped);
+        JdbcQuestTransaction transaction=new JdbcQuestTransaction(manager);
+        JdbcQuestRuntimeRepository runtime=new JdbcQuestRuntimeRepository(manager);
+        JdbcRewardDeliveryRepository delivery=new JdbcRewardDeliveryRepository(manager);
+        RewardEntitlement entitlement=entitlement(UUID.randomUUID(),UUID.randomUUID());
+        transaction.inTransaction(()->{runtime.insertEntitlementsIfAbsent(Collections.singleton(entitlement));return null;});
+        RewardDeliveryLease first=transaction.inTransaction(()->delivery.leaseAvailable("worker-a",100L,200L,1)).get(0);
+        assertEquals(0,first.getFailureCount());
+        assertTrue(transaction.inTransaction(()->delivery.markDeferred(entitlement.getEntitlementKey(),"worker-a",
+            first.getAttempt(),"offline",150L,200L)));
+        RewardDeliveryLease second=transaction.inTransaction(()->delivery.leaseAvailable("worker-b",200L,300L,1)).get(0);
+        assertEquals(2,second.getAttempt());assertEquals(0,second.getFailureCount());
+        assertTrue(transaction.inTransaction(()->delivery.markFailed(entitlement.getEntitlementKey(),"worker-b",
+            second.getAttempt(),"inventory-full",250L,300L,true)));
+        assertEquals(1L,scalar("SELECT failure_count FROM galaxy_quest_reward_entitlement"));
     }
 
     @Test

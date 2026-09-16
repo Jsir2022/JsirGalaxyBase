@@ -47,14 +47,14 @@ public class QuestFactProjectorTest {
         QuestDefinition definition = new QuestDefinition(UUID.randomUUID(), 1, "Meeting", "", QuestLogic.AND,
             QuestLogic.AND, Collections.<UUID>emptySet(), Collections.singletonList(task),
             Collections.<RewardDefinition>emptyList());
-        QuestProgressSnapshot initial = new QuestEngine().evaluate(party, definition, null,
+        ParticipantMembership membership = new ParticipantMembership(party,
+            new HashSet<UUID>(Arrays.asList(first, second)));
+        QuestProgressSnapshot initial = new QuestEngine().evaluate(membership, definition, null,
             Collections.<String, TaskProgress>emptyMap(), Collections.<UUID>emptySet(), 1L).getProgress();
         TaskEvaluatorRegistry registry = new TaskEvaluatorRegistry();
         registry.register(new FactCountTaskEvaluator("count"));
         GameplayFact fact = new GameplayFact("s1", "meeting:1", second, "minecraft:meeting", 2L,
             map("subject", "station", "amount", "1"));
-        ParticipantMembership membership = new ParticipantMembership(party,
-            new HashSet<UUID>(Arrays.asList(first, second)));
         assertEquals(1L, new QuestFactProjector(registry).project(definition, initial, membership, fact)
             .get("meeting").getValue());
     }

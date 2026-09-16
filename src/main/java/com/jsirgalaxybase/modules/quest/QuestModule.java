@@ -4,6 +4,9 @@ import java.io.PrintWriter;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.Collection;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Collections;
 import java.util.logging.Logger;
 
@@ -36,8 +39,7 @@ import com.jsirgalaxybase.quest.core.QuestEngine;
 import com.jsirgalaxybase.quest.core.QuestEvaluationPlanner;
 import com.jsirgalaxybase.quest.core.QuestClock;
 import com.jsirgalaxybase.quest.core.BqCompatibleTaskEvaluatorRegistry;
-import com.jsirgalaxybase.quest.core.PlayerOnlyMembershipResolver;
-import com.jsirgalaxybase.quest.core.PlayerQuestAssignmentPolicy;
+import com.jsirgalaxybase.quest.core.ScopedQuestAssignmentPolicy;
 import com.jsirgalaxybase.quest.core.QuestObservationPlan;
 import com.jsirgalaxybase.quest.core.QuestObservationPlanProvider;
 import com.jsirgalaxybase.quest.core.QuestRuntimeTypeExtension;
@@ -47,11 +49,14 @@ import com.jsirgalaxybase.quest.postgres.JdbcQuestConnectionManager;
 import com.jsirgalaxybase.quest.postgres.JdbcQuestDefinitionRepository;
 import com.jsirgalaxybase.quest.postgres.JdbcQuestChapterRepository;
 import com.jsirgalaxybase.quest.postgres.JdbcQuestRuntimeRepository;
+import com.jsirgalaxybase.quest.postgres.JdbcParticipantMembershipResolver;
 import com.jsirgalaxybase.quest.postgres.JdbcQuestTransaction;
 import com.jsirgalaxybase.quest.postgres.JdbcRewardClaimRepository;
 import com.jsirgalaxybase.quest.postgres.JdbcRewardChoiceSelectionRepository;
 import com.jsirgalaxybase.quest.postgres.JdbcQuestTrackingRepository;
 import com.jsirgalaxybase.quest.postgres.JdbcQuestCompletionQuery;
+import com.jsirgalaxybase.quest.postgres.JdbcRewardDeliveryRepository;
+import com.jsirgalaxybase.quest.postgres.JdbcQuestCompletionRewardPort;
 import com.jsirgalaxybase.terminal.TerminalService;
 import com.jsirgalaxybase.modules.quest.application.TrackedQuestSnapshotFactory;
 import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.TrackedQuestSyncController;
@@ -59,6 +64,14 @@ import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.MinecraftQuestE
 import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.QuestGameplayEventHandler;
 import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.RuntimeQuestFactSink;
 import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.MinecraftQuestFactFactory;
+import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.MinecraftItemRewardDeliveryHandler;
+import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.MinecraftXpRewardDeliveryHandler;
+import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.MinecraftScoreboardRewardDeliveryHandler;
+import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.MinecraftCommandRewardExecutor;
+import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.OnlineServerQuestPlayerResolver;
+import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.QuestPlayerResolver;
+import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.QuestRewardDeliveryController;
+import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.WorldSaveQuestPlayerDataFlusher;
 
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 import cpw.mods.fml.common.event.FMLServerStartingEvent;
@@ -69,6 +82,8 @@ import net.minecraft.server.MinecraftServer;
 public class QuestModule extends ModModule {
     private boolean requested;
     private QuestCenterQuery questCenterQuery;
+    private com.jsirgalaxybase.quest.core.ParticipantDirectoryQuery participantDirectoryQuery;
+    private com.jsirgalaxybase.quest.core.AuthenticatedParticipantAdministrationService participantAdministrationService;
     private AuthenticatedQuestClaimService questClaimService;
     private AuthenticatedRewardChoiceService rewardChoiceService;
     private AuthenticatedQuestTrackingService questTrackingService;
@@ -87,6 +102,8 @@ public class QuestModule extends ModModule {
     private QuestGameplayEventHandler gameplayEventHandler;
     private boolean gameplayEventsRegistered;
     private boolean trackingSyncRegistered;
+    private QuestRewardDeliveryController rewardDeliveryController;
+    private boolean rewardDeliveryRegistered;
     private String unavailableReason = "quest PostgreSQL read runtime is disabled";
 
     public QuestModule() { super("quest", "Cross-server Quest Platform", "core"); }
@@ -99,11 +116,17 @@ public class QuestModule extends ModModule {
 
     @Override
     public void serverStarting(ModuleContext context,FMLServerStartingEvent event) {
+        if (rewardDeliveryRegistered && rewardDeliveryController != null) {
+            unregisterRewardDelivery(rewardDeliveryController);
+            rewardDeliveryRegistered = false;
+        }
         if (gameplayEventsRegistered && gameplayEventHandler != null) {
             unregisterGameplayEvents(gameplayEventHandler);
             gameplayEventsRegistered = false;
         }
         TerminalService.installQuestCenterQuery(null);
+        TerminalService.installQuestParticipantDirectoryQuery(null);
+        TerminalService.installQuestParticipantAdministrationService(null);
         TerminalService.installQuestClaimService(null);
         TerminalService.installRewardChoiceService(null);
         TerminalService.installQuestTrackingService(null);
@@ -117,10 +140,10 @@ public class QuestModule extends ModModule {
         TerminalService.installQuestChapterCloneService(null);
         TerminalService.installQuestChapterOrderingService(null);
         TerminalService.installQuestChapterAlignmentService(null);
-        questCenterQuery=null; batchRetirementService=null;
+        questCenterQuery=null;participantDirectoryQuery=null;participantAdministrationService=null; batchRetirementService=null;
         questClaimService=null;rewardChoiceService=null;questTrackingService=null;draftManagementService=null;definitionManagementQuery=null;
         chapterManagementQuery=null;chapterDependencyQuery=null;definitionImpactQuery=null;chapterManagementService=null;chapterCloneService=null;chapterOrderingService=null;chapterAlignmentService=null;
-        questRuntimeService=null;questTypeRegistry=null;gameplayEventHandler=null;
+        questRuntimeService=null;questTypeRegistry=null;gameplayEventHandler=null;rewardDeliveryController=null;
         if(!requested)return;
         if(!isDedicatedServer()){
             unavailableReason="quest PostgreSQL read runtime requires a dedicated server";
@@ -136,6 +159,8 @@ public class QuestModule extends ModModule {
         try{
             questTypeRegistry=createQuestRuntimeTypeRegistry();
             questCenterQuery=createAndValidateQuery(shared);
+            participantDirectoryQuery=createParticipantDirectoryQuery(shared);
+            participantAdministrationService=createParticipantAdministrationService(shared);
             questClaimService=createClaimService(shared);
             rewardChoiceService=createChoiceService(shared);
             questTrackingService=createTrackingService(shared);
@@ -154,7 +179,12 @@ public class QuestModule extends ModModule {
             questRuntimeService=createQuestRuntimeService(runtimeManager);
             gameplayEventHandler=createGameplayEventHandler(runtimeManager, questRuntimeService,
                 context.getConfiguration().getBankingSourceServerId());
+            rewardDeliveryController=createRewardDeliveryController(runtimeManager,
+                context.getConfiguration().getBankingSourceServerId(),
+                context.getConfiguration().getQuestCommandRewardAllowlist());
             TerminalService.installQuestCenterQuery(questCenterQuery);
+            TerminalService.installQuestParticipantDirectoryQuery(participantDirectoryQuery);
+            TerminalService.installQuestParticipantAdministrationService(participantAdministrationService);
             TerminalService.installQuestClaimService(questClaimService);
             TerminalService.installRewardChoiceService(rewardChoiceService);
             TerminalService.installQuestTrackingService(questTrackingService);
@@ -170,11 +200,12 @@ public class QuestModule extends ModModule {
             TerminalService.installQuestChapterAlignmentService(chapterAlignmentService);
             if(!trackingSyncRegistered){registerTrackingSync(questCenterQuery);trackingSyncRegistered=true;}
             if(!gameplayEventsRegistered){registerGameplayEvents(gameplayEventHandler);gameplayEventsRegistered=true;}
+            if(!rewardDeliveryRegistered){registerRewardDelivery(rewardDeliveryController);rewardDeliveryRegistered=true;}
             unavailableReason="";
             GalaxyBase.LOG.info("Quest PostgreSQL read runtime enabled after read-only schema validation");
         }catch(RuntimeException failure){
-            questCenterQuery=null;batchRetirementService=null;questClaimService=null;rewardChoiceService=null;questTrackingService=null;draftManagementService=null;definitionManagementQuery=null;chapterManagementQuery=null;chapterDependencyQuery=null;definitionImpactQuery=null;chapterManagementService=null;chapterCloneService=null;chapterOrderingService=null;chapterAlignmentService=null;TerminalService.installQuestCenterQuery(null);TerminalService.installQuestClaimService(null);TerminalService.installRewardChoiceService(null);TerminalService.installQuestTrackingService(null);TerminalService.installQuestDefinitionManagementQuery(null);TerminalService.installQuestDraftManagementService(null);TerminalService.installQuestBatchRetirementService(null);TerminalService.installQuestChapterManagementQuery(null);TerminalService.installQuestChapterDependencyQuery(null);TerminalService.installQuestDefinitionImpactQuery(null);TerminalService.installQuestChapterManagementService(null);TerminalService.installQuestChapterCloneService(null);TerminalService.installQuestChapterOrderingService(null);TerminalService.installQuestChapterAlignmentService(null);
-            questRuntimeService=null;questTypeRegistry=null;gameplayEventHandler=null;
+            questCenterQuery=null;participantDirectoryQuery=null;participantAdministrationService=null;batchRetirementService=null;questClaimService=null;rewardChoiceService=null;questTrackingService=null;draftManagementService=null;definitionManagementQuery=null;chapterManagementQuery=null;chapterDependencyQuery=null;definitionImpactQuery=null;chapterManagementService=null;chapterCloneService=null;chapterOrderingService=null;chapterAlignmentService=null;TerminalService.installQuestCenterQuery(null);TerminalService.installQuestParticipantDirectoryQuery(null);TerminalService.installQuestParticipantAdministrationService(null);TerminalService.installQuestClaimService(null);TerminalService.installRewardChoiceService(null);TerminalService.installQuestTrackingService(null);TerminalService.installQuestDefinitionManagementQuery(null);TerminalService.installQuestDraftManagementService(null);TerminalService.installQuestBatchRetirementService(null);TerminalService.installQuestChapterManagementQuery(null);TerminalService.installQuestChapterDependencyQuery(null);TerminalService.installQuestDefinitionImpactQuery(null);TerminalService.installQuestChapterManagementService(null);TerminalService.installQuestChapterCloneService(null);TerminalService.installQuestChapterOrderingService(null);TerminalService.installQuestChapterAlignmentService(null);
+            questRuntimeService=null;questTypeRegistry=null;gameplayEventHandler=null;rewardDeliveryController=null;
             unavailableReason="quest PostgreSQL read runtime failed schema validation: "+safe(failure.getMessage());
             GalaxyBase.LOG.error(unavailableReason,failure);
         }
@@ -190,6 +221,12 @@ public class QuestModule extends ModModule {
         FMLCommonHandler.instance().bus().unregister(handler);
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.unregister(handler);
     }
+    protected void registerRewardDelivery(QuestRewardDeliveryController controller){
+        FMLCommonHandler.instance().bus().register(controller);
+    }
+    protected void unregisterRewardDelivery(QuestRewardDeliveryController controller){
+        FMLCommonHandler.instance().bus().unregister(controller);
+    }
     protected QuestCenterQuery createAndValidateQuery(JdbcConnectionManager shared){
         JdbcQuestCenterQuery query=new JdbcQuestCenterQuery(new JdbcQuestConnectionManager(new SharedDataSource(shared)));
         query.validateSchema();return query;
@@ -199,6 +236,8 @@ public class QuestModule extends ModModule {
         return new AuthenticatedQuestClaimService(new JdbcQuestDefinitionRepository(manager),
             new JdbcQuestRuntimeRepository(manager),new JdbcRewardClaimRepository(manager),new JdbcQuestTransaction(manager));
     }
+    protected com.jsirgalaxybase.quest.core.ParticipantDirectoryQuery createParticipantDirectoryQuery(JdbcConnectionManager shared){JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(new SharedDataSource(shared));return new com.jsirgalaxybase.quest.postgres.JdbcParticipantDirectoryQuery(manager);}
+    protected com.jsirgalaxybase.quest.core.AuthenticatedParticipantAdministrationService createParticipantAdministrationService(JdbcConnectionManager shared){JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(new SharedDataSource(shared));return new com.jsirgalaxybase.quest.core.AuthenticatedParticipantAdministrationService(new com.jsirgalaxybase.quest.postgres.JdbcParticipantAdministrationRepository(manager),new JdbcQuestTransaction(manager));}
     protected AuthenticatedRewardChoiceService createChoiceService(JdbcConnectionManager shared){
         JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(new SharedDataSource(shared));
         return new AuthenticatedRewardChoiceService(new JdbcQuestDefinitionRepository(manager),
@@ -280,7 +319,8 @@ public class QuestModule extends ModModule {
     protected QuestGameplayEventHandler createGameplayEventHandler(JdbcQuestConnectionManager manager, QuestRuntimeService runtime,
         String sourceServer){
         QuestEvaluationPlanner planner=new QuestEvaluationPlanner(new JdbcQuestDefinitionRepository(manager),
-            new JdbcQuestCompletionQuery(manager),new PlayerOnlyMembershipResolver(),new PlayerQuestAssignmentPolicy());
+            new JdbcQuestCompletionQuery(manager),new JdbcParticipantMembershipResolver(manager),
+            new ScopedQuestAssignmentPolicy());
         QuestObservationPlanProvider observations=new QuestObservationPlanProvider(){
             private volatile QuestObservationPlan cached=QuestObservationPlan.empty();
             private volatile long nextRefresh;
@@ -302,9 +342,45 @@ public class QuestModule extends ModModule {
         return new QuestGameplayEventHandler(new RuntimeQuestFactSink(runtime,planner,clock),
             new MinecraftQuestFactFactory(sourceServer),observations);
     }
+    protected QuestRewardDeliveryController createRewardDeliveryController(JdbcQuestConnectionManager manager,
+        String sourceServer, String[] commandAllowlist) {
+        QuestPlayerResolver players = new OnlineServerQuestPlayerResolver();
+        WorldSaveQuestPlayerDataFlusher flusher = new WorldSaveQuestPlayerDataFlusher();
+        List<com.jsirgalaxybase.quest.core.RewardDeliveryHandler> handlers =
+            new ArrayList<com.jsirgalaxybase.quest.core.RewardDeliveryHandler>();
+        handlers.add(new MinecraftItemRewardDeliveryHandler("bq_standard:item", players, flusher));
+        handlers.add(new MinecraftItemRewardDeliveryHandler("bq_standard:choice", players, flusher));
+        handlers.add(new MinecraftXpRewardDeliveryHandler(players, flusher));
+        handlers.add(new MinecraftScoreboardRewardDeliveryHandler(players, flusher));
+        handlers.add(new com.jsirgalaxybase.quest.core.QuestCompletionRewardDeliveryHandler(
+            new JdbcQuestCompletionRewardPort(new JdbcQuestDefinitionRepository(manager),
+                new JdbcQuestRuntimeRepository(manager), new JdbcQuestTransaction(manager),
+                new JdbcParticipantMembershipResolver(manager)),
+            new QuestClock(){@Override public long currentTimeMillis(){return System.currentTimeMillis();}}));
+        handlers.add(new com.jsirgalaxybase.quest.core.CommandRewardDeliveryHandler(
+            new com.jsirgalaxybase.quest.core.AllowlistedCommandRewardPolicy(
+                new java.util.LinkedHashSet<String>(Arrays.asList(commandAllowlist == null
+                    ? new String[0] : commandAllowlist))),
+            new MinecraftCommandRewardExecutor(players, flusher),
+            participant -> {
+                net.minecraft.entity.player.EntityPlayerMP player = players.findOnline(participant.getId());
+                return player == null ? "" : player.getCommandSenderName();
+            }));
+        com.jsirgalaxybase.quest.core.RewardDeliveryWorker worker =
+            new com.jsirgalaxybase.quest.core.RewardDeliveryWorker(
+                new JdbcRewardDeliveryRepository(manager), new JdbcQuestTransaction(manager),
+                new com.jsirgalaxybase.quest.core.RewardDeliveryRouter(handlers),
+                new QuestClock(){@Override public long currentTimeMillis(){return System.currentTimeMillis();}},
+                30000L, 5000L, 10);
+        String workerId = "quest-reward:" + (sourceServer == null || sourceServer.trim().isEmpty()
+            ? "unknown" : sourceServer.trim());
+        return new QuestRewardDeliveryController(worker, workerId);
+    }
     public boolean isReadRuntimeActive(){return questCenterQuery!=null;}
     public String getUnavailableReason(){return unavailableReason;}
     public QuestCenterQuery getQuestCenterQuery(){return questCenterQuery;}
+    public com.jsirgalaxybase.quest.core.ParticipantDirectoryQuery getParticipantDirectoryQuery(){return participantDirectoryQuery;}
+    public com.jsirgalaxybase.quest.core.AuthenticatedParticipantAdministrationService getParticipantAdministrationService(){return participantAdministrationService;}
     public AuthenticatedQuestClaimService getQuestClaimService(){return questClaimService;}
     public AuthenticatedRewardChoiceService getRewardChoiceService(){return rewardChoiceService;}
     public AuthenticatedQuestTrackingService getQuestTrackingService(){return questTrackingService;}
@@ -318,6 +394,7 @@ public class QuestModule extends ModModule {
     public QuestChapterOrderingService getChapterOrderingService(){return chapterOrderingService;}
     public QuestChapterAlignmentService getChapterAlignmentService(){return chapterAlignmentService;}
     public QuestRuntimeService getQuestRuntimeService(){return questRuntimeService;}
+    public QuestRewardDeliveryController getRewardDeliveryController(){return rewardDeliveryController;}
     public QuestRuntimeTypeRegistry getQuestTypeRegistry(){return questTypeRegistry;}
     private static String safe(String value){return value==null||value.trim().isEmpty()?"unknown database error":value;}
 

@@ -13,6 +13,11 @@ public interface QuestCenterActionPort {
         @Override public void selectRewardChoice(String questId,String rewardKey,int choiceIndex) {}
         @Override public void toggleTracking(String questId) {}
         @Override public void openManagement() {}
+        @Override public void createParticipant(String type,String name) {}
+        @Override public void addParticipantMember(String type,String id,long revision,String player,String role) {}
+        @Override public void removeParticipantMember(String type,String id,long revision,String player) {}
+        @Override public void leaveParticipant(String type,String id,long revision) {}
+        @Override public void transferParticipantOwner(String type,String id,long revision,String player) {}
         @Override public void retry() {}
     };
 
@@ -27,5 +32,10 @@ public interface QuestCenterActionPort {
     void selectRewardChoice(String questId,String rewardKey,int choiceIndex);
     void toggleTracking(String questId);
     void openManagement();
+    void createParticipant(String type,String name);
+    void addParticipantMember(String type,String id,long revision,String player,String role);
+    void removeParticipantMember(String type,String id,long revision,String player);
+    void leaveParticipant(String type,String id,long revision);
+    void transferParticipantOwner(String type,String id,long revision,String player);
     void retry();
 }
