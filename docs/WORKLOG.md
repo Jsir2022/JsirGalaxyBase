@@ -3827,3 +3827,32 @@
 - 后续唯一权威进度见 `betterquesting-capability-absorption-matrix-2026-09-13.md`。PARTY/TEAM/PUBLIC 奖励归属、
   管理诊断与受控修复、幂等迁移/回滚、实时影子双算和自动切换证据均明确未完成；历史各段“下一步”只保留
   为当时记录，不再作为当前计划依据。
+
+### 2026-09-16 - PARTY/TEAM/PUBLIC 跨服主体与逐成员奖励归属收口
+
+- PostgreSQL 新增稳定 PARTY/TEAM/PUBLIC 主体、成员关系、`OWNER / ADMIN / MEMBER`、乐观修订、离队、移除、
+  所有权转让与归档合同；玩家每种主体类型最多一个活跃成员关系。任务定义的 scope 由服务端选择唯一进度
+  主体，事实不会因多重成员关系重复推进。
+- 组任务完成或进入重复周期时，在同一事务中冻结当时活跃成员并生成逐玩家 entitlement。后来加入者不补领
+  旧周期，离队者保留既得资格；离线交付进入延期而不消耗失败预算。物品、XP、计分板和命令交付统一解析为
+  具体 PLAYER 收件人，禁止把组 UUID 当成玩家。
+- 领取批次增加服务端 `RewardClaimTarget`，精确包含原进度主体与周期。终端按认证玩家的
+  `recipient_player_id` 显示最早尚可领取批次，即使已经离队仍可操作；领取和 Choice 不接受客户端玩家身份，
+  并避免不同队伍恰好同周期时串领。终端详情显示奖励来源 scope 与周期。
+- 命令奖励默认拒绝，只接受显式根命令白名单；空命令、控制字符、超长命令和前缀伪装均拒绝。任意命令的
+  execute/marker 崩溃间隙仍不能承诺 exactly-once，文档明确要求仅配置自身可幂等的审计命令。
+- 新增的 `20260914_001_add_cross_server_quest_platform.sql` 是真实增量迁移而非全量 DDL 复制：旧 PLAYER
+  entitlement 会回填收件人，旧非 PLAYER 且无法推导收件人的数据失败闭合；唯一键、消费主体检查及失败计数
+  均可重复应用。迁移在隔离 PostgreSQL 16 上从旧提交 DDL 连续执行两次通过；未对生产数据库执行。
+- CodeGraph 同步后对 `AuthenticatedParticipantAdministrationService`、`RewardClaimTarget`、
+  `JdbcRewardClaimRepository` 和 `JdbcQuestCenterQuery` 执行 impact；奖励目标影响 30 个符号，领取仓储影响
+  20 个符号，任务中心查询影响 48 个符号。显式覆盖 Quest Core、PostgreSQL、Minecraft 奖励适配、终端网络、
+  UI2 主体管理和根项目回归。
+- 隔离 PostgreSQL 16 的真实集成测试通过，覆盖离队奖励可见、后加入者无旧资格、同周期不同主体隔离、
+  成员冻结、Choice、租约交付和延期重试。完整 Docker 门禁通过 56 项 Gradle 任务；当前报告合计 776 项测试、
+  52 项环境条件跳过、0 failure/0 error，258 张视觉快照、`assemble`、`verifyUi2SelfContained` 与
+  `git diff --check` 均通过。运行 JAR 为
+  `build/libs/jsirgalaxybase-a8ca03e-main+a8ca03eb8d-dirty.jar`，SHA-256：
+  `fb9cc0983b7c6ec4aa58f88cd221469d245128a662bd664a91eb9a41fb158540`。
+- 本批未部署、未执行生产 DDL、未启用 Quest 生产开关、未停用 BetterQuesting，也未触碰 Lobby/S1/S2/客户端。
+  后续仍是管理员诊断与受控修复、迁移 dry-run/回滚、实时影子双算及正式切换证据；这些不属于本批完成声明。
