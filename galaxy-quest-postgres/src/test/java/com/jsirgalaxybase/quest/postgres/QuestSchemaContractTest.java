@@ -33,6 +33,19 @@ public class QuestSchemaContractTest {
         assertTrue(ddl.contains("'item', 'fluid', 'xp'"));
         assertTrue(ddl.contains("submission_status IN ('PREPARED', 'APPLIED', 'CONFIRMED', 'REJECTED')"));
         assertTrue(ddl.contains("participant_type VARCHAR(16) NOT NULL CHECK (participant_type IN ('PLAYER','PARTY','TEAM','PUBLIC'))"));
+        assertTrue(ddl.contains("galaxy_quest_content_migration_batch"));
+        assertTrue(ddl.contains("galaxy_quest_content_migration_item"));
+        assertTrue(ddl.contains("status IN ('PREVIEW', 'BLOCKED', 'APPLIED', 'ROLLED_BACK')"));
+        assertTrue(ddl.contains("action IN ('CREATED', 'VERSIONED', 'UNCHANGED')"));
+        assertTrue(ddl.contains("error_count INTEGER NOT NULL DEFAULT 0"));
+        assertTrue(ddl.contains("warning_count INTEGER NOT NULL DEFAULT 0"));
+    }
+
+    @Test public void reviewedContentMigrationAuditIsTransactionalAndIdempotent() throws Exception {
+        Path migration=Paths.get("ops/sql/migrations/20260917_001_add_quest_content_migration_audit.sql");
+        if(!Files.exists(migration))migration=Paths.get("../ops/sql/migrations/20260917_001_add_quest_content_migration_audit.sql");
+        assertTrue(Files.exists(migration));String reviewed=new String(Files.readAllBytes(migration),StandardCharsets.UTF_8);
+        assertTrue(reviewed.contains("BEGIN;"));assertTrue(reviewed.contains("CREATE TABLE IF NOT EXISTS galaxy_quest_content_migration_batch"));assertTrue(reviewed.contains("source_hash VARCHAR(64) NOT NULL UNIQUE"));assertTrue(reviewed.contains("status IN ('PREVIEW', 'BLOCKED', 'APPLIED', 'ROLLED_BACK')"));assertTrue(reviewed.contains("error_count INTEGER NOT NULL DEFAULT 0"));assertTrue(reviewed.contains("warning_count INTEGER NOT NULL DEFAULT 0"));assertTrue(reviewed.contains("CREATE TABLE IF NOT EXISTS galaxy_quest_content_migration_item"));assertTrue(reviewed.contains("action IN ('CREATED', 'VERSIONED', 'UNCHANGED')"));assertTrue(reviewed.contains("COMMIT;"));
     }
 
     @Test public void reviewedMigrationUpgradesTheCommittedPlayerOnlySchema() throws Exception {

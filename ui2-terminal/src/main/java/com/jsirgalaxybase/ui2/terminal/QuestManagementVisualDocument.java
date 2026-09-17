@@ -123,8 +123,13 @@ public final class QuestManagementVisualDocument extends ComponentUiDocument {
             .child(button("quest-admin-prev", "‹", new Runnable() { public void run() { actions.page(model.getPage() - 1); } }, model.getPage() > 0))
             .child(label("quest-admin-page", (model.getPage() + 1) + " / " + model.getPages(), false))
             .child(button("quest-admin-next", "›", new Runnable() { public void run() { actions.page(model.getPage() + 1); } }, model.getPage() + 1 < model.getPages())).build());
-        return UiElement.type("Column").key("quest-admin").child(tools).child(rows.build()).build();
+        UiElement.Builder content=UiElement.type("Column").key("quest-admin").child(tools);
+        if(!model.getMigrations().isEmpty()){QuestManagementVisualModel.Migration migration=model.getMigrations().get(0);content.child(label("quest-migration-latest","迁移 "+migration.getBatchId()+" · "+migration.getStatus()+" · 新增 "+migration.getCreated()+" · 变更 "+migration.getVersioned()+" · 相同 "+migration.getUnchanged()+" · 阻塞 "+migration.getErrorCount()+" · 警告 "+migration.getWarningCount()+" · "+shortHash(migration.getSourceHash()),false));String diagnostic=firstDiagnostic(migration.getDiagnostic());if(!diagnostic.isEmpty())content.child(label("quest-migration-diagnostic",diagnostic,false));}
+        return content.child(rows.build()).build();
     }
+
+    private static String shortHash(String value){return value==null?"":value.substring(0,Math.min(12,value.length()));}
+    private static String firstDiagnostic(String value){if(value==null)return "";for(String line:value.split("\\r?\\n"))if(line.startsWith("ERROR|")||line.startsWith("WARNING|"))return line.replace("|"," · ");return "";}
 
     private UiElement batchConfirmation() {
         return UiElement.type("Dialog").key("quest-admin-batch-confirm")
@@ -342,8 +347,9 @@ public final class QuestManagementVisualDocument extends ComponentUiDocument {
             .child(LayoutSpec.of("quest-admin-prev", LayoutKind.LEAF).preferred(18, 0).build())
             .child(LayoutSpec.of("quest-admin-page", LayoutKind.LEAF).flex(1).build())
             .child(LayoutSpec.of("quest-admin-next", LayoutKind.LEAF).preferred(18, 0).build()).build());
-        return LayoutSpec.of("quest-admin", LayoutKind.COLUMN).flex(1).padding(new Insets(3, 3, 3, 3)).gap(3)
-            .child(tools).child(list.build()).build();
+        LayoutSpec.Builder root=LayoutSpec.of("quest-admin", LayoutKind.COLUMN).flex(1).padding(new Insets(3, 3, 3, 3)).gap(3).child(tools);
+        if(!model.getMigrations().isEmpty()){root.child(LayoutSpec.of("quest-migration-latest",LayoutKind.LEAF).preferred(0,compact?10:13).build());if(!firstDiagnostic(model.getMigrations().get(0).getDiagnostic()).isEmpty())root.child(LayoutSpec.of("quest-migration-diagnostic",LayoutKind.LEAF).preferred(0,compact?10:13).build());}
+        return root.child(list.build()).build();
     }
 
     private LayoutSpec creatorLayout(boolean compact){return LayoutSpec.of("quest-admin-creator",LayoutKind.COLUMN).flex(1).padding(new Insets(3,3,3,3)).child(LayoutSpec.of("quest-admin-create-card",LayoutKind.COLUMN).flex(1).padding(new Insets(4,4,4,4)).gap(3)

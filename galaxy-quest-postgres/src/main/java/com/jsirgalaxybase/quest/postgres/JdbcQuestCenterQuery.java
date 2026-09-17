@@ -51,6 +51,8 @@ public final class JdbcQuestCenterQuery implements AuthenticatedQuestCenterQuery
             requireTable(connection,"galaxy_quest_player_preference");
             requireTable(connection,"galaxy_quest_participant");
             requireTable(connection,"galaxy_quest_participant_membership");
+            requireTable(connection,"galaxy_quest_content_migration_batch");
+            requireTable(connection,"galaxy_quest_content_migration_item");
             return null;
         });
     }

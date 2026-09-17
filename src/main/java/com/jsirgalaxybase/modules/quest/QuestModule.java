@@ -93,6 +93,7 @@ public class QuestModule extends ModModule {
     private AuthenticatedQuestChapterManagementQuery chapterManagementQuery;
     private AuthenticatedQuestChapterDependencyQuery chapterDependencyQuery;
     private AuthenticatedQuestDefinitionImpactQuery definitionImpactQuery;
+    private com.jsirgalaxybase.quest.core.AuthenticatedQuestContentMigrationQuery contentMigrationQuery;
     private QuestChapterManagementService chapterManagementService;
     private QuestChapterCloneService chapterCloneService;
     private QuestChapterOrderingService chapterOrderingService;
@@ -136,13 +137,14 @@ public class QuestModule extends ModModule {
         TerminalService.installQuestChapterManagementQuery(null);
         TerminalService.installQuestChapterDependencyQuery(null);
         TerminalService.installQuestDefinitionImpactQuery(null);
+        TerminalService.installQuestContentMigrationQuery(null);
         TerminalService.installQuestChapterManagementService(null);
         TerminalService.installQuestChapterCloneService(null);
         TerminalService.installQuestChapterOrderingService(null);
         TerminalService.installQuestChapterAlignmentService(null);
         questCenterQuery=null;participantDirectoryQuery=null;participantAdministrationService=null; batchRetirementService=null;
         questClaimService=null;rewardChoiceService=null;questTrackingService=null;draftManagementService=null;definitionManagementQuery=null;
-        chapterManagementQuery=null;chapterDependencyQuery=null;definitionImpactQuery=null;chapterManagementService=null;chapterCloneService=null;chapterOrderingService=null;chapterAlignmentService=null;
+        chapterManagementQuery=null;chapterDependencyQuery=null;definitionImpactQuery=null;contentMigrationQuery=null;chapterManagementService=null;chapterCloneService=null;chapterOrderingService=null;chapterAlignmentService=null;
         questRuntimeService=null;questTypeRegistry=null;gameplayEventHandler=null;rewardDeliveryController=null;
         if(!requested)return;
         if(!isDedicatedServer()){
@@ -171,6 +173,7 @@ public class QuestModule extends ModModule {
             chapterManagementQuery=createChapterManagementQuery(shared,editorAuthorization);
             chapterDependencyQuery=createChapterDependencyQuery(shared,editorAuthorization);
             definitionImpactQuery=createDefinitionImpactQuery(shared,editorAuthorization);
+            contentMigrationQuery=createContentMigrationQuery(shared,editorAuthorization);
             chapterManagementService=createChapterManagementService(shared,editorAuthorization);
             chapterCloneService=createChapterCloneService(shared,editorAuthorization);
             chapterOrderingService=createChapterOrderingService(shared,editorAuthorization);
@@ -194,6 +197,7 @@ public class QuestModule extends ModModule {
             TerminalService.installQuestChapterManagementQuery(chapterManagementQuery);
             TerminalService.installQuestChapterDependencyQuery(chapterDependencyQuery);
             TerminalService.installQuestDefinitionImpactQuery(definitionImpactQuery);
+            TerminalService.installQuestContentMigrationQuery(contentMigrationQuery);
             TerminalService.installQuestChapterManagementService(chapterManagementService);
             TerminalService.installQuestChapterCloneService(chapterCloneService);
             TerminalService.installQuestChapterOrderingService(chapterOrderingService);
@@ -204,7 +208,7 @@ public class QuestModule extends ModModule {
             unavailableReason="";
             GalaxyBase.LOG.info("Quest PostgreSQL read runtime enabled after read-only schema validation");
         }catch(RuntimeException failure){
-            questCenterQuery=null;participantDirectoryQuery=null;participantAdministrationService=null;batchRetirementService=null;questClaimService=null;rewardChoiceService=null;questTrackingService=null;draftManagementService=null;definitionManagementQuery=null;chapterManagementQuery=null;chapterDependencyQuery=null;definitionImpactQuery=null;chapterManagementService=null;chapterCloneService=null;chapterOrderingService=null;chapterAlignmentService=null;TerminalService.installQuestCenterQuery(null);TerminalService.installQuestParticipantDirectoryQuery(null);TerminalService.installQuestParticipantAdministrationService(null);TerminalService.installQuestClaimService(null);TerminalService.installRewardChoiceService(null);TerminalService.installQuestTrackingService(null);TerminalService.installQuestDefinitionManagementQuery(null);TerminalService.installQuestDraftManagementService(null);TerminalService.installQuestBatchRetirementService(null);TerminalService.installQuestChapterManagementQuery(null);TerminalService.installQuestChapterDependencyQuery(null);TerminalService.installQuestDefinitionImpactQuery(null);TerminalService.installQuestChapterManagementService(null);TerminalService.installQuestChapterCloneService(null);TerminalService.installQuestChapterOrderingService(null);TerminalService.installQuestChapterAlignmentService(null);
+            questCenterQuery=null;participantDirectoryQuery=null;participantAdministrationService=null;batchRetirementService=null;questClaimService=null;rewardChoiceService=null;questTrackingService=null;draftManagementService=null;definitionManagementQuery=null;chapterManagementQuery=null;chapterDependencyQuery=null;definitionImpactQuery=null;contentMigrationQuery=null;chapterManagementService=null;chapterCloneService=null;chapterOrderingService=null;chapterAlignmentService=null;TerminalService.installQuestCenterQuery(null);TerminalService.installQuestParticipantDirectoryQuery(null);TerminalService.installQuestParticipantAdministrationService(null);TerminalService.installQuestClaimService(null);TerminalService.installRewardChoiceService(null);TerminalService.installQuestTrackingService(null);TerminalService.installQuestDefinitionManagementQuery(null);TerminalService.installQuestDraftManagementService(null);TerminalService.installQuestBatchRetirementService(null);TerminalService.installQuestChapterManagementQuery(null);TerminalService.installQuestChapterDependencyQuery(null);TerminalService.installQuestDefinitionImpactQuery(null);TerminalService.installQuestContentMigrationQuery(null);TerminalService.installQuestChapterManagementService(null);TerminalService.installQuestChapterCloneService(null);TerminalService.installQuestChapterOrderingService(null);TerminalService.installQuestChapterAlignmentService(null);
             questRuntimeService=null;questTypeRegistry=null;gameplayEventHandler=null;rewardDeliveryController=null;
             unavailableReason="quest PostgreSQL read runtime failed schema validation: "+safe(failure.getMessage());
             GalaxyBase.LOG.error(unavailableReason,failure);
@@ -291,6 +295,7 @@ public class QuestModule extends ModModule {
         return new AuthenticatedQuestDefinitionImpactQuery(new JdbcQuestDefinitionRepository(manager),
             new JdbcQuestChapterRepository(manager), authorization);
     }
+    protected com.jsirgalaxybase.quest.core.AuthenticatedQuestContentMigrationQuery createContentMigrationQuery(JdbcConnectionManager shared,QuestEditorAuthorization authorization){JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(new SharedDataSource(shared));return new com.jsirgalaxybase.quest.core.AuthenticatedQuestContentMigrationQuery(new com.jsirgalaxybase.quest.postgres.JdbcQuestContentMigrationRepository(manager),authorization);}
     protected QuestChapterManagementService createChapterManagementService(JdbcConnectionManager shared,
         QuestEditorAuthorization authorization) {
         JdbcQuestConnectionManager manager = new JdbcQuestConnectionManager(new SharedDataSource(shared));

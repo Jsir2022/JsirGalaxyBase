@@ -184,13 +184,16 @@ public class TerminalServiceTest {
         TerminalService.installQuestDefinitionManagementQuery(new com.jsirgalaxybase.quest.core.AuthenticatedQuestDefinitionManagementQuery(
             new com.jsirgalaxybase.quest.core.QuestDefinitionManagementQuery(){public com.jsirgalaxybase.quest.core.QuestDefinitionManagementPage load(com.jsirgalaxybase.quest.core.QuestDefinitionManagementRequest value){request[0]=value;return new com.jsirgalaxybase.quest.core.QuestDefinitionManagementPage(Collections.<com.jsirgalaxybase.quest.core.StoredQuestDefinition>emptyList(),value.getPage(),value.getPageSize(),0L);}public java.util.Optional<com.jsirgalaxybase.quest.core.StoredQuestDefinition> find(UUID id,int version){return java.util.Optional.empty();}},
             new com.jsirgalaxybase.quest.core.QuestEditorAuthorization(){public boolean canManageDefinitions(com.jsirgalaxybase.quest.core.QuestEditorActor value){actor[0]=value;return true;}}));
+        TerminalService.installQuestContentMigrationQuery(new com.jsirgalaxybase.quest.core.AuthenticatedQuestContentMigrationQuery(
+            new com.jsirgalaxybase.quest.core.QuestContentMigrationQuery(){public java.util.List<com.jsirgalaxybase.quest.core.QuestContentMigrationSummary> listRecent(int limit){return java.util.Collections.singletonList(new com.jsirgalaxybase.quest.core.QuestContentMigrationSummary("bq-test","hash","PREVIEW",1L,0L,2,1,1,0,1,"WARNING|UNPLACED_QUEST"));}},
+            new com.jsirgalaxybase.quest.core.QuestEditorAuthorization(){public boolean canManageDefinitions(com.jsirgalaxybase.quest.core.QuestEditorActor value){return true;}}));
         try{
             TerminalQuestCenterSectionSnapshot result=TerminalService.buildAuthenticatedQuestCenterSnapshot(player,"Admin",
                 TerminalActionType.QUEST_ADMIN_FILTER,new TerminalQuestActionPayload("","","all","steel",0,0,"",-1,"DRAFT",3));
             assertEquals(player,actor[0].getId());assertEquals("Admin",actor[0].getDisplayName());
             assertEquals("steel",request[0].getQuery());assertEquals(3,request[0].getPage());assertEquals(20,request[0].getPageSize());
-            assertEquals(TerminalQuestCenterSectionSnapshot.View.ADMIN,result.getView());assertNotNull(result.getManagement());
-        }finally{TerminalService.installQuestDefinitionManagementQuery(null);TerminalService.installQuestCenterQuery(null);}
+            assertEquals(TerminalQuestCenterSectionSnapshot.View.ADMIN,result.getView());assertNotNull(result.getManagement());assertEquals("bq-test",result.getManagement().getMigrations().get(0).getBatchId());
+        }finally{TerminalService.installQuestContentMigrationQuery(null);TerminalService.installQuestDefinitionManagementQuery(null);TerminalService.installQuestCenterQuery(null);}
     }
 
     @Test

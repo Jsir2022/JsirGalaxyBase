@@ -124,6 +124,7 @@ public final class TerminalService {
     private static volatile AuthenticatedQuestChapterManagementQuery questChapterManagementQuery;
     private static volatile AuthenticatedQuestChapterDependencyQuery questChapterDependencyQuery;
     private static volatile AuthenticatedQuestDefinitionImpactQuery questDefinitionImpactQuery;
+    private static volatile com.jsirgalaxybase.quest.core.AuthenticatedQuestContentMigrationQuery questContentMigrationQuery;
     private static volatile QuestChapterManagementService questChapterManagementService;
     private static volatile QuestChapterCloneService questChapterCloneService;
     private static volatile QuestChapterAlignmentService questChapterAlignmentService;
@@ -209,6 +210,7 @@ public final class TerminalService {
     public static void installQuestChapterManagementQuery(AuthenticatedQuestChapterManagementQuery query) { questChapterManagementQuery = query; }
     public static void installQuestChapterDependencyQuery(AuthenticatedQuestChapterDependencyQuery query) { questChapterDependencyQuery = query; }
     public static void installQuestDefinitionImpactQuery(AuthenticatedQuestDefinitionImpactQuery query) { questDefinitionImpactQuery = query; }
+    public static void installQuestContentMigrationQuery(com.jsirgalaxybase.quest.core.AuthenticatedQuestContentMigrationQuery query) { questContentMigrationQuery = query; }
     public static void installQuestChapterManagementService(QuestChapterManagementService service) { questChapterManagementService = service; }
     /** Installs the Base-owned atomic chapter copy command; null leaves definitions unchanged. */
     public static void installQuestChapterCloneService(QuestChapterCloneService service) { questChapterCloneService = service; }
@@ -1307,9 +1309,10 @@ public final class TerminalService {
             else if(found.getStatus()==AuthenticatedQuestDefinitionManagementQuery.DefinitionResult.Status.NOT_FOUND)message="所选任务版本不存在或已被移除。";
             else message="当前玩家没有读取任务定义的权限。";
         }catch(IllegalArgumentException invalid){message="所选任务标识无效。";}
+        java.util.List<TerminalQuestCenterSectionSnapshot.Migration> migrationRows=new java.util.ArrayList<TerminalQuestCenterSectionSnapshot.Migration>();if(questContentMigrationQuery!=null)for(com.jsirgalaxybase.quest.core.QuestContentMigrationSummary value:questContentMigrationQuery.listRecent(actor,10))migrationRows.add(new TerminalQuestCenterSectionSnapshot.Migration(value.getBatchId(),value.getSourceHash(),value.getStatus(),value.getAppliedAt(),value.getRolledBackAt(),value.getCreated(),value.getVersioned(),value.getUnchanged(),value.getErrorCount(),value.getWarningCount(),value.getDiagnostic()));
         TerminalQuestCenterSectionSnapshot.Management management=new TerminalQuestCenterSectionSnapshot.Management(
             intent.getQuery(),lifecycle==null?"":lifecycle.name(),page.getPage(),page.getPageSize(),page.getTotal(),definitions,detail,
-            managementTypes(QuestElementKind.TASK),managementTypes(QuestElementKind.REWARD));
+            managementTypes(QuestElementKind.TASK),managementTypes(QuestElementKind.REWARD),migrationRows);
         return new TerminalQuestCenterSectionSnapshot("READY",message,
             TerminalQuestCenterSectionSnapshot.View.ADMIN,"","","all",intent.getQuery(),
             java.util.Collections.<TerminalQuestCenterSectionSnapshot.Chapter>emptyList(),0,6,0,

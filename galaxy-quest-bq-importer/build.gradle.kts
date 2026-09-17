@@ -21,12 +21,14 @@ tasks.withType<JavaCompile>().configureEach {
 
 dependencies {
     implementation(project(":galaxy-quest-core"))
+    implementation(project(":galaxy-quest-postgres"))
     implementation("com.google.code.gson:gson:2.10.1")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.postgresql:postgresql:42.7.4")
 }
 
 application {
-    mainClass.set("com.jsirgalaxybase.quest.bqimport.BqInventoryMain")
+    mainClass.set("com.jsirgalaxybase.quest.bqimport.BqMigrationMain")
 }
 
 tasks.register<JavaExec>("progressInventory") {
