@@ -3856,3 +3856,58 @@
   `fb9cc0983b7c6ec4aa58f88cd221469d245128a662bd664a91eb9a41fb158540`。
 - 本批未部署、未执行生产 DDL、未启用 Quest 生产开关、未停用 BetterQuesting，也未触碰 Lobby/S1/S2/客户端。
   后续仍是管理员诊断与受控修复、迁移 dry-run/回滚、实时影子双算及正式切换证据；这些不属于本批完成声明。
+
+### 2026-09-17 - BetterQuesting 内容兼容与迁移路线定稿
+
+- 新增独立路线文档 `betterquesting-content-compatibility-migration-roadmap-2026-09-17.md`，明确暂停职业、贡献等
+  新玩法，先完成现有 GTNH BQ 内容的定义导入、行为兼容、玩家进度合并、影子双算和可回滚切换。
+- 核对当前实现：`galaxy-quest-bq-importer` 已能只读解析 `DefaultQuests/Quests`、`QuestLines`、
+  `QuestLinesOrder.txt` 和玩家 UUID 进度 JSON，但当前只生成内存模型与报告，没有 PostgreSQL 写入、迁移批次、
+  dry-run/回滚或生产调用；importer 继续不进入运行 JAR。
+- 下一实施点固定为 M.1 定义与章节迁移闭环：稳定清单、兼容矩阵、严格校验、隔离 PostgreSQL 幂等提交与
+  整批回滚、UI2 导入预览，以及导入后玩家任务中心的完整浏览。玩家进度、事实运行、奖励、部署、生产 DDL
+  和 BQ 停用均明确不在 M.1 范围。
+- 本次仅修改文档，没有代码、构建、数据库、部署或运行时状态变化。
+
+### 2026-09-17 - BQ 定义迁移 M.1 离线清单开工
+
+- CodeGraph 索引为最新；沿 `BqQuestDefinitionImporter`、`BqQuestChapterImporter`、定义/章节 PostgreSQL
+  Repository、`TerminalService` 与 `QuestManagementVisualDocument` 六条入口核对影响边界。
+- 新增确定性 `BqMigrationManifest`/`BqMigrationPlanner`：同一拆分任务书生成稳定批次哈希，并失败闭合检查未知
+  Task/Reward、重复 UUID、缺失/循环前置和悬空章节引用；未放入章节的任务以明确警告保留。
+- Docker `:galaxy-quest-bq-importer:test` 通过（23 项）；没有读取生产任务目录、连接数据库、执行 DDL、导入
+  玩家进度、发放奖励、部署或修改 BetterQuesting。下一步是隔离 PostgreSQL staging/dry-run 与原子提交合同。
+
+### 2026-09-17 - BetterQuesting 替代下一长期目标交接单
+
+- 新增 `betterquesting-replacement-goal-handoff-2026-09-17.md`，将“完成 BQ 替代”拆成定义/章节迁移、行为兼容、
+  玩家进度迁移、诊断修复、影子双算和灰度切换六段，避免把尚不能一次验收的工作误设为单一无限目标。
+- 交接单明确当前工作树已有 M.1 实现但尚未完成全量验收、提交与推送；下一目标必须延续现有实现收口，禁止
+  另起平行 importer 或把未验收代码写成已完成。
+- 固化可直接设立的 M.1 长期目标、自动完成判据和禁止边界。本次只更新文档与索引，没有读取生产 BQ 目录、
+  执行数据库变更、部署、启用 Quest 或停用 BetterQuesting。
+
+### 2026-09-17 - BQ 定义与章节迁移 M.1 自动收口
+
+- 完成确定性迁移清单、逐元素兼容矩阵和失败闭合校验：覆盖重复 UUID、缺失/循环前置、章节悬空与重复放置、
+  顺序缺失、资源引用边界、未知类型，并复用正式 `StandardQuestEditorTypeRegistry` 校验 13 类任务和 6 类奖励
+  的归一化参数。原始 BQ JSON 继续保存在离线迁移载荷中，不进入 Base 运行时读取路径。
+- 新增明确分离的 `dry-run / preview / apply / rollback`：dry-run 零写入；preview 只在显式隔离写入确认后记录
+  PREVIEW 或 BLOCKED；apply 以 PostgreSQL advisory lock 和事务完成 CREATED/VERSIONED/UNCHANGED；相同批次
+  幂等，内容变化受控升版，整批回滚受后续版本与依赖保护。
+- 新增审计表增量迁移 `20260917_001_add_quest_content_migration_audit.sql`，只在隔离 PostgreSQL 16 中从空审计
+  表连续执行两次验证；未执行生产 DDL。真实集成测试覆盖故障事务回滚、阻塞预览、升版恢复、章节图标/背景、
+  前置、目标、奖励和玩家任务中心浏览。
+- UI2 管理终端接入最近迁移状态、来源哈希、创建/升版/不变计数、错误/警告和有界诊断；三档终端尺寸的迁移
+  预览结构审计通过。CodeGraph 已同步，并复核规划器、数据库服务、审计仓储、管理文档和 `TerminalService`
+  的 impact/affected；显式门禁覆盖了 CodeGraph 未能从新增文件推导的 importer 与 UI2 测试。
+- Docker 完整门禁通过：Quest 三模块、UI2 四模块、视觉导出、根 `test`、`assemble` 和
+  `verifyUi2SelfContained`；共 788 项测试、71 项环境条件跳过、0 failure/0 error，258 张视觉快照均为
+  `SUMMARY|issues=0`，`git diff --check` 通过。代码提交为 `b963344`。
+- 提交后先显式生成 UI2 子模块 JAR，再通过根 `assemble` 与 `verifyUi2SelfContained`（规避旧 Forge 转换器在
+  新版本名首次构建时的任务排序竞争）。运行 JAR 为
+  `build/libs/jsirgalaxybase-b963344-main+b963344e96-dirty.jar`，SHA-256：
+  `0e5176f01227abbef1948a3eaa2f24c9487b279142f5362ebbd3fc31bcefdd88`；内容审计确认没有 importer、Gson CLI、
+  BetterQuesting 类、BQ GUI/Packet 或 JSON 存储，仅保留来源声明。
+- 本轮没有读取生产 BQ 目录、导入玩家进度、发放奖励、部署、启用 Quest 生产开关、停用 BetterQuesting，
+  也未触碰 Lobby/S1/S2/客户端。M.1 只完成内容迁移闭环；下一阶段仍是 M.2 Task/Reward 行为兼容。
