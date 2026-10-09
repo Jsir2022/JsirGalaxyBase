@@ -170,10 +170,14 @@ public final class QuestCenterVisualModel {
     public static final class TaskRow {
         private final String key, label, detail;
         private final long value, target;
-        public TaskRow(String key,String label,String detail,long value,long target){this.key=text(key);this.label=text(label);
-            this.detail=text(detail);this.value=Math.max(0,value);this.target=Math.max(1,target);}
+        private final boolean confirmable,submittable,detectable;
+        public TaskRow(String key,String label,String detail,long value,long target){this(key,label,detail,value,target,false,false);}
+        public TaskRow(String key,String label,String detail,long value,long target,boolean confirmable){this(key,label,detail,value,target,confirmable,false);}
+        public TaskRow(String key,String label,String detail,long value,long target,boolean confirmable,boolean submittable){this(key,label,detail,value,target,confirmable,submittable,false);}
+        public TaskRow(String key,String label,String detail,long value,long target,boolean confirmable,boolean submittable,boolean detectable){this.key=text(key);this.label=text(label);
+            this.detail=text(detail);this.value=Math.max(0,value);this.target=Math.max(1,target);this.confirmable=confirmable;this.submittable=submittable;this.detectable=detectable;}
         public String getKey(){return key;} public String getLabel(){return label;} public String getDetail(){return detail;}
-        public long getValue(){return value;} public long getTarget(){return target;} public boolean isComplete(){return value>=target;}
+        public long getValue(){return value;} public long getTarget(){return target;} public boolean isComplete(){return value>=target;} public boolean isConfirmable(){return confirmable;} public boolean isSubmittable(){return submittable;} public boolean isDetectable(){return detectable;}
     }
 
     public static final class RewardRow {

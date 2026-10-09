@@ -117,6 +117,26 @@ public final class TaskProgress {
         return new TaskProgress(taskKey, observedValues, targets, false);
     }
 
+    /** Replaces an incomplete BQ retrieval snapshot while retaining individually satisfied requirements. */
+    public TaskProgress replaceIncompleteComponents(List<Long> observedValues) {
+        if (complete) return this;
+        if (observedValues == null || observedValues.size() != values.size()) {
+            throw new IllegalArgumentException("observed progress shape does not match task progress");
+        }
+        List<Long> replaced = new ArrayList<Long>(values.size());
+        for (int i = 0; i < values.size(); i++) {
+            long observed = Objects.requireNonNull(observedValues.get(i), "observedValue");
+            if (observed < 0) throw new IllegalArgumentException("observed progress must not be negative");
+            replaced.add(values.get(i) >= targets.get(i) ? values.get(i) : observed);
+        }
+        return new TaskProgress(taskKey, replaced, targets, false);
+    }
+
+    /** Latches the BQ Task completion marker without rewriting its per-component observation values. */
+    public TaskProgress markComplete() {
+        return complete ? this : new TaskProgress(taskKey, values, targets, true);
+    }
+
     private static long saturatingSum(List<Long> values) {
         long result = 0L;
         for (Long value : values) {

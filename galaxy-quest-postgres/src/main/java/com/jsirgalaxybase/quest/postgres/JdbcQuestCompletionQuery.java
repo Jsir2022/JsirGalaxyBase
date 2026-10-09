@@ -24,7 +24,7 @@ public final class JdbcQuestCompletionQuery implements QuestCompletionQuery {
             Set<UUID> result = new LinkedHashSet<UUID>();
             try (PreparedStatement statement = connection.prepareStatement(
                 "SELECT DISTINCT quest_id FROM galaxy_quest_progress WHERE participant_type=? AND participant_id=? "
-                    + "AND status='COMPLETED' ORDER BY quest_id")) {
+                    + "AND ever_completed=TRUE ORDER BY quest_id")) {
                 statement.setString(1, participantId.getType().name());
                 statement.setObject(2, participantId.getId());
                 try (ResultSet rows = statement.executeQuery()) {

@@ -34,6 +34,26 @@ public class TerminalQuestActionPayloadTest {
     }
 
     @Test
+    public void checkboxActionReusesBoundedActionKeyWithoutPlayerIdentity() {
+        TerminalQuestActionPayload decoded = TerminalQuestActionPayload.decode(new TerminalQuestActionPayload(
+            "chapter", "550e8400-e29b-41d4-a716-446655440000", "all", "", 0, 0,
+            "task-0", -1).encode());
+        assertEquals("task-0", decoded.getTaskKey());
+        assertEquals(-1, decoded.getChoiceIndex());
+        assertEquals(TerminalActionType.QUEST_CONFIRM_TASK,
+            TerminalActionType.fromId("quest_confirm_task"));
+    }
+
+    @Test
+    public void forceClaimIntentHasDedicatedActionWithoutAddingIdentityToPayload() {
+        TerminalQuestActionPayload decoded=TerminalQuestActionPayload.decode(new TerminalQuestActionPayload(
+            "chapter-a","550e8400-e29b-41d4-a716-446655440000","claimable","",0,0).encode());
+        assertEquals("chapter-a",decoded.getChapterId());
+        assertEquals("550e8400-e29b-41d4-a716-446655440000",decoded.getQuestId());
+        assertEquals(TerminalActionType.QUEST_FORCE_CLAIM,TerminalActionType.fromId("quest_force_claim"));
+    }
+
+    @Test
     public void malformedAndOversizedIntentFailsClosedToBoundedValues() {
         TerminalQuestActionPayload malformed = TerminalQuestActionPayload.decode("not-a-valid-payload");
         assertEquals("", malformed.getChapterId());

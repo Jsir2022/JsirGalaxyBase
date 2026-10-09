@@ -3,13 +3,17 @@ package com.jsirgalaxybase.modules.quest.infrastructure.minecraft;
 import com.jsirgalaxybase.GalaxyBase;
 import com.jsirgalaxybase.quest.core.QuestObservationPlan;
 import com.jsirgalaxybase.quest.core.QuestObservationPlanProvider;
+import com.jsirgalaxybase.quest.core.QuestClock;
 import com.jsirgalaxybase.quest.core.QuestScoreObservation;
 import com.jsirgalaxybase.quest.core.QuestCraftingStatisticObservation;
+import com.jsirgalaxybase.quest.core.GameplayFact;
 
 import cpw.mods.fml.common.eventhandler.EventPriority;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.common.gameevent.PlayerEvent.ItemCraftedEvent;
 import cpw.mods.fml.common.gameevent.PlayerEvent.ItemSmeltedEvent;
+import cpw.mods.fml.common.gameevent.PlayerEvent.PlayerLoggedInEvent;
+import cpw.mods.fml.common.gameevent.PlayerEvent.PlayerLoggedOutEvent;
 import cpw.mods.fml.common.gameevent.TickEvent;
 import net.minecraft.inventory.InventoryCrafting;
 import net.minecraft.item.ItemStack;
@@ -23,11 +27,18 @@ import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent.Action;
 import net.minecraftforge.event.world.BlockEvent.BreakEvent;
 
-/** Event capture only. It never traverses quest definitions or mutates player progress directly. */
+import java.util.IdentityHashMap;
+import java.util.Map;
+import java.util.UUID;
+
+/** Captures server facts and delegates bounded periodic progress reconciliation to the runtime sink. */
 public final class QuestGameplayEventHandler {
     private final QuestFactSink sink;
     private final MinecraftQuestFactFactory facts;
     private final QuestObservationPlanProvider observationPlans;
+    private final QuestClock clock;
+    private final Map<net.minecraft.entity.player.EntityPlayer, InventorySession> inventorySessions =
+        new IdentityHashMap<net.minecraft.entity.player.EntityPlayer, InventorySession>();
 
     public QuestGameplayEventHandler(QuestFactSink sink, MinecraftQuestFactFactory facts) {
         this(sink, facts, new QuestObservationPlanProvider() {
@@ -37,11 +48,20 @@ public final class QuestGameplayEventHandler {
 
     public QuestGameplayEventHandler(QuestFactSink sink, MinecraftQuestFactFactory facts,
         QuestObservationPlanProvider observationPlans) {
+        this(sink, facts, observationPlans, new QuestClock() {
+            @Override public long currentTimeMillis() { return System.currentTimeMillis(); }
+        });
+    }
+
+    public QuestGameplayEventHandler(QuestFactSink sink, MinecraftQuestFactFactory facts,
+        QuestObservationPlanProvider observationPlans, QuestClock clock) {
         if (sink == null || facts == null) throw new IllegalArgumentException("sink and facts are required");
         if (observationPlans == null) throw new IllegalArgumentException("observationPlans is required");
+        if (clock == null) throw new IllegalArgumentException("clock is required");
         this.sink = sink;
         this.facts = facts;
         this.observationPlans = observationPlans;
+        this.clock = clock;
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
@@ -54,19 +74,28 @@ public final class QuestGameplayEventHandler {
             amount = actual == null ? 0 : actual.stackSize;
         }
         final int produced = amount;
-        if (produced > 0) submit(() -> facts.itemProduced(event.player, event.crafting, produced, "craft"));
+        if (produced > 0) {
+            final ItemStack output = event.crafting.copy();
+            submit(() -> facts.itemProduced(event.player, output, produced, "craft"));
+            submitCraftingStatistics(event.player, output, "craft");
+        }
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public void onItemSmelted(ItemSmeltedEvent event) {
         if (!valid(event.player) || event.smelting == null) return;
-        submit(() -> facts.itemProduced(event.player, event.smelting, Math.max(1, event.smelting.stackSize), "smelt"));
+        final ItemStack output = event.smelting.copy();
+        submit(() -> facts.itemProduced(event.player, output, Math.max(1, output.stackSize), "smelt"));
+        submitCraftingStatistics(event.player, output, "smelt");
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public void onItemAnvil(AnvilRepairEvent event) {
         if (!valid(event.entityPlayer) || event.output == null) return;
-        submit(() -> facts.itemProduced(event.entityPlayer, event.output, Math.max(1, event.output.stackSize), "anvil"));
+        final ItemStack output = event.output.copy();
+        if (output.stackSize <= 0) return;
+        submit(() -> facts.itemProduced(event.entityPlayer, output, output.stackSize, "anvil"));
+        submitCraftingStatistics(event.entityPlayer, output, "anvil");
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
@@ -111,23 +140,75 @@ public final class QuestGameplayEventHandler {
         QuestObservationPlan plan = observationPlans.current();
         if (plan == null) return;
         if (event.player.ticksExisted % 20 == 0) {
-            if (plan.observesInventory()) submit(() -> facts.inventoryObserved(event.player, event.player.inventory));
+            if (plan.observesInventory()) {
+                if (plan.observesBqPartyInventory()) {
+                    InventorySession session = inventorySession(event.player);
+                    final GameplayFact snapshot = facts.inventoryObserved(event.player, event.player.inventory,
+                        session.id);
+                    // A login event may claim a new session. Tick retries must be fenced
+                    // updates; they must never reclaim a lease held by another server.
+                    submit(() -> snapshot);
+                } else {
+                    submit(() -> facts.inventoryObserved(event.player, event.player.inventory));
+                }
+            }
             if (plan.observesFluidInventory()) submit(() -> facts.fluidInventoryObserved(event.player, event.player.inventory));
             for (final QuestScoreObservation score : plan.getScores()) {
                 submit(() -> facts.scoreObserved(event.player, score.getName(), score.getDisplayName(),
                     score.getCriteria()));
-            }
-            for (final QuestCraftingStatisticObservation statistic : plan.getCraftingStatistics()) {
-                submit(() -> facts.craftingStatisticObserved(event.player, statistic.getRegistryName(), statistic.getMeta()));
             }
         }
         if (event.player.ticksExisted % 60 == 0) {
             if (plan.observesMeeting()) submit(() -> facts.nearbyEntitiesObserved(event.player,
                 plan.getMeetingRadius()));
             if (plan.observesXp()) submit(() -> facts.xpObserved(event.player));
+            if (plan.observesPlayerLockedProgress()) {
+                sink.reconcileLockedProgress(event.player.getUniqueID(), clock.currentTimeMillis());
+            }
         }
         if (event.player.ticksExisted % 100 == 0 && plan.observesLocation()) {
             submit(() -> facts.locationObserved(event.player));
+        }
+    }
+
+    @SubscribeEvent
+    public void onPlayerLoggedIn(PlayerLoggedInEvent event) {
+        if (event == null || !valid(event.player)) return;
+        QuestObservationPlan plan = observationPlans.current();
+        if (plan == null || !plan.observesInventory() || !plan.observesBqPartyInventory()) return;
+        InventorySession session = new InventorySession(UUID.randomUUID());
+        inventorySessions.put(event.player, session);
+        GameplayFact snapshot = facts.inventoryObserved(event.player, event.player.inventory, session.id);
+        submitInventorySession(snapshot);
+    }
+
+    @SubscribeEvent
+    public void onPlayerLoggedOut(PlayerLoggedOutEvent event) {
+        if (event == null || event.player == null || !(event.player instanceof net.minecraft.entity.player.EntityPlayerMP)
+            || event.player instanceof FakePlayer) return;
+        InventorySession session = inventorySessions.remove(event.player);
+        if (session == null) return;
+        try {
+            sink.endInventorySession(event.player.getUniqueID(), session.id);
+        } catch (RuntimeException failure) {
+            GalaxyBase.LOG.error("Failed to expire quest inventory session", failure);
+        }
+    }
+
+    private InventorySession inventorySession(net.minecraft.entity.player.EntityPlayer player) {
+        InventorySession session = inventorySessions.get(player);
+        if (session == null) {
+            session = new InventorySession(UUID.randomUUID());
+            inventorySessions.put(player, session);
+        }
+        return session;
+    }
+
+    private void submitInventorySession(GameplayFact fact) {
+        try {
+            sink.beginInventorySession(fact);
+        } catch (Exception failure) {
+            GalaxyBase.LOG.error("Failed to publish quest inventory session", failure);
         }
     }
 
@@ -144,6 +225,22 @@ public final class QuestGameplayEventHandler {
             sink.accept(factory.call());
         } catch (Exception failure) {
             GalaxyBase.LOG.error("Failed to persist quest gameplay fact", failure);
+        }
+    }
+
+    private static final class InventorySession {
+        private final UUID id;
+        private InventorySession(UUID id) { this.id = id; }
+    }
+
+    private void submitCraftingStatistics(final net.minecraft.entity.player.EntityPlayer player, ItemStack trigger,
+        final String triggerChannel) {
+        QuestObservationPlan plan = observationPlans.current();
+        if (plan == null || !plan.observesCraftingStatistics() || trigger == null || trigger.getItem() == null) return;
+        final ItemStack output = trigger.copy();
+        for (final QuestCraftingStatisticObservation statistic : plan.getCraftingStatistics()) {
+            submit(() -> facts.craftingStatisticObserved(player, statistic.getRegistryName(), statistic.getMeta(),
+                output, triggerChannel));
         }
     }
 }

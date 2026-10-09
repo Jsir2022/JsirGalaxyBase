@@ -46,16 +46,31 @@ public final class FluidSnapshotTaskEvaluator implements TaskEvaluator {
         String observed = "fluidInventory." + item + ".";
         if (!value(parameters, required + "name").equals(value(fact, observed + "name"))) return false;
         if (bool(parameters.get("ignoreNBT"), true)) return true;
+        boolean requiredPresent = nbtPresent(parameters, required + "nbtPresent", required + "nbt",
+            required + "nbtPortable");
+        boolean observedPresent = nbtPresent(fact, observed + "nbtPresent", observed + "nbt",
+            observed + "nbtPortable");
+        if (requiredPresent != observedPresent) return false;
+        if (!requiredPresent) return true;
         String requiredNbt = value(parameters, required + "nbtPortable");
-        return requiredNbt.isEmpty() || PortableNbt.decode(requiredNbt).isEmpty()
-            || PortableNbtMatcher.matches(requiredNbt, value(fact, observed + "nbtPortable"), false);
+        String observedNbt = value(fact, observed + "nbtPortable");
+        if (requiredNbt.isEmpty() || observedNbt.isEmpty()) return requiredNbt.isEmpty() && observedNbt.isEmpty();
+        return PortableNbtMatcher.matches(requiredNbt, observedNbt, false);
+    }
+
+    private boolean nbtPresent(Map<String, String> values, String presentKey, String rawKey, String portableKey) {
+        String explicit = values.get(presentKey);
+        if (explicit != null) return bool(explicit, false);
+        String raw = values.get(rawKey);
+        if (raw != null && !raw.trim().isEmpty() && !"{}".equals(raw.trim())) return true;
+        return !value(values, portableKey).isEmpty();
     }
 
     private String value(Map<String, String> values, String key) {
         String value = values.get(key);
         return value == null ? "" : value;
     }
-    private boolean bool(String raw, boolean fallback) { return raw == null ? fallback : Boolean.parseBoolean(raw); }
+    private boolean bool(String raw, boolean fallback) { return QuestBooleanParameter.parse(raw, fallback); }
     private int integer(String raw, int fallback) { return raw == null ? fallback : Integer.parseInt(raw); }
     private long positive(String raw, long fallback) {
         long value = raw == null ? fallback : Long.parseLong(raw);

@@ -35,6 +35,6 @@ public final class CommandRewardDeliveryHandler implements RewardDeliveryHandler
         return command;
     }
     private static boolean bool(String value, boolean fallback) {
-        return value == null ? fallback : "1".equals(value) || Boolean.parseBoolean(value);
+        return QuestBooleanParameter.parse(value, fallback);
     }
 }

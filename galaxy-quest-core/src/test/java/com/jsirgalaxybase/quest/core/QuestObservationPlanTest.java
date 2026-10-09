@@ -54,11 +54,82 @@ public class QuestObservationPlanTest {
         assertEquals("minecraft:iron_ingot", plan.getCraftingStatistics().get(0).getRegistryName());
     }
 
+    @Test
+    public void interpretsNumericBqFlagsWhenBuildingTheObservationPlan() {
+        QuestObservationPlan plan = QuestObservationPlan.fromPublished(Arrays.asList(
+            stored(QuestDefinitionLifecycle.PUBLISHED, task("galaxy:inventory_observed", "consume", "1")),
+            stored(QuestDefinitionLifecycle.PUBLISHED, task("galaxy:fluid_inventory_observed", "consume", "0")),
+            stored(QuestDefinitionLifecycle.PUBLISHED, task("galaxy:xp_observed", "consume", "0")),
+            stored(QuestDefinitionLifecycle.PUBLISHED, craftingTask())));
+        assertFalse(plan.observesInventory());
+        assertTrue(plan.observesFluidInventory());
+        assertTrue(plan.observesXp());
+        assertTrue(plan.observesCraftingStatistics());
+    }
+
+    @Test
+    public void enablesPartyInventoryLeasesForEveryImportedNonConsumingBqRetrieval() {
+        QuestObservationPlan imported = QuestObservationPlan.fromPublished(Arrays.asList(
+            stored(QuestDefinitionLifecycle.PUBLISHED, bqRetrieval("bq_standard:retrieval", false, true)),
+            stored(QuestDefinitionLifecycle.PUBLISHED, bqRetrieval("bq_standard:optional_retrieval", false, true))));
+        assertTrue(imported.observesInventory());
+        assertTrue(imported.observesBqPartyInventory());
+
+        QuestObservationPlan consuming = QuestObservationPlan.fromPublished(Collections.singletonList(
+            stored(QuestDefinitionLifecycle.PUBLISHED, bqRetrieval("bq_standard:retrieval", true, true))));
+        assertFalse(consuming.observesInventory());
+        assertFalse(consuming.observesBqPartyInventory());
+
+        QuestObservationPlan authored = QuestObservationPlan.fromPublished(Collections.singletonList(
+            stored(QuestDefinitionLifecycle.PUBLISHED, bqRetrieval("bq_standard:retrieval", false, false))));
+        assertTrue(authored.observesInventory());
+        assertFalse(authored.observesBqPartyInventory());
+
+        QuestObservationPlan nonGroup = QuestObservationPlan.fromPublished(Collections.singletonList(
+            stored(QuestDefinitionLifecycle.PUBLISHED, bqRetrieval("bq_standard:retrieval", false, true, false))));
+        assertTrue(nonGroup.observesInventory());
+        assertTrue(nonGroup.observesBqPartyInventory());
+    }
+
+    @Test
+    public void enablesLockedProgressReconciliationOnlyForPublishedPlayerQuests() {
+        QuestDefinition player = lockedProgressQuest(QuestParticipantScope.PLAYER);
+        QuestDefinition party = lockedProgressQuest(QuestParticipantScope.PARTY);
+        QuestObservationPlan plan = QuestObservationPlan.fromPublished(Arrays.asList(
+            new StoredQuestDefinition(player, QuestDefinitionLifecycle.PUBLISHED, "hash", 1L),
+            new StoredQuestDefinition(party, QuestDefinitionLifecycle.PUBLISHED, "hash", 1L),
+            new StoredQuestDefinition(lockedProgressQuest(QuestParticipantScope.PLAYER),
+                QuestDefinitionLifecycle.RETIRED, "hash", 1L)));
+        assertTrue(plan.observesPlayerLockedProgress());
+
+        QuestObservationPlan partyOnly = QuestObservationPlan.fromPublished(Collections.singletonList(
+            new StoredQuestDefinition(party, QuestDefinitionLifecycle.PUBLISHED, "hash", 1L)));
+        assertFalse(partyOnly.observesPlayerLockedProgress());
+        assertFalse(QuestObservationPlan.empty().observesPlayerLockedProgress());
+    }
+
+    private static QuestDefinition lockedProgressQuest(QuestParticipantScope scope) {
+        return new QuestDefinition(UUID.randomUUID(), 1, "Locked", "", QuestLogic.AND, QuestLogic.AND,
+            Collections.<UUID>emptySet(), Collections.singletonList(task("galaxy:task_confirmed")),
+            Collections.<RewardDefinition>emptyList(), RepeatPolicy.never(), QuestBehavior.builder()
+                .progressWhileLocked(true).participantScope(scope).build());
+    }
+
     private static StoredQuestDefinition stored(QuestDefinitionLifecycle lifecycle, TaskDefinition task) {
         QuestDefinition definition = new QuestDefinition(UUID.randomUUID(), 1, "Q", "", QuestLogic.AND,
             QuestLogic.AND, Collections.<UUID>emptySet(), Collections.singletonList(task),
             Collections.<RewardDefinition>emptyList());
         return new StoredQuestDefinition(definition, lifecycle, "hash", 1L);
+    }
+
+    private static TaskDefinition craftingTask() {
+        Map<String, String> parameters = new LinkedHashMap<String, String>();
+        parameters.put("factType", "galaxy:item_produced");
+        parameters.put("allowCraftedFromStatistics", "1");
+        parameters.put("item.count", "1");
+        parameters.put("item.0.registryName", "minecraft:iron_ingot");
+        parameters.put("item.0.meta", "0");
+        return new TaskDefinition("craft", "bq_standard:crafting", false, parameters);
     }
 
     private static TaskDefinition task(String factType, String... values) {
@@ -67,5 +138,19 @@ public class QuestObservationPlanTest {
         parameters.put("target", "1");
         for (int i = 0; i < values.length; i += 2) parameters.put(values[i], values[i + 1]);
         return new TaskDefinition("task", "type", false, parameters);
+    }
+
+    private static TaskDefinition bqRetrieval(String typeId, boolean consume, boolean imported) {
+        return bqRetrieval(typeId, consume, imported, true);
+    }
+
+    private static TaskDefinition bqRetrieval(String typeId, boolean consume, boolean imported, boolean groupDetect) {
+        Map<String, String> parameters = new LinkedHashMap<String, String>();
+        parameters.put("factType", "galaxy:inventory_observed");
+        parameters.put("consume", Boolean.toString(consume));
+        parameters.put("groupDetect", Boolean.toString(groupDetect));
+        parameters.put("target", "1");
+        if (imported) parameters.put("bq.raw", "{}");
+        return new TaskDefinition("retrieval", typeId, false, parameters);
     }
 }

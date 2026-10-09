@@ -12,6 +12,7 @@ public final class RewardEntitlement {
     private final RewardDefinition reward;
     private final int cycle;
     private final boolean deliveryRequested;
+    private final boolean suppressed;
 
     public RewardEntitlement(UUID playerId, QuestDefinition quest, RewardDefinition reward) {
         this(ParticipantId.player(playerId), quest, reward, 0);
@@ -28,6 +29,11 @@ public final class RewardEntitlement {
 
     public RewardEntitlement(ParticipantId participantId, UUID recipientPlayerId, QuestDefinition quest,
         RewardDefinition reward, int cycle, boolean deliveryRequested) {
+        this(participantId, recipientPlayerId, quest, reward, cycle, deliveryRequested, false);
+    }
+
+    public RewardEntitlement(ParticipantId participantId, UUID recipientPlayerId, QuestDefinition quest,
+        RewardDefinition reward, int cycle, boolean deliveryRequested, boolean suppressed) {
         this.participantId = Objects.requireNonNull(participantId, "participantId");
         this.recipientPlayerId = Objects.requireNonNull(recipientPlayerId, "recipientPlayerId");
         this.questId = quest.getId();
@@ -35,6 +41,7 @@ public final class RewardEntitlement {
         this.reward = Objects.requireNonNull(reward, "reward");
         this.cycle = cycle;
         this.deliveryRequested = deliveryRequested;
+        this.suppressed = suppressed;
         String recipientPart = participantId.getType() == ParticipantType.PLAYER
             && participantId.getId().equals(recipientPlayerId) ? "" : recipientPlayerId + ":";
         this.entitlementKey = participantId.asStableKey() + ":" + recipientPart + questId + ":"
@@ -50,8 +57,26 @@ public final class RewardEntitlement {
     public RewardDefinition getReward() { return reward; }
     public int getCycle() { return cycle; }
     public boolean isDeliveryRequested() { return deliveryRequested; }
+    public boolean isSuppressed() { return suppressed; }
     public RewardDeliveryStatus getInitialDeliveryStatus() {
+        if (suppressed) return RewardDeliveryStatus.SUPPRESSED;
         return deliveryRequested ? RewardDeliveryStatus.PENDING : RewardDeliveryStatus.CLAIMABLE;
+    }
+
+    private RewardEntitlement(RewardEntitlement source, boolean suppressed) {
+        this.entitlementKey = source.entitlementKey;
+        this.participantId = source.participantId;
+        this.recipientPlayerId = source.recipientPlayerId;
+        this.questId = source.questId;
+        this.questVersion = source.questVersion;
+        this.reward = source.reward;
+        this.cycle = source.cycle;
+        this.deliveryRequested = source.deliveryRequested;
+        this.suppressed = suppressed;
+    }
+
+    public RewardEntitlement withSuppressedDelivery() {
+        return suppressed ? this : new RewardEntitlement(this, true);
     }
 
     private static UUID personalRecipient(ParticipantId participantId) {

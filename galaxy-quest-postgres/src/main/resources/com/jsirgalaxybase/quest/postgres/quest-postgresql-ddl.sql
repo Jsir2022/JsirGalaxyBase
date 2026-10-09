@@ -70,6 +70,20 @@ CREATE TABLE IF NOT EXISTS galaxy_quest_fact (
     PRIMARY KEY (source_server, event_id)
 );
 
+-- Only the newest online-session inventory is retained here; expired leases are excluded from evaluation.
+CREATE TABLE IF NOT EXISTS galaxy_quest_active_inventory_snapshot (
+    player_id UUID PRIMARY KEY,
+    source_server VARCHAR(64) NOT NULL,
+    session_id UUID NOT NULL,
+    attributes_json JSONB NOT NULL CHECK (jsonb_typeof(attributes_json) = 'object'),
+    observed_at TIMESTAMPTZ NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    CHECK (expires_at > observed_at)
+);
+
+CREATE INDEX IF NOT EXISTS galaxy_quest_active_inventory_snapshot_expiry_idx
+    ON galaxy_quest_active_inventory_snapshot (expires_at);
+
 CREATE TABLE IF NOT EXISTS galaxy_quest_participant (
     participant_type VARCHAR(16) NOT NULL CHECK (participant_type IN ('PARTY', 'TEAM', 'PUBLIC')),
     participant_id UUID NOT NULL,
@@ -111,6 +125,7 @@ CREATE TABLE IF NOT EXISTS galaxy_quest_progress (
     cycle INTEGER NOT NULL DEFAULT 0 CHECK (cycle >= 0),
     status VARCHAR(16) NOT NULL CHECK (status IN ('LOCKED', 'AVAILABLE', 'IN_PROGRESS', 'COMPLETED')),
     completed_at BIGINT NOT NULL DEFAULT 0,
+    ever_completed BOOLEAN NOT NULL DEFAULT FALSE,
     revision BIGINT NOT NULL DEFAULT 0,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (participant_type, participant_id, quest_id, definition_version)
@@ -143,7 +158,7 @@ CREATE TABLE IF NOT EXISTS galaxy_quest_reward_entitlement (
     reward_type VARCHAR(128) NOT NULL,
     reward_parameters_json JSONB NOT NULL,
     delivery_status VARCHAR(16) NOT NULL DEFAULT 'PENDING'
-        CHECK (delivery_status IN ('CLAIMABLE', 'PENDING', 'DELIVERING', 'DELIVERED', 'FAILED', 'ABANDONED')),
+        CHECK (delivery_status IN ('CLAIMABLE', 'PENDING', 'DELIVERING', 'DELIVERED', 'SUPPRESSED', 'FAILED', 'ABANDONED')),
     attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
     failure_count INTEGER NOT NULL DEFAULT 0 CHECK (failure_count >= 0),
     lease_owner VARCHAR(128),

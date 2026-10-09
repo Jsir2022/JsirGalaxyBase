@@ -4,7 +4,10 @@ import com.jsirgalaxybase.quest.core.FactProcessingResult;
 import com.jsirgalaxybase.quest.core.GameplayFact;
 import com.jsirgalaxybase.quest.core.QuestClock;
 import com.jsirgalaxybase.quest.core.QuestEvaluationRequestProvider;
+import com.jsirgalaxybase.quest.core.ParticipantId;
 import com.jsirgalaxybase.quest.core.QuestRuntimeService;
+
+import java.util.UUID;
 
 public final class RuntimeQuestFactSink implements QuestFactSink {
     private final QuestRuntimeService runtime;
@@ -24,5 +27,12 @@ public final class RuntimeQuestFactSink implements QuestFactSink {
         FactProcessingResult result = runtime.apply(fact, plans, clock.currentTimeMillis());
         // ACCEPTED, DUPLICATE and IGNORED are all terminal for this immutable fact.
         if (result == null) throw new IllegalStateException("quest runtime returned no fact result");
+    }
+
+    @Override
+    public void reconcileLockedProgress(UUID playerId, long now) {
+        if (playerId == null) return;
+        FactProcessingResult result = runtime.reconcileLockedProgress(ParticipantId.player(playerId), plans, now);
+        if (result == null) throw new IllegalStateException("quest runtime returned no reconciliation result");
     }
 }

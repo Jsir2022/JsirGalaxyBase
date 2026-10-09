@@ -49,6 +49,7 @@ dependencies {
     implementation(project(":ui2-lab"))
     implementation(project(":galaxy-quest-core"))
     implementation(project(":galaxy-quest-postgres"))
+    testImplementation(project(":galaxy-quest-bq-importer"))
     shadowImplementation(files(ui2CoreJar))
     shadowImplementation(files(ui2TerminalJar))
     shadowImplementation(files(ui2LabJar))

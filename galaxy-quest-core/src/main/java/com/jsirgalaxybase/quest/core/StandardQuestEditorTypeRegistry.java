@@ -17,7 +17,7 @@ public final class StandardQuestEditorTypeRegistry {
         result.add(task("bq_standard:hunt", "Hunt entities", text("subject", "Entity"), positive("target", "Required kills"), bool("ignoreNBT", "Ignore NBT"), bool("subtypes", "Include subtypes"), optional("targetNBT.portable", "Entity NBT", QuestEditorFieldType.NBT)));
         result.add(task("bq_standard:interact_entity", "Interact with entity", text("subject", "Entity"), positive("target", "Required interactions"), optional("targetNBT.portable", "Entity NBT", QuestEditorFieldType.NBT), optional("heldItem.registryName", "Held item", QuestEditorFieldType.TEXT)));
         result.add(task("bq_standard:interact_item", "Use item or block", positive("target", "Required interactions"), optional("heldItem.registryName", "Held item", QuestEditorFieldType.TEXT), optional("block.registryName", "Block", QuestEditorFieldType.TEXT)));
-        result.add(task("bq_standard:location", "Visit location", integer("dimension", "Dimension"), integer("posX", "X"), integer("posY", "Y"), integer("posZ", "Z"), positive("range", "Range"), bool("invert", "Invert area"), bool("taxiCabDist", "Use taxicab distance")));
+        result.add(task("bq_standard:location", "Visit location", integer("dimension", "Dimension"), integer("posX", "X"), integer("posY", "Y"), integer("posZ", "Z"), integer("range", "Range; non-positive means dimension-wide"), bool("invert", "Invert area"), bool("taxiCabDist", "Use taxicab distance")));
         result.add(task("bq_standard:meeting", "Meet entities", text("subject", "Entity"), positive("amount", "Required entities"), positive("range", "Range"), optional("targetNBT.portable", "Entity NBT", QuestEditorFieldType.NBT)));
         result.add(task("bq_standard:optional_retrieval", "Optional item retrieval", list("item", "Items", QuestEditorFieldType.ITEM_LIST), bool("consume", "Consume items")));
         result.add(task("bq_standard:retrieval", "Retrieve items", list("item", "Items", QuestEditorFieldType.ITEM_LIST), bool("consume", "Consume items")));
@@ -25,7 +25,7 @@ public final class StandardQuestEditorTypeRegistry {
         result.add(task("bq_standard:xp", "Experience", positive("amount", "Amount"), enumeration("xpUnit", "Unit", "points", "levels"), bool("consume", "Consume experience")));
         result.add(reward("bq_standard:choice", "Choice of items", list("item", "Choices", QuestEditorFieldType.ITEM_LIST)));
         result.add(reward("bq_standard:command", "Run command", required("command", "Command", QuestEditorFieldType.COMMAND_LIST), bool("viaPlayer", "Run as player")));
-        result.add(reward("bq_standard:item", "Give items", list("item", "Items", QuestEditorFieldType.ITEM_LIST)));
+        result.add(reward("bq_standard:item", "Give items", optional("item", "Items", QuestEditorFieldType.ITEM_LIST)));
         result.add(reward("bq_standard:questcompletion", "Complete quest", required("questUuid", "Quest", QuestEditorFieldType.QUEST_REFERENCE)));
         result.add(reward("bq_standard:scoreboard", "Set scoreboard", text("scoreName", "Objective"), integer("score", "Score")));
         result.add(reward("bq_standard:xp", "Give experience", positive("amount", "Amount"), enumeration("xpUnit", "Unit", "points", "levels")));

@@ -5,12 +5,13 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import com.jsirgalaxybase.quest.core.GameplayFact;
 import com.jsirgalaxybase.quest.core.FluidObservationCanonicalizer;
 import com.jsirgalaxybase.quest.core.FluidObservationEntry;
 import com.jsirgalaxybase.quest.core.InventoryObservationEntry;
-import com.jsirgalaxybase.quest.core.InventoryObservationCanonicalizer;
+import com.jsirgalaxybase.quest.core.InventoryObservationAttributeCodec;
 
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityList;
@@ -45,6 +46,8 @@ public final class MinecraftQuestFactFactory {
         this.identity = identity;
     }
 
+    public String getSourceServer() { return sourceServer; }
+
     public GameplayFact itemProduced(EntityPlayer player, ItemStack stack, int amount, String channel) {
         if (player == null || stack == null || stack.getItem() == null) throw new IllegalArgumentException(
             "player and produced item are required");
@@ -52,6 +55,7 @@ public final class MinecraftQuestFactFactory {
         Object registryName = Item.itemRegistry.getNameForObject(stack.getItem());
         attributes.put("registryName", registryName == null ? "minecraft:air" : registryName.toString());
         attributes.put("meta", Integer.toString(stack.getItemDamage()));
+        attributes.put("damageable", Boolean.toString(stack.getItem().isDamageable()));
         attributes.put("amount", Integer.toString(Math.max(0, amount)));
         attributes.put("channel", channel);
         attributes.put("oreDictionary", oreNames(stack));
@@ -60,6 +64,11 @@ public final class MinecraftQuestFactFactory {
     }
 
     public GameplayFact craftingStatisticObserved(EntityPlayer player, String registryName, int meta) {
+        return craftingStatisticObserved(player, registryName, meta, null, null);
+    }
+
+    public GameplayFact craftingStatisticObserved(EntityPlayer player, String registryName, int meta,
+        ItemStack trigger, String triggerChannel) {
         if (player == null || registryName == null || registryName.trim().isEmpty()) {
             throw new IllegalArgumentException("player and registryName are required");
         }
@@ -76,8 +85,19 @@ public final class MinecraftQuestFactFactory {
         Map<String, String> attributes = new LinkedHashMap<String, String>();
         attributes.put("registryName", registryName.trim());
         attributes.put("meta", Integer.toString(meta));
+        attributes.put("damageable", Boolean.toString(item != null && item.isDamageable()));
         attributes.put("amount", Integer.toString(amount));
         attributes.put("channel", "craft-statistics");
+        if (trigger != null && trigger.getItem() != null && triggerChannel != null) {
+            Object triggerName = Item.itemRegistry.getNameForObject(trigger.getItem());
+            attributes.put("trigger.channel", triggerChannel);
+            attributes.put("trigger.registryName", triggerName == null ? "minecraft:air" : triggerName.toString());
+            attributes.put("trigger.meta", Integer.toString(trigger.getItemDamage()));
+            attributes.put("trigger.damageable", Boolean.toString(trigger.getItem().isDamageable()));
+            attributes.put("trigger.oreDictionary", oreNames(trigger));
+            if (trigger.hasTagCompound()) attributes.put("trigger.nbtPortable",
+                MinecraftPortableNbtCodec.encode(trigger.getTagCompound()));
+        }
         return fact(player, "galaxy:item_produced", "craft-statistics", attributes);
     }
 
@@ -137,7 +157,7 @@ public final class MinecraftQuestFactFactory {
         attributes.put("y", Integer.toString(y));
         attributes.put("z", Integer.toString(z));
         attributes.put("dimension", Integer.toString(player.dimension));
-        TileEntity tile = player.worldObj.getTileEntity(x, y, z);
+        TileEntity tile = block.hasTileEntity(meta) ? player.worldObj.getTileEntity(x, y, z) : null;
         if (tile != null) {
             NBTTagCompound nbt = new NBTTagCompound();
             tile.writeToNBT(nbt);
@@ -148,7 +168,6 @@ public final class MinecraftQuestFactFactory {
 
     public GameplayFact inventoryObserved(EntityPlayer player, IInventory inventory) {
         if (player == null || inventory == null) throw new IllegalArgumentException("player and inventory are required");
-        Map<String, String> attributes = new LinkedHashMap<String, String>();
         List<InventoryObservationEntry> raw = new ArrayList<InventoryObservationEntry>();
         for (int slot = 0; slot < inventory.getSizeInventory(); slot++) {
             ItemStack stack = inventory.getStackInSlot(slot);
@@ -159,21 +178,34 @@ public final class MinecraftQuestFactFactory {
             String portable = stack.hasTagCompound()
                 ? MinecraftPortableNbtCodec.encode(stack.getTagCompound()) : "";
             raw.add(new InventoryObservationEntry(registryName, stack.getItemDamage(), stack.stackSize, ore,
-                stack.hasTagCompound() ? stack.getTagCompound().toString() : "", portable));
+                "", portable,
+                stack.getItem().isDamageable()));
         }
-        int entry = 0;
-        for (InventoryObservationEntry observation : new InventoryObservationCanonicalizer().canonicalize(raw)) {
-            String prefix = "inventory." + entry + ".";
-            attributes.put(prefix + "registryName", observation.getRegistryName());
-            attributes.put(prefix + "meta", Integer.toString(observation.getMeta()));
-            attributes.put(prefix + "amount", Long.toString(observation.getAmount()));
-            attributes.put(prefix + "oreDictionary", observation.getOreDictionary());
-            if (!observation.getNbt().isEmpty()) attributes.put(prefix + "nbt", observation.getNbt());
-            if (!observation.getNbtPortable().isEmpty()) attributes.put(prefix + "nbtPortable", observation.getNbtPortable());
-            entry++;
+        return fact(player, "galaxy:inventory_observed", "inventory",
+            new InventoryObservationAttributeCodec().encode(raw));
+    }
+
+    public GameplayFact inventoryObserved(EntityPlayer player, IInventory inventory, UUID sessionId) {
+        if (sessionId == null) throw new IllegalArgumentException("inventory session id is required");
+        GameplayFact fact = inventoryObserved(player, inventory);
+        Map<String, String> attributes = new LinkedHashMap<String, String>(fact.getAttributes());
+        attributes.put("inventory.sessionId", sessionId.toString());
+        return new GameplayFact(fact.getSourceServer(), fact.getEventId(), fact.getPlayerId(), fact.getTypeId(),
+            fact.getOccurredAt(), attributes);
+    }
+
+    public GameplayFact bqPartyInventoryObserved(GameplayFact trigger, UUID partyId,
+        List<InventoryObservationEntry> entries) {
+        if (trigger == null || !"galaxy:inventory_observed".equals(trigger.getTypeId()) || partyId == null) {
+            throw new IllegalArgumentException("inventory trigger and party id are required");
         }
-        attributes.put("inventory.count", Integer.toString(entry));
-        return fact(player, "galaxy:inventory_observed", "inventory", attributes);
+        Map<String, String> attributes = new LinkedHashMap<String, String>(
+            new InventoryObservationAttributeCodec().encode(entries));
+        attributes.put("inventory.bqPartySnapshot", "true");
+        attributes.put("inventory.bqPartyId", partyId.toString());
+        String eventId = "bq-party-inventory:" + trigger.getEventId() + ":" + partyId;
+        return new GameplayFact(sourceServer, eventId, trigger.getPlayerId(), "galaxy:inventory_observed",
+            trigger.getOccurredAt(), attributes);
     }
 
     public GameplayFact fluidInventoryObserved(EntityPlayer player, IInventory inventory) {
@@ -194,13 +226,14 @@ public final class MinecraftQuestFactFactory {
             if (fluid == null || fluid.getFluid() == null || fluid.amount <= 0) continue;
             raw.add(new FluidObservationEntry(fluid.getFluid().getName(),
                 saturatingMultiply(fluid.amount, stack.stackSize), fluid.tag == null ? "" : fluid.tag.toString(),
-                fluid.tag == null ? "" : MinecraftPortableNbtCodec.encode(fluid.tag)));
+                fluid.tag == null ? "" : MinecraftPortableNbtCodec.encode(fluid.tag), fluid.tag != null));
         }
         int entry = 0;
         for (FluidObservationEntry observation : new FluidObservationCanonicalizer().canonicalize(raw)) {
             String prefix = "fluidInventory." + entry + ".";
             attributes.put(prefix + "name", observation.getName());
             attributes.put(prefix + "amount", Long.toString(observation.getAmount()));
+            attributes.put(prefix + "nbtPresent", Boolean.toString(observation.isNbtPresent()));
             if (!observation.getNbt().isEmpty()) attributes.put(prefix + "nbt", observation.getNbt());
             if (!observation.getNbtPortable().isEmpty()) attributes.put(prefix + "nbtPortable",
                 observation.getNbtPortable());

@@ -36,8 +36,11 @@ public final class BlockVectorTaskEvaluator implements TaskEvaluator {
         String name = parameters.get(prefix + "registryName");
         int requiredMeta = integer(parameters.get(prefix + "meta"), 0);
         int actualMeta = integer(fact.get("meta"), 0);
+        // BQ's TaskBlockBreak treats negative metadata as the direct-match wildcard. Its
+        // OreDictionary lookup separately uses WILDCARD_VALUE, but 32767 is not a direct
+        // registry-name wildcard in that implementation.
         boolean direct = name != null && name.equals(fact.get("registryName"))
-            && (requiredMeta < 0 || requiredMeta == 32767 || requiredMeta == actualMeta);
+            && (requiredMeta < 0 || requiredMeta == actualMeta);
         String ore = parameters.get(prefix + "oreDictionary");
         boolean oreMatch = ore != null && !ore.isEmpty() && delimitedContains(fact.get("oreDictionary"), ore);
         if (!direct && !oreMatch) return false;

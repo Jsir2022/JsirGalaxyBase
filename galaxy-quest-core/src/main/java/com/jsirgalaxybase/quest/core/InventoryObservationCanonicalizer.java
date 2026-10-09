@@ -23,14 +23,14 @@ public final class InventoryObservationCanonicalizer {
             if (previous == null) unique.put(key, entry);
             else unique.put(key, new InventoryObservationEntry(previous.getRegistryName(), previous.getMeta(),
                 saturatingAdd(previous.getAmount(), entry.getAmount()), previous.getOreDictionary(),
-                previous.getNbt(), previous.getNbtPortable()));
+                previous.getNbt(), previous.getNbtPortable(), previous.isDamageable()));
         }
         return Collections.unmodifiableList(new ArrayList<InventoryObservationEntry>(unique.values()));
     }
 
     private String key(InventoryObservationEntry value) {
         return value.getRegistryName() + "\u0000" + value.getMeta() + "\u0000" + value.getOreDictionary()
-            + "\u0000" + value.getNbtPortable();
+            + "\u0000" + value.getNbtPortable() + "\u0000" + value.isDamageable();
     }
 
     private long saturatingAdd(long left, long right) {

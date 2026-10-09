@@ -58,7 +58,7 @@ public final class MeetingTaskEvaluator implements TaskEvaluator {
     }
 
     private static boolean bool(String raw, boolean fallback) {
-        return raw == null ? fallback : Boolean.parseBoolean(raw);
+        return QuestBooleanParameter.parse(raw, fallback);
     }
 
     private static int integer(String raw, int fallback) {

@@ -19,8 +19,13 @@ public class QuestSchemaContractTest {
         assertTrue(ddl.contains("PRIMARY KEY (participant_type, participant_id, quest_id, definition_version)"));
         assertTrue(ddl.contains("progress_values BIGINT[] NOT NULL"));
         assertTrue(ddl.contains("entitlement_key VARCHAR(512) PRIMARY KEY"));
+        assertTrue(ddl.contains("'DELIVERED', 'SUPPRESSED', 'FAILED'"));
         assertTrue(ddl.contains("UNIQUE (participant_type, participant_id, recipient_player_id, quest_id, definition_version, cycle, reward_key)"));
         assertTrue(ddl.contains("galaxy_quest_participant_membership"));
+        assertTrue(ddl.contains("galaxy_quest_active_inventory_snapshot"));
+        assertTrue(ddl.contains("galaxy_quest_active_inventory_snapshot_expiry_idx"));
+        assertTrue(ddl.contains("session_id UUID NOT NULL"));
+        assertTrue(ddl.contains("expires_at TIMESTAMPTZ NOT NULL"));
         assertTrue(ddl.contains("galaxy_quest_one_active_scoped_membership_idx"));
         assertTrue(ddl.contains("recipient_player_id UUID NOT NULL"));
         assertTrue(ddl.contains("failure_count INTEGER NOT NULL DEFAULT 0"));
@@ -62,6 +67,30 @@ public class QuestSchemaContractTest {
         assertTrue(reviewed.contains("legacy non-PLAYER reward entitlement requires an explicit recipient mapping"));
         assertTrue(reviewed.contains("uq_galaxy_quest_entitlement_recipient_cycle_reward"));
         assertTrue(reviewed.contains("ck_galaxy_quest_consumption_participant_type"));
+        assertTrue(reviewed.contains("COMMIT;"));
+    }
+
+    @Test public void reviewedRewardSuppressionMigrationAddsAnExplicitTerminalState() throws Exception {
+        Path migration=Paths.get("ops/sql/migrations/20260929_001_add_quest_reward_suppressed_status.sql");
+        if(!Files.exists(migration))migration=Paths.get("../ops/sql/migrations/20260929_001_add_quest_reward_suppressed_status.sql");
+        assertTrue("reviewed reward suppression migration must exist",Files.exists(migration));
+        String reviewed=new String(Files.readAllBytes(migration),StandardCharsets.UTF_8);
+        assertTrue(reviewed.contains("BEGIN;"));
+        assertTrue(reviewed.contains("DROP CONSTRAINT IF EXISTS galaxy_quest_reward_entitlement_delivery_status_check"));
+        assertTrue(reviewed.contains("'DELIVERED', 'SUPPRESSED', 'FAILED'"));
+        assertTrue(reviewed.contains("COMMIT;"));
+    }
+
+    @Test public void reviewedBqPartyInventoryLeaseMigrationIsAdditiveAndExpiring() throws Exception {
+        Path migration=Paths.get("ops/sql/migrations/20260930_001_add_bq_party_inventory_snapshot_leases.sql");
+        if(!Files.exists(migration))migration=Paths.get("../ops/sql/migrations/20260930_001_add_bq_party_inventory_snapshot_leases.sql");
+        assertTrue("reviewed BQ lease migration must exist",Files.exists(migration));
+        String reviewed=new String(Files.readAllBytes(migration),StandardCharsets.UTF_8);
+        assertTrue(reviewed.contains("BEGIN;"));
+        assertTrue(reviewed.contains("CREATE TABLE IF NOT EXISTS galaxy_quest_active_inventory_snapshot"));
+        assertTrue(reviewed.contains("session_id UUID NOT NULL"));
+        assertTrue(reviewed.contains("expires_at TIMESTAMPTZ NOT NULL"));
+        assertTrue(reviewed.contains("galaxy_quest_active_inventory_snapshot_expiry_idx"));
         assertTrue(reviewed.contains("COMMIT;"));
     }
 

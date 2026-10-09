@@ -134,11 +134,22 @@ public class QuestCenterVisualDocument extends ComponentUiDocument {
         UiElement.Builder tasks=UiElement.type("Card").key("quest-detail-tasks")
             .child(label("quest-task-title","任务目标","caption",1,true));
         for(int i=0;i<Math.min(6,detail.getTasks().size());i++){
-            QuestCenterVisualModel.TaskRow task=detail.getTasks().get(i);
-            tasks.child(UiElement.type("Row").key("quest-task-"+i)
+            final QuestCenterVisualModel.TaskRow task=detail.getTasks().get(i);
+            UiElement.Builder row=UiElement.type("Row").key("quest-task-"+i)
                 .child(label("quest-task-name-"+i,(task.isComplete()?"✓ ":"○ ")+task.getLabel(),"caption",1,task.isComplete()))
                 .child(label("quest-task-detail-"+i,task.getDetail(),"caption",1,false))
-                .child(label("quest-task-progress-"+i,task.getValue()+" / "+task.getTarget(),"caption",1,false)).build());
+                .child(label("quest-task-progress-"+i,task.getValue()+" / "+task.getTarget(),"caption",1,false));
+            if(task.isConfirmable()&&!task.isComplete())row.child(button("quest-task-confirm-"+i,"确认",
+                new Runnable(){public void run(){actions.confirmTask(detail.getSummary().getId(),task.getKey());}},true));
+            if(task.isSubmittable()&&!task.isComplete())row.child(UiElement.type("Column").key("quest-task-item-actions-"+i)
+                .child(button("quest-task-detect-items-"+i,"提交并消耗背包匹配项",
+                    new Runnable(){public void run(){actions.submitTask(detail.getSummary().getId(),task.getKey());}},true))
+                .child(button("quest-task-submit-held-"+i,"提交并消耗手持栈",
+                    new Runnable(){public void run(){actions.submitHeldStack(detail.getSummary().getId(),task.getKey());}},true))
+                .build());
+            if(task.isDetectable()&&!task.isComplete())row.child(button("quest-task-detect-"+i,"检测合成",
+                new Runnable(){public void run(){actions.detectTask(detail.getSummary().getId(),task.getKey());}},true));
+            tasks.child(row.build());
         }
         UiElement.Builder rewards=UiElement.type("Card").key("quest-detail-rewards")
             .child(label("quest-reward-title","任务奖励","caption",1,true));
@@ -158,14 +169,19 @@ public class QuestCenterVisualDocument extends ComponentUiDocument {
                 rewards.child(UiElement.type("Button").key("quest-choice-"+i+"-"+optionIndex)
                     .prop(StandardWidgets.TEXT,(optionIndex+1)+". "+option.getLabel()+" ×"+option.getItem().getQuantity())
                     .prop(StandardWidgets.SELECTED,reward.getSelectedChoiceIndex()==optionIndex)
-                    .prop(StandardWidgets.ENABLED,reward.getSelectedChoiceIndex()<0)
+                    .prop(StandardWidgets.ENABLED,reward.isClaimable())
                     .prop(StandardWidgets.ACTION,handler(new Runnable(){public void run(){actions.selectRewardChoice(
                         detail.getSummary().getId(),choiceReward.getKey(),selectedOption);}})).build());
             }
         }
         boolean canClaim=summary.getState()==QuestCenterVisualModel.QuestState.CLAIMABLE;
-        rewards.child(button("quest-claim",canClaim?"领取全部奖励":summary.getState()==QuestCenterVisualModel.QuestState.COMPLETED?"奖励已领取":"完成后可领取",
-            new Runnable(){public void run(){actions.claim(detail.getSummary().getId());}},canClaim));
+        boolean hasUnselectedChoice=hasUnselectedChoice(rewardRows);
+        String claimLabel=!canClaim?summary.getState()==QuestCenterVisualModel.QuestState.COMPLETED?"奖励已领取":"完成后可领取"
+            :hasUnselectedChoice?"请先选择奖励":"领取全部奖励";
+        rewards.child(button("quest-claim",claimLabel,
+            new Runnable(){public void run(){actions.claim(detail.getSummary().getId());}},canClaim&&!hasUnselectedChoice));
+        if(canClaim&&hasUnselectedChoice)rewards.child(button("quest-claim-random-choice","随机选择并领取",
+            new Runnable(){public void run(){actions.forceClaimWithRandomChoices(detail.getSummary().getId());}},true));
         return UiElement.type("Column").key("quest-detail").child(heading.build())
             .child(UiElement.type("Row").key("quest-detail-columns").child(tasks.build()).child(rewards.build()).build()).build();
     }
@@ -320,12 +336,35 @@ public class QuestCenterVisualDocument extends ComponentUiDocument {
             .child(LayoutSpec.of("quest-detail-prereq",LayoutKind.LEAF).preferred(compact?40:70,18).build());
         LayoutSpec.Builder tasks=LayoutSpec.of("quest-detail-tasks",LayoutKind.COLUMN).flex(3).padding(new Insets(3,3,3,3)).gap(2)
             .child(LayoutSpec.of("quest-task-title",LayoutKind.LEAF).preferred(0,12).build());
-        for(int i=0;i<Math.min(6,detail.getTasks().size());i++)tasks.child(LayoutSpec.of("quest-task-"+i,LayoutKind.ROW).preferred(0,compact?17:20).gap(2)
-            .child(LayoutSpec.of("quest-task-name-"+i,LayoutKind.LEAF).flex(2).build()).child(LayoutSpec.of("quest-task-detail-"+i,LayoutKind.LEAF).flex(2).build()).child(LayoutSpec.of("quest-task-progress-"+i,LayoutKind.LEAF).preferred(48,0).build()).build());
+        for(int i=0;i<Math.min(6,detail.getTasks().size());i++){
+            QuestCenterVisualModel.TaskRow task=detail.getTasks().get(i);
+            boolean confirmable=task.isConfirmable()&&!task.isComplete();
+            boolean submittable=task.isSubmittable()&&!task.isComplete();
+            boolean detectable=task.isDetectable()&&!task.isComplete();
+            int rowHeight=submittable?(compact?34:40):(compact?17:20);
+            LayoutSpec.Builder row=LayoutSpec.of("quest-task-"+i,LayoutKind.ROW).preferred(0,rowHeight).gap(2)
+                .child(LayoutSpec.of("quest-task-name-"+i,LayoutKind.LEAF).flex(2).build())
+                .child(LayoutSpec.of("quest-task-detail-"+i,LayoutKind.LEAF).flex(2).build())
+                .child(LayoutSpec.of("quest-task-progress-"+i,LayoutKind.LEAF).preferred(48,0).build());
+            if(confirmable)row.child(LayoutSpec.of("quest-task-confirm-"+i,LayoutKind.LEAF)
+                .preferred(compact?30:38,0).build());
+            if(detectable)row.child(LayoutSpec.of("quest-task-detect-"+i,LayoutKind.LEAF)
+                .preferred(compact?48:58,0).build());
+            if(submittable)row.child(LayoutSpec.of("quest-task-item-actions-"+i,LayoutKind.COLUMN)
+                .preferred(compact?64:96,0).gap(1)
+                .child(LayoutSpec.of("quest-task-detect-items-"+i,LayoutKind.LEAF).preferred(0,compact?15:18).build())
+                .child(LayoutSpec.of("quest-task-submit-held-"+i,LayoutKind.LEAF).preferred(0,compact?15:18).build())
+                .build());
+            tasks.child(row.build());
+        }
         LayoutSpec.Builder rewards=LayoutSpec.of("quest-detail-rewards",LayoutKind.COLUMN).flex(2).padding(new Insets(3,3,3,3)).gap(2)
             .child(LayoutSpec.of("quest-reward-title",LayoutKind.LEAF).preferred(0,12).build());
         for(int i=0;i<Math.min(4,detail.getRewards().size());i++){QuestCenterVisualModel.RewardRow reward=detail.getRewards().get(i);LayoutSpec.Builder row=LayoutSpec.of("quest-reward-"+i,LayoutKind.ROW).preferred(0,compact?18:22).gap(2);if(reward.getItem()!=null)row.child(LayoutSpec.of("quest-reward-item-"+i,LayoutKind.LEAF).preferred(compact?16:20,compact?16:20).build());row.child(LayoutSpec.of("quest-reward-name-"+i,LayoutKind.LEAF).flex(1).build()).child(LayoutSpec.of("quest-reward-detail-"+i,LayoutKind.LEAF).flex(1).build());rewards.child(row.build());for(int optionIndex=0;optionIndex<Math.min(4,reward.getChoices().size());optionIndex++)rewards.child(LayoutSpec.of("quest-choice-"+i+"-"+optionIndex,LayoutKind.LEAF).preferred(0,compact?16:19).build());}
         rewards.child(LayoutSpec.of("quest-claim",LayoutKind.LEAF).preferred(0,compact?18:22).build());
+        boolean canClaim=summary.getState()==QuestCenterVisualModel.QuestState.CLAIMABLE;
+        boolean hasUnselectedChoice=hasUnselectedChoice(detail.getRewards());
+        if(canClaim&&hasUnselectedChoice)rewards.child(LayoutSpec.of("quest-claim-random-choice",LayoutKind.LEAF)
+            .preferred(0,compact?18:22).build());
         return LayoutSpec.of("quest-detail",LayoutKind.COLUMN).flex(1).padding(new Insets(3,3,3,3)).gap(3).child(heading.build())
             .child(LayoutSpec.of("quest-detail-columns",LayoutKind.ROW).flex(1).gap(3).child(tasks.build()).child(rewards.build()).build()).build();
     }
@@ -380,4 +419,10 @@ public class QuestCenterVisualDocument extends ComponentUiDocument {
     private static String questNameKey(QuestCenterVisualModel.QuestSummary quest){return "quest-name-"+quest.getId();}
     private static String questSubtitleKey(QuestCenterVisualModel.QuestSummary quest){return "quest-subtitle-"+quest.getId();}
     private static String questStatusKey(QuestCenterVisualModel.QuestSummary quest){return "quest-status-"+quest.getId();}
+    private static boolean hasUnselectedChoice(List<QuestCenterVisualModel.RewardRow> rewards){
+        for(QuestCenterVisualModel.RewardRow reward:rewards){
+            if(reward.requiresChoice()&&reward.getSelectedChoiceIndex()<0)return true;
+        }
+        return false;
+    }
 }

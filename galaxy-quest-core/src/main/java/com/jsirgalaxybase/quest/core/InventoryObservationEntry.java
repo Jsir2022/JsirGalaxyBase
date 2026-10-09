@@ -6,6 +6,7 @@ import java.util.Objects;
 public final class InventoryObservationEntry {
     private final String registryName;
     private final int meta;
+    private final boolean damageable;
     private final long amount;
     private final String oreDictionary;
     private final String nbt;
@@ -13,11 +14,17 @@ public final class InventoryObservationEntry {
 
     public InventoryObservationEntry(String registryName, int meta, long amount, String oreDictionary,
         String nbt, String nbtPortable) {
+        this(registryName, meta, amount, oreDictionary, nbt, nbtPortable, false);
+    }
+
+    public InventoryObservationEntry(String registryName, int meta, long amount, String oreDictionary,
+        String nbt, String nbtPortable, boolean damageable) {
         if (registryName == null || registryName.trim().isEmpty()) throw new IllegalArgumentException(
             "registryName must not be blank");
         if (amount <= 0L) throw new IllegalArgumentException("amount must be positive");
         this.registryName = registryName.trim();
         this.meta = meta;
+        this.damageable = damageable;
         this.amount = amount;
         this.oreDictionary = safe(oreDictionary);
         this.nbt = safe(nbt);
@@ -26,6 +33,7 @@ public final class InventoryObservationEntry {
 
     public String getRegistryName() { return registryName; }
     public int getMeta() { return meta; }
+    public boolean isDamageable() { return damageable; }
     public long getAmount() { return amount; }
     public String getOreDictionary() { return oreDictionary; }
     public String getNbt() { return nbt; }

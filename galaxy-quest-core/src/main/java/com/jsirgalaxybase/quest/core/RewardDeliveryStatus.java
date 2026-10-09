@@ -5,6 +5,7 @@ public enum RewardDeliveryStatus {
     PENDING,
     DELIVERING,
     DELIVERED,
+    SUPPRESSED,
     FAILED,
     ABANDONED
 }

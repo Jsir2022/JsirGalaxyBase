@@ -24,10 +24,30 @@ import com.jsirgalaxybase.quest.core.QuestStatus;
 import com.jsirgalaxybase.quest.core.RepeatPolicy;
 import com.jsirgalaxybase.quest.core.RewardDefinition;
 import com.jsirgalaxybase.quest.core.TaskDefinition;
+import com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot;
 import com.jsirgalaxybase.ui2.terminal.QuestCenterVisualModel;
 import com.jsirgalaxybase.ui2.terminal.TerminalVisualModel;
 
 public class QuestCenterVisualModelAdapterTest {
+    @Test public void mapsManualConsumptionAvailabilityFromServerWireSnapshot() {
+        String questId=UUID.randomUUID().toString();
+        TerminalQuestCenterSectionSnapshot.Quest summary=new TerminalQuestCenterSectionSnapshot.Quest(
+            questId,"chapter","Steel","Retrieve steel","IN_PROGRESS",0,1,"",0,"",false);
+        TerminalQuestCenterSectionSnapshot.Detail detail=new TerminalQuestCenterSectionSnapshot.Detail(summary,
+            "Bring steel","No prerequisite","Non-repeatable",Collections.singletonList(
+                new TerminalQuestCenterSectionSnapshot.Task("steel","Retrieval","Manual submit",0,64,false,true,true)),
+            Collections.<TerminalQuestCenterSectionSnapshot.Reward>emptyList());
+        TerminalQuestCenterSectionSnapshot wire=new TerminalQuestCenterSectionSnapshot("READY","",
+            TerminalQuestCenterSectionSnapshot.View.DETAIL,"chapter",questId,"all","",
+            Collections.<TerminalQuestCenterSectionSnapshot.Chapter>emptyList(),0,6,0,
+            Collections.singletonList(summary),0,7,1,detail);
+
+        QuestCenterVisualModel model=QuestCenterVisualModelAdapter.fromWire(shell(),wire);
+
+        assertTrue(model.getDetail().getTasks().get(0).isSubmittable());
+        assertTrue(model.getDetail().getTasks().get(0).isDetectable());
+    }
+
     @Test public void mapsChaptersFiltersClaimableAndBuildsDetailWithoutMinecraftTypes(){
         UUID player=UUID.randomUUID(),questId=UUID.randomUUID(),chapterId=UUID.randomUUID();
         TaskDefinition task=new TaskDefinition("collect","bq_standard:checkbox",false,Collections.singletonMap("target","1"));

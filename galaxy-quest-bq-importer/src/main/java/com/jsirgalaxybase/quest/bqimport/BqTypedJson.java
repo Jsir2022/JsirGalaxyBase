@@ -5,6 +5,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
+import com.jsirgalaxybase.quest.core.QuestBooleanParameter;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
@@ -26,6 +27,11 @@ final class BqTypedJson {
         return value != null && value.isJsonObject() ? value.getAsJsonObject() : new JsonObject();
     }
 
+    static boolean hasCompound(JsonObject parent, String name) {
+        JsonElement value = find(parent, name);
+        return value != null && value.isJsonObject();
+    }
+
     static String string(JsonObject parent, String name, String fallback) {
         JsonElement value = find(parent, name);
         return value == null || value.isJsonNull() ? fallback : value.getAsString();
@@ -41,9 +47,7 @@ final class BqTypedJson {
         if (value == null || value.isJsonNull()) return fallback;
         if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber()) return value.getAsLong() != 0L;
         String raw = value.getAsString();
-        if ("1".equals(raw)) return true;
-        if ("0".equals(raw)) return false;
-        return Boolean.parseBoolean(raw);
+        return QuestBooleanParameter.parse(raw, fallback);
     }
 
     static List<JsonObject> indexedObjects(JsonObject parent, String name) {

@@ -63,6 +63,9 @@ public final class JdbcQuestCompletionRewardPort implements QuestCompletionRewar
         if (selected.isEmpty()) return Result.TARGET_SCOPE_UNAVAILABLE;
         ParticipantMembership membership = selected.get(0);
         ParticipantId participantId = membership.getParticipantId();
+        if (runtime.wasEverCompleted(participantId, targetQuestId, definition.getVersion())) {
+            return Result.ALREADY_COMPLETED;
+        }
         Optional<QuestProgressSnapshot> prior = runtime.findProgress(participantId, targetQuestId,
             definition.getVersion());
         if (prior.isPresent() && prior.get().getStatus() == QuestStatus.COMPLETED) {

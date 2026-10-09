@@ -34,6 +34,64 @@ public class QuestEngineTest {
     }
 
     @Test
+    public void bqOptionalRetrievalDoesNotBlockQuestCompletion() {
+        UUID player = UUID.randomUUID();
+        TaskDefinition required = new TaskDefinition("required", "bq_standard:checkbox", false,
+            Collections.<String, String>emptyMap());
+        TaskDefinition optionalRetrieval = new TaskDefinition("bonus", "bq_standard:optional_retrieval", true,
+            map("progressMode", "item-vector", "item.count", "1", "item.0.amount", "5", "consume", "false"));
+        QuestDefinition quest = new QuestDefinition(UUID.randomUUID(), 1, "Optional retrieval", "", QuestLogic.AND,
+            QuestLogic.AND, Collections.<UUID>emptySet(), Arrays.asList(required, optionalRetrieval),
+            Collections.<RewardDefinition>emptyList());
+
+        Map<String, TaskProgress> observed = new LinkedHashMap<String, TaskProgress>();
+        observed.put("required", new TaskProgress("required", 1L, 1L, true));
+        observed.put("bonus", new TaskProgress("bonus", 0L, 5L, false));
+        QuestEvaluation result = new QuestEngine().evaluate(player, quest, null, observed,
+            Collections.<UUID>emptySet(), 100L);
+
+        assertEquals(QuestStatus.COMPLETED, result.getProgress().getStatus());
+        assertFalse(result.getProgress().getTasks().get("bonus").isComplete());
+    }
+
+    @Test
+    public void completedBqQuestFreezesOptionalRetrievalUntilANewCycleBegins() {
+        UUID player = UUID.randomUUID();
+        TaskDefinition required = new TaskDefinition("required", "bq_standard:checkbox", false,
+            Collections.<String, String>emptyMap());
+        TaskDefinition optionalRetrieval = new TaskDefinition("bonus", "bq_standard:optional_retrieval", true,
+            map("progressMode", "item-vector", "item.count", "1", "item.0.amount", "5", "consume", "false"));
+        QuestDefinition quest = new QuestDefinition(UUID.randomUUID(), 1, "Optional retrieval freeze", "",
+            QuestLogic.AND, QuestLogic.AND, Collections.<UUID>emptySet(), Arrays.asList(required, optionalRetrieval),
+            Collections.<RewardDefinition>emptyList(), RepeatPolicy.after(100L));
+        Map<String, TaskProgress> beforeCompletion = new LinkedHashMap<String, TaskProgress>();
+        beforeCompletion.put("required", new TaskProgress("required", 1L, 1L, true));
+        beforeCompletion.put("bonus", new TaskProgress("bonus", 0L, 5L, false));
+        QuestEvaluation completed = new QuestEngine().evaluate(player, quest, null, beforeCompletion,
+            Collections.<UUID>emptySet(), 100L);
+        assertEquals(QuestStatus.COMPLETED, completed.getProgress().getStatus());
+
+        Map<String, TaskProgress> laterObservation = new LinkedHashMap<String, TaskProgress>();
+        laterObservation.put("required", new TaskProgress("required", 1L, 1L, true));
+        laterObservation.put("bonus", new TaskProgress("bonus", 5L, 5L, true));
+        QuestEvaluation later = new QuestEngine().evaluate(player, quest, completed.getProgress(), laterObservation,
+            Collections.<UUID>emptySet(), 101L);
+
+        assertEquals("BQ stops detecting a completed quest before the next repeat cycle",
+            QuestStatus.COMPLETED, later.getProgress().getStatus());
+        assertEquals(Arrays.asList(0L), later.getProgress().getTasks().get("bonus").getValues());
+        assertFalse(later.getProgress().getTasks().get("bonus").isComplete());
+        assertTrue(later.getEntitlements().isEmpty());
+
+        QuestEvaluation nextCycle = new QuestEngine().evaluate(player, quest, later.getProgress(), laterObservation,
+            Collections.<UUID>emptySet(), 200L);
+        assertEquals(1, nextCycle.getProgress().getCycle());
+        assertEquals(QuestStatus.COMPLETED, nextCycle.getProgress().getStatus());
+        assertEquals(Arrays.asList(5L), nextCycle.getProgress().getTasks().get("bonus").getValues());
+        assertTrue(nextCycle.getProgress().getTasks().get("bonus").isComplete());
+    }
+
+    @Test
     public void autoClaimBehaviorRequestsImmediateDelivery() {
         UUID player = UUID.randomUUID();
         QuestDefinition base = quest(QuestLogic.AND);
@@ -48,6 +106,80 @@ public class QuestEngineTest {
             Collections.<UUID>emptySet(), 1234L);
 
         assertEquals(RewardDeliveryStatus.PENDING, result.getEntitlements().get(0).getInitialDeliveryStatus());
+    }
+
+    @Test
+    public void incompleteBqRetrievalProgressTracksCurrentInventoryWhileCompletedProgressStaysLatched() {
+        UUID player = UUID.randomUUID();
+        TaskDefinition retrieval = new TaskDefinition("items", "bq_standard:retrieval", false,
+            map("progressMode", "item-vector", "item.count", "2", "item.0.amount", "3",
+                "item.1.amount", "10",
+                "consume", "false", "groupDetect", "false"));
+        QuestDefinition quest = new QuestDefinition(UUID.randomUUID(), 1, "Retrieval", "", QuestLogic.AND,
+            QuestLogic.AND, Collections.<UUID>emptySet(), Collections.singletonList(retrieval),
+            Collections.<RewardDefinition>emptyList());
+        QuestProgressSnapshot previous = progress(quest, player, QuestStatus.IN_PROGRESS,
+            new TaskProgress("items", Arrays.asList(3L, 4L), Arrays.asList(3L, 10L), false));
+
+        QuestEvaluation lower = new QuestEngine().evaluate(player, quest, previous,
+            Collections.singletonMap("items", new TaskProgress("items", Arrays.asList(0L, 1L),
+                Arrays.asList(3L, 10L), false)),
+            Collections.<UUID>emptySet(), 10L);
+        assertEquals(Arrays.asList(3L, 1L), lower.getProgress().getTasks().get("items").getValues());
+
+        QuestProgressSnapshot completed = progress(quest, player, QuestStatus.IN_PROGRESS,
+            new TaskProgress("items", Arrays.asList(3L, 10L), Arrays.asList(3L, 10L), true));
+        QuestEvaluation latched = new QuestEngine().evaluate(player, quest, completed,
+            Collections.singletonMap("items", new TaskProgress("items", Arrays.asList(0L, 0L),
+                Arrays.asList(3L, 10L), false)),
+            Collections.<UUID>emptySet(), 11L);
+        assertTrue(latched.getProgress().getTasks().get("items").isComplete());
+    }
+
+    @Test
+    public void consumingRetrievalProgressRemainsMonotonicAfterCommittedConsumption() {
+        UUID player = UUID.randomUUID();
+        TaskDefinition retrieval = new TaskDefinition("items", "bq_standard:retrieval", false,
+            map("progressMode", "item-vector", "item.count", "1", "item.0.amount", "10",
+                "consume", "true", "groupDetect", "false"));
+        QuestDefinition quest = new QuestDefinition(UUID.randomUUID(), 1, "Retrieval", "", QuestLogic.AND,
+            QuestLogic.AND, Collections.<UUID>emptySet(), Collections.singletonList(retrieval),
+            Collections.<RewardDefinition>emptyList());
+        QuestProgressSnapshot previous = progress(quest, player, QuestStatus.IN_PROGRESS,
+            new TaskProgress("items", Arrays.asList(4L), Arrays.asList(10L), false));
+
+        QuestEvaluation replay = new QuestEngine().evaluate(player, quest, previous,
+            Collections.singletonMap("items", new TaskProgress("items", Arrays.asList(1L), Arrays.asList(10L), false)),
+            Collections.<UUID>emptySet(), 10L);
+        assertEquals(Arrays.asList(4L), replay.getProgress().getTasks().get("items").getValues());
+    }
+
+    @Test
+    public void groupDetectRetrievalReplacesIncompleteProgressFromAggregateSnapshot() {
+        UUID player = UUID.randomUUID();
+        TaskDefinition retrieval = new TaskDefinition("items", "bq_standard:retrieval", false,
+            map("progressMode", "item-vector", "item.count", "2", "item.0.amount", "3",
+                "item.1.amount", "10",
+                "consume", "false", "groupDetect", "true"));
+        QuestDefinition quest = new QuestDefinition(UUID.randomUUID(), 1, "Group retrieval", "", QuestLogic.AND,
+            QuestLogic.AND, Collections.<UUID>emptySet(), Collections.singletonList(retrieval),
+            Collections.<RewardDefinition>emptyList());
+        QuestProgressSnapshot previous = progress(quest, player, QuestStatus.IN_PROGRESS,
+            new TaskProgress("items", Arrays.asList(3L, 8L), Arrays.asList(3L, 10L), false));
+
+        QuestEvaluation lower = new QuestEngine().evaluate(player, quest, previous,
+            Collections.singletonMap("items", new TaskProgress("items", Arrays.asList(0L, 3L),
+                Arrays.asList(3L, 10L), false)),
+            Collections.<UUID>emptySet(), 10L);
+        assertEquals(Arrays.asList(0L, 3L), lower.getProgress().getTasks().get("items").getValues());
+
+        QuestProgressSnapshot completed = progress(quest, player, QuestStatus.COMPLETED,
+            new TaskProgress("items", Arrays.asList(3L, 10L), Arrays.asList(3L, 10L), true));
+        QuestEvaluation latched = new QuestEngine().evaluate(player, quest, completed,
+            Collections.singletonMap("items", new TaskProgress("items", Arrays.asList(0L, 0L),
+                Arrays.asList(3L, 10L), false)),
+            Collections.<UUID>emptySet(), 11L);
+        assertTrue(latched.getProgress().getTasks().get("items").isComplete());
     }
 
     @Test
@@ -89,6 +221,31 @@ public class QuestEngineTest {
             Collections.<UUID>emptySet(), 1100L);
         assertEquals(1, second.getProgress().getCycle());
         assertTrue(second.getEntitlements().get(0).getEntitlementKey().contains(":1:coins"));
+    }
+
+    @Test
+    public void repeatableCraftingTaskResetsVectorAndReappliesAbsoluteCraftStatistic() {
+        UUID player = UUID.randomUUID();
+        TaskDefinition crafting = new TaskDefinition("craft", "bq_standard:crafting", false,
+            map("progressMode", "item-vector", "item.count", "1", "item.0.registryName", "minecraft:iron_ingot",
+                "item.0.meta", "0", "item.0.amount", "3", "allowCraftedFromStatistics", "true"));
+        QuestDefinition repeatable = new QuestDefinition(UUID.randomUUID(), 1, "Craft again", "", QuestLogic.AND,
+            QuestLogic.AND, Collections.<UUID>emptySet(), Collections.singletonList(crafting),
+            Collections.singletonList(new RewardDefinition("reward", "bq_standard:item",
+                Collections.<String, String>emptyMap())), RepeatPolicy.after(100L));
+        Map<String, TaskProgress> absoluteStatistics = Collections.singletonMap("craft",
+            new TaskProgress("craft", Arrays.asList(3L), Arrays.asList(3L), false));
+
+        QuestEvaluation first = new QuestEngine().evaluate(player, repeatable, null, absoluteStatistics,
+            Collections.<UUID>emptySet(), 1000L);
+        QuestEvaluation nextCycle = new QuestEngine().evaluate(player, repeatable, first.getProgress(),
+            absoluteStatistics, Collections.<UUID>emptySet(), 1100L);
+
+        assertEquals(0, first.getProgress().getCycle());
+        assertEquals(1, nextCycle.getProgress().getCycle());
+        assertTrue(nextCycle.getProgress().getTasks().get("craft").isComplete());
+        assertEquals(1, nextCycle.getEntitlements().size());
+        assertTrue(nextCycle.getEntitlements().get(0).getEntitlementKey().contains(":1:reward"));
     }
 
     @Test
@@ -138,6 +295,27 @@ public class QuestEngineTest {
     }
 
     @Test
+    public void exclusivePrerequisitesUnlockFromOneCompletedAlternative() {
+        UUID seed = UUID.randomUUID();
+        UUID alternative = UUID.randomUUID();
+        QuestDefinition base = quest(QuestLogic.AND);
+        QuestDefinition choice = new QuestDefinition(base.getId(), 1, "Choice", "", QuestLogic.XOR,
+            QuestLogic.AND, new java.util.LinkedHashSet<UUID>(Arrays.asList(seed, alternative)),
+            base.getTasks(), base.getRewards());
+        Map<String, TaskProgress> observations = new LinkedHashMap<String, TaskProgress>();
+        observations.put("collect", new TaskProgress("collect", 8, 8, true));
+        observations.put("visit", new TaskProgress("visit", 1, 1, true));
+        QuestEngine engine = new QuestEngine();
+        UUID player = UUID.randomUUID();
+        assertEquals(QuestStatus.LOCKED, engine.evaluate(player, choice, null, observations,
+            Collections.<UUID>emptySet(), 1L).getProgress().getStatus());
+        assertEquals(QuestStatus.COMPLETED, engine.evaluate(player, choice, null, observations,
+            Collections.singleton(seed), 2L).getProgress().getStatus());
+        assertEquals(QuestStatus.LOCKED, engine.evaluate(player, choice, null, observations,
+            new java.util.LinkedHashSet<UUID>(Arrays.asList(seed, alternative)), 3L).getProgress().getStatus());
+    }
+
+    @Test
     public void lockedProgressAndSimultaneousFollowExplicitBehaviorInsteadOfGlobalDefaults() {
         UUID prerequisite = UUID.randomUUID();
         QuestDefinition base = quest(QuestLogic.AND);
@@ -175,5 +353,17 @@ public class QuestEngineTest {
                 new TaskDefinition("collect", "item", false, target),
                 new TaskDefinition("visit", "location", false, Collections.singletonMap("target", "1"))),
             Collections.singletonList(new RewardDefinition("coins", "bank", Collections.<String, String>emptyMap())));
+    }
+
+    private static QuestProgressSnapshot progress(QuestDefinition quest, UUID player, QuestStatus status,
+        TaskProgress taskProgress) {
+        return new QuestProgressSnapshot(ParticipantId.player(player), quest.getId(), quest.getVersion(), status,
+            Collections.singletonMap(taskProgress.getTaskKey(), taskProgress), 0L, 0);
+    }
+
+    private static Map<String, String> map(String... values) {
+        Map<String, String> result = new LinkedHashMap<String, String>();
+        for (int i = 0; i < values.length; i += 2) result.put(values[i], values[i + 1]);
+        return result;
     }
 }

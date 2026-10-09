@@ -66,7 +66,7 @@ public class BqMigrationPlannerTest {
         assertTrue(matrix.toText().contains("TASK|00000000-0000-0000-0000-000000000007|task-0|bq_standard:retrieval=BLOCKED"));
     }
 
-    @Test public void prerequisiteCyclesDuplicateQuestIdsAndDuplicatePlacementFailClosed() throws Exception {
+    @Test public void prerequisiteCyclesAndDuplicateQuestIdsFailClosedButCrossChapterPlacementIsAllowed() throws Exception {
         Path root = root("bq-plan-cycle");
         writeQuest(root, "a.json", 7, "{\"0:10\":{\"questIDHigh:4\":0,\"questIDLow:4\":8}}",
             "{\"0:10\":{\"index:3\":0,\"taskID:8\":\"bq_standard:checkbox\"}}");
@@ -85,7 +85,52 @@ public class BqMigrationPlannerTest {
         assertFalse(manifest.isApplicable());
         assertTrue(manifest.toText().contains("DUPLICATE_QUEST_UUID"));
         assertTrue(manifest.toText().contains("PREREQUISITE_CYCLE"));
-        assertTrue(manifest.toText().contains("DUPLICATE_CHAPTER_PLACEMENT"));
+        assertFalse(manifest.toText().contains("DUPLICATE_CHAPTER_PLACEMENT"));
+    }
+
+    @Test public void sameQuestInTwoChaptersIsApplicable() throws Exception {
+        Path root = root("bq-plan-cross-chapter");
+        writeQuest(root, "a.json", 7, "{}", "{\"0:10\":{\"index:3\":0,\"taskID:8\":\"bq_standard:checkbox\"}}");
+        Path first = Files.createDirectories(root.resolve("QuestLines/Main-AAAAAAAAAAAAAAAAAAAAAQ=="));
+        Path second = Files.createDirectories(root.resolve("QuestLines/Second-AAAAAAAAAAAAAAAAAAAAAg=="));
+        Files.write(root.resolve("QuestLinesOrder.txt"), ("AAAAAAAAAAAAAAAAAAAAAQ==: Main\n"
+            + "AAAAAAAAAAAAAAAAAAAAAg==: Second\n").getBytes(StandardCharsets.UTF_8));
+        String entry = "{\"questIDHigh:4\":0,\"questIDLow:4\":7,\"sizeX:3\":24,\"sizeY:3\":24,\"x:3\":0,\"y:3\":0}";
+        Files.write(first.resolve("a.json"), entry.getBytes(StandardCharsets.UTF_8));
+        Files.write(second.resolve("a.json"), entry.getBytes(StandardCharsets.UTF_8));
+        assertTrue(new BqMigrationPlanner().plan(root).isApplicable());
+    }
+
+    @Test public void emptyBqItemRewardIsApplicableNoOp() throws Exception {
+        Path root = root("bq-plan-empty-item-reward");
+        String quest = "{\"questIDHigh:4\":0,\"questIDLow:4\":9,"
+            + "\"properties:10\":{\"betterquesting:10\":{\"name:8\":\"Empty reward\"}},"
+            + "\"tasks:9\":{\"0:10\":{\"index:3\":0,\"taskID:8\":\"bq_standard:checkbox\"}},"
+            + "\"rewards:9\":{\"0:10\":{\"index:3\":0,\"rewardID:8\":\"bq_standard:item\",\"rewards:9\":{}}}}";
+        Files.write(root.resolve("Quests/line/quest.json"), quest.getBytes(StandardCharsets.UTF_8));
+        BqMigrationManifest manifest = new BqMigrationPlanner().plan(root);
+        assertTrue(manifest.toText(), manifest.isApplicable());
+        assertEquals("0", manifest.getQuests().get(0).getDefinition().getRewards().get(0)
+            .getParameters().get("item.count"));
+    }
+
+    @Test public void seededExclusiveChoiceCycleIsPreservedButUnseededCycleIsBlocked() throws Exception {
+        Path seeded = root("bq-plan-seeded-xor");
+        writeQuest(seeded, "seed.json", 7, "{}",
+            "{\"0:10\":{\"index:3\":0,\"taskID:8\":\"bq_standard:checkbox\"}}");
+        writeXorQuest(seeded, "first.json", 8, 7, 9);
+        writeXorQuest(seeded, "second.json", 9, 7, 8);
+        BqMigrationManifest applicable = new BqMigrationPlanner().plan(seeded);
+        assertTrue(applicable.toText(), applicable.isApplicable());
+        assertTrue(applicable.toText().contains("WARNING|SEEDED_XOR_CYCLE"));
+        assertFalse(applicable.toText().contains("PREREQUISITE_CYCLE"));
+
+        Path unseeded = root("bq-plan-unseeded-xor");
+        writeXorQuest(unseeded, "first.json", 8, 9);
+        writeXorQuest(unseeded, "second.json", 9, 8);
+        BqMigrationManifest blocked = new BqMigrationPlanner().plan(unseeded);
+        assertFalse(blocked.isApplicable());
+        assertTrue(blocked.toText().contains("ERROR|PREREQUISITE_CYCLE"));
     }
 
     @Test public void supportedTypesStillFailClosedWhenNormalizedParametersAreInvalid() throws Exception {
@@ -96,6 +141,9 @@ public class BqMigrationPlannerTest {
         assertFalse(manifest.isApplicable());
         assertTrue(manifest.toText().contains("INVALID_ELEMENT_PARAMETER"));
         assertTrue(manifest.toText().contains("tasks.task-0.amount"));
+        BqCompatibilityReport compatibility = BqCompatibilityReport.create(manifest);
+        assertEquals(BqCompatibilityStatus.BLOCKED,
+            compatibility.getElementCompatibility().get("TASK|00000000-0000-0000-0000-00000000000c|task-0|bq_standard:xp"));
     }
 
     private static Path root(String prefix) throws Exception {
@@ -111,5 +159,21 @@ public class BqMigrationPlannerTest {
             +"\"properties:10\":{\"betterquesting:10\":{\"name:8\":\"Q"+low+"\"}},"
             +"\"preRequisites:9\":"+prerequisites+",\"tasks:9\":"+tasks+",\"rewards:9\":{}}";
         Files.write(root.resolve("Quests/line").resolve(file),json.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void writeXorQuest(Path root, String file, long low, long... prerequisiteIds) throws Exception {
+        StringBuilder prerequisites = new StringBuilder("{");
+        for (int i = 0; i < prerequisiteIds.length; i++) {
+            if (i > 0) prerequisites.append(',');
+            prerequisites.append('"').append(i).append(":10\":{\"questIDHigh:4\":0,\"questIDLow:4\":")
+                .append(prerequisiteIds[i]).append('}');
+        }
+        prerequisites.append('}');
+        String json = "{\"questIDHigh:4\":0,\"questIDLow:4\":" + low + ","
+            + "\"properties:10\":{\"betterquesting:10\":{\"name:8\":\"Choice\","
+            + "\"questLogic:8\":\"XOR\"}},\"preRequisites:9\":" + prerequisites + ","
+            + "\"tasks:9\":{\"0:10\":{\"index:3\":0,\"taskID:8\":\"bq_standard:checkbox\"}},"
+            + "\"rewards:9\":{}}";
+        Files.write(root.resolve("Quests/line").resolve(file), json.getBytes(StandardCharsets.UTF_8));
     }
 }

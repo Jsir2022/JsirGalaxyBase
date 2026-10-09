@@ -25,6 +25,32 @@ public final class QuestEngine {
     public QuestEvaluation evaluate(ParticipantMembership membership, QuestDefinition definition,
         QuestProgressSnapshot previous, Map<String, TaskProgress> observations, Set<UUID> completedPrerequisites,
         long now) {
+        return evaluate(membership, definition, previous, observations, completedPrerequisites, now, false);
+    }
+
+    /** Holds an expired completed cycle open while its manual-consumption saga is being recovered. */
+    public QuestEvaluation evaluate(ParticipantMembership membership, QuestDefinition definition,
+        QuestProgressSnapshot previous, Map<String, TaskProgress> observations, Set<UUID> completedPrerequisites,
+        long now, boolean holdCompletedCycle) {
+        return evaluate(membership, definition, previous, observations, completedPrerequisites, now,
+            holdCompletedCycle, false);
+    }
+
+    /**
+     * Allows authenticated BQ party task facts to update every member's Task progress, while still deferring
+     * locked members' quest completion and reward entitlement until they unlock.
+     */
+    public QuestEvaluation evaluate(ParticipantMembership membership, QuestDefinition definition,
+        QuestProgressSnapshot previous, Map<String, TaskProgress> observations, Set<UUID> completedPrerequisites,
+        long now, boolean holdCompletedCycle, boolean bqPartyProgressFanout) {
+        long repeatAnchorMillis = previous == null ? 0L : previous.getCompletedAt();
+        return evaluate(membership, definition, previous, observations, completedPrerequisites, now,
+            holdCompletedCycle, bqPartyProgressFanout, repeatAnchorMillis);
+    }
+
+    public QuestEvaluation evaluate(ParticipantMembership membership, QuestDefinition definition,
+        QuestProgressSnapshot previous, Map<String, TaskProgress> observations, Set<UUID> completedPrerequisites,
+        long now, boolean holdCompletedCycle, boolean bqPartyProgressFanout, long repeatAnchorMillis) {
         ParticipantId participantId = membership.getParticipantId();
         if (previous != null && !previous.getParticipantId().equals(participantId)) {
             throw new IllegalArgumentException("progress participant does not match evaluation participant");
@@ -35,10 +61,13 @@ public final class QuestEngine {
         }
         boolean unlocked = definition.getPrerequisites().isEmpty() || definition.getPrerequisiteLogic().satisfied(
             intersectionSize(definition.getPrerequisites(), completedPrerequisites), definition.getPrerequisites().size());
-        boolean acceptsProgress = unlocked || definition.getBehavior().isProgressWhileLocked();
+        boolean acceptsProgress = unlocked || definition.getBehavior().isProgressWhileLocked()
+            || bqPartyProgressFanout;
+        boolean acceptsQuestCompletion = unlocked || definition.getBehavior().isProgressWhileLocked();
 
-        boolean beginNextCycle = previous != null && previous.getStatus() == QuestStatus.COMPLETED
-            && definition.getRepeatPolicy().isAvailable(previous.getCompletedAt(), now);
+        boolean beginNextCycle = beginsNextCycle(definition, previous, now, holdCompletedCycle, repeatAnchorMillis);
+        boolean frozenCompletedCycle = previous != null && previous.getStatus() == QuestStatus.COMPLETED
+            && !beginNextCycle;
         QuestProgressSnapshot progressBase = beginNextCycle ? null : previous;
         int cycle = previous == null ? 0 : previous.getCycle() + (beginNextCycle ? 1 : 0);
 
@@ -49,7 +78,21 @@ public final class QuestEngine {
             TaskProgress old = progressBase == null ? null : progressBase.getTasks().get(task.getKey());
             TaskProgress observed = observations == null ? null : observations.get(task.getKey());
             TaskProgress value = old == null ? TaskProgress.empty(task) : old;
-            if (acceptsProgress && observed != null) value = value.merge(observed);
+            if (acceptsProgress && observed != null && !frozenCompletedCycle) {
+                if (isNonConsumingRetrievalSnapshot(task)) {
+                    // BQ groupDetect resets every item component before a party-wide scan. Without it,
+                    // individually satisfied requirements remain latched while partial requirements are
+                    // recomputed from the current inventory. Task completion itself is always latched.
+                    boolean groupDetect = QuestBooleanParameter.parse(
+                        task.getParameters().get("groupDetect"), false);
+                    value = groupDetect
+                        ? value.replaceIncomplete(observed.getValues())
+                        : value.replaceIncompleteComponents(observed.getValues());
+                    if (observed.isComplete()) value = value.markComplete();
+                } else {
+                    value = value.merge(observed);
+                }
+            }
             merged.put(task.getKey(), value);
             if (!task.isOptional()) {
                 requiredCount++;
@@ -59,9 +102,9 @@ public final class QuestEngine {
 
         QuestStatus priorStatus = progressBase == null ? null : progressBase.getStatus();
         boolean alreadyComplete = priorStatus == QuestStatus.COMPLETED;
-        boolean completed = acceptsProgress
-            && (alreadyComplete || definition.getTaskLogic().satisfied(completeCount, requiredCount));
-        if (!completed && acceptsProgress && definition.getBehavior().isSimultaneous() && completeCount > 0) {
+        boolean completed = alreadyComplete || acceptsQuestCompletion
+            && definition.getTaskLogic().satisfied(completeCount, requiredCount);
+        if (!completed && acceptsQuestCompletion && definition.getBehavior().isSimultaneous() && completeCount > 0) {
             merged.clear();
             for (TaskDefinition task : definition.getTasks()) merged.put(task.getKey(), TaskProgress.empty(task));
         }
@@ -85,11 +128,29 @@ public final class QuestEngine {
         return new QuestEvaluation(next, entitlements);
     }
 
+    boolean beginsNextCycle(QuestDefinition definition, QuestProgressSnapshot previous, long now,
+        boolean holdCompletedCycle) {
+        return beginsNextCycle(definition, previous, now, holdCompletedCycle,
+            previous == null ? 0L : previous.getCompletedAt());
+    }
+
+    boolean beginsNextCycle(QuestDefinition definition, QuestProgressSnapshot previous, long now,
+        boolean holdCompletedCycle, long repeatAnchorMillis) {
+        return !holdCompletedCycle && previous != null && previous.getStatus() == QuestStatus.COMPLETED
+            && definition.getRepeatPolicy().isAvailable(repeatAnchorMillis, now);
+    }
+
     private static int intersectionSize(Set<UUID> required, Set<UUID> completed) {
         if (completed == null || completed.isEmpty()) return 0;
         int count = 0;
         for (UUID id : required) if (completed.contains(id)) count++;
         return count;
+    }
+
+    private static boolean isNonConsumingRetrievalSnapshot(TaskDefinition task) {
+        String type = task.getTypeId();
+        return ("bq_standard:retrieval".equals(type) || "bq_standard:optional_retrieval".equals(type))
+            && !QuestBooleanParameter.parse(task.getParameters().get("consume"), false);
     }
 
     private static boolean hasProgress(Map<String, TaskProgress> tasks) {

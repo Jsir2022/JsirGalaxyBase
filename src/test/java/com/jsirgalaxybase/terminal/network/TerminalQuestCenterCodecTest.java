@@ -23,7 +23,7 @@ public class TerminalQuestCenterCodecTest {
             "minecraft:iron_ingot", 0, "铁锭",true);
         TerminalQuestCenterSectionSnapshot.Detail detail = new TerminalQuestCenterSectionSnapshot.Detail(
             quest, "建造一座高炉", "前置任务 1 项", "不可重复",
-            Arrays.asList(new TerminalQuestCenterSectionSnapshot.Task("task-a", "物品任务", "必需目标", 64, 64)),
+            Arrays.asList(new TerminalQuestCenterSectionSnapshot.Task("task-a", "物品任务", "必需目标", 32, 64, true, true, true)),
             Arrays.asList(new TerminalQuestCenterSectionSnapshot.Reward("reward-a", "选择奖励", "bq_standard:choice",
                 "minecraft:diamond", 0, "钻石", 4, true, false,Arrays.asList(
                     new TerminalQuestCenterSectionSnapshot.Choice("minecraft:diamond",0,"钻石",4),
@@ -44,7 +44,10 @@ public class TerminalQuestCenterCodecTest {
         assertEquals("quest-a", decoded.getQuests().get(0).getId());
         assertTrue(decoded.getQuests().get(0).isTracked());
         assertNotNull(decoded.getDetail());
-        assertEquals(64, decoded.getDetail().getTasks().get(0).getValue());
+        assertEquals(32, decoded.getDetail().getTasks().get(0).getValue());
+        assertTrue(decoded.getDetail().getTasks().get(0).isConfirmable());
+        assertTrue(decoded.getDetail().getTasks().get(0).isSubmittable());
+        assertTrue(decoded.getDetail().getTasks().get(0).isDetectable());
         assertEquals("minecraft:diamond", decoded.getDetail().getRewards().get(0).getItemRegistry());
         assertTrue(decoded.getDetail().getRewards().get(0).isClaimable());
         assertEquals(2,decoded.getDetail().getRewards().get(0).getChoices().size());

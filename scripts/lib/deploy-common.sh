@@ -4,7 +4,7 @@ set -euo pipefail
 
 DEPLOY_COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$DEPLOY_COMMON_DIR/../.." && pwd)"
-GTNH_ROOT="${GTNH_ROOT:-/media/u24/data/gtnh}"
+GTNH_ROOT="${GTNH_ROOT:-$(cd "$PROJECT_ROOT/.." && pwd)}"
 COMPOSE_FILE="${COMPOSE_FILE:-$GTNH_ROOT/docker/projects/docker-compose.yml}"
 GRAY_CONTAINER="${GRAY_CONTAINER:-galaxy-gtnh}"
 DB_CONTAINER="${DB_CONTAINER:-galaxy-base}"

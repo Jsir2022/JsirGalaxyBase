@@ -28,34 +28,85 @@ public final class MinecraftXpRewardDeliveryHandler implements RewardDeliveryHan
         }
         EntityPlayerMP player = players.findOnline(lease.getParticipantId().getId());
         if (player == null) return RewardDeliveryOutcome.deferred("player-offline");
-        String marker = QuestRewardMarker.key(lease.getEntitlementKey());
-        NBTTagCompound persisted = QuestRewardMarker.persisted(player);
-        NBTTagCompound markers = persisted.getCompoundTag(QuestRewardMarker.ROOT);
-        if (markers.getBoolean(marker)) return RewardDeliveryOutcome.delivered();
+        return deliverToPlayer(lease, new MinecraftExperiencePort(player, flusher));
+    }
 
-        int oldTotal = player.experienceTotal;
-        int oldLevel = player.experienceLevel;
-        float oldProgress = player.experience;
+    static RewardDeliveryOutcome deliverToPlayer(RewardDeliveryLease lease, ExperiencePort player) {
+        String marker = QuestRewardMarker.key(lease.getEntitlementKey());
+        if (player.hasMarker(marker)) return RewardDeliveryOutcome.delivered();
+
+        int oldTotal = player.experienceTotal();
+        int oldLevel = player.experienceLevel();
+        float oldProgress = player.experienceProgress();
         int amount;
         try { amount = Integer.parseInt(lease.getReward().getParameters().get("amount")); }
         catch (RuntimeException invalid) { return RewardDeliveryOutcome.failed("invalid-reward:amount", false); }
         long points = "levels".equals(lease.getReward().getParameters().get("xpUnit")) ? levelXp(amount) : amount;
-        addPoints(player, points);
-        markers.setBoolean(marker, true);
-        persisted.setTag(QuestRewardMarker.ROOT, markers);
+        long total = Math.max(0L, playerXp(oldLevel, oldProgress) + points);
+        int storedTotal = total >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
+        int level = xpLevel(total);
+        long start = levelXp(level);
+        float progress = Math.max(0F, (float) ((double) (total - start) / (double) barCap(level)));
+        player.setExperience(storedTotal, level, progress);
+        player.setMarker(marker);
         try {
-            flusher.flush(player);
+            player.flush();
         } catch (RuntimeException failure) {
-            player.experienceTotal = oldTotal;
-            player.experienceLevel = oldLevel;
-            player.experience = oldProgress;
-            markers.removeTag(marker);
-            persisted.setTag(QuestRewardMarker.ROOT, markers);
+            player.setExperience(oldTotal, oldLevel, oldProgress);
+            player.removeMarker(marker);
             return RewardDeliveryOutcome.failed("player-save-failed:" + failure.getClass().getSimpleName(), true);
         }
-        player.playerNetServerHandler.sendPacket(
-            new S1FPacketSetExperience(player.experience, player.experienceTotal, player.experienceLevel));
+        player.syncExperience();
         return RewardDeliveryOutcome.delivered();
+    }
+
+    interface ExperiencePort {
+        int experienceTotal();
+        int experienceLevel();
+        float experienceProgress();
+        void setExperience(int total, int level, float progress);
+        boolean hasMarker(String marker);
+        void setMarker(String marker);
+        void removeMarker(String marker);
+        void flush();
+        void syncExperience();
+    }
+
+    private static final class MinecraftExperiencePort implements ExperiencePort {
+        private final EntityPlayerMP player;
+        private final QuestPlayerDataFlusher flusher;
+        private final NBTTagCompound persisted;
+        private final NBTTagCompound markers;
+
+        private MinecraftExperiencePort(EntityPlayerMP player, QuestPlayerDataFlusher flusher) {
+            this.player = player;
+            this.flusher = flusher;
+            this.persisted = QuestRewardMarker.persisted(player);
+            this.markers = persisted.getCompoundTag(QuestRewardMarker.ROOT);
+        }
+
+        @Override public int experienceTotal() { return player.experienceTotal; }
+        @Override public int experienceLevel() { return player.experienceLevel; }
+        @Override public float experienceProgress() { return player.experience; }
+        @Override public void setExperience(int total, int level, float progress) {
+            player.experienceTotal = total;
+            player.experienceLevel = level;
+            player.experience = progress;
+        }
+        @Override public boolean hasMarker(String marker) { return markers.getBoolean(marker); }
+        @Override public void setMarker(String marker) {
+            markers.setBoolean(marker, true);
+            persisted.setTag(QuestRewardMarker.ROOT, markers);
+        }
+        @Override public void removeMarker(String marker) {
+            markers.removeTag(marker);
+            persisted.setTag(QuestRewardMarker.ROOT, markers);
+        }
+        @Override public void flush() { flusher.flush(player); }
+        @Override public void syncExperience() {
+            player.playerNetServerHandler.sendPacket(
+                new S1FPacketSetExperience(player.experience, player.experienceTotal, player.experienceLevel));
+        }
     }
 
     static void addPoints(EntityPlayerMP player, long points) {
@@ -92,7 +143,10 @@ public final class MinecraftXpRewardDeliveryHandler implements RewardDeliveryHan
     }
 
     static long playerXp(EntityPlayerMP player) {
-        return levelXp(player.experienceLevel) + (long) (barCap(player.experienceLevel)
-            * Math.max(0D, player.experience));
+        return playerXp(player.experienceLevel, player.experience);
+    }
+
+    private static long playerXp(int level, float progress) {
+        return levelXp(level) + (long) (barCap(level) * Math.max(0D, progress));
     }
 }

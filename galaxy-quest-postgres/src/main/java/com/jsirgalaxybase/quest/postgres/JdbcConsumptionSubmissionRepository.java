@@ -47,6 +47,32 @@ public final class JdbcConsumptionSubmissionRepository implements ConsumptionSub
     }
 
     @Override
+    public List<ConsumptionSubmission> findPendingForPlayer(final UUID playerId, final String sourceServer,
+        final int limit) {
+        requireTransaction();
+        if (playerId == null || sourceServer == null || sourceServer.trim().isEmpty()) throw new IllegalArgumentException(
+            "playerId and sourceServer are required");
+        final int boundedLimit = Math.max(1, Math.min(64, limit));
+        return connections.withConnection(connection -> {
+            List<String> keys = new ArrayList<String>();
+            try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT submission_key FROM galaxy_quest_consumption_submission "
+                    + "WHERE player_id=? AND source_server=? AND submission_status IN ('PREPARED','APPLIED') "
+                    + "ORDER BY created_at,submission_key LIMIT ? FOR UPDATE SKIP LOCKED")) {
+                statement.setObject(1, playerId);
+                statement.setString(2, sourceServer.trim());
+                statement.setInt(3, boundedLimit);
+                try (ResultSet rows = statement.executeQuery()) {
+                    while (rows.next()) keys.add(rows.getString(1));
+                }
+            }
+            List<ConsumptionSubmission> result = new ArrayList<ConsumptionSubmission>(keys.size());
+            for (String key : keys) result.add(selectForUpdate(connection, key));
+            return result;
+        });
+    }
+
+    @Override
     public ConsumptionSubmission prepareIfAbsent(final ConsumptionRequest request) {
         requireTransaction();
         return connections.withConnection(connection -> {

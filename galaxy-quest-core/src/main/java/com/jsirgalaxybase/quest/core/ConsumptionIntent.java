@@ -11,15 +11,22 @@ public final class ConsumptionIntent {
     private final UUID questId;
     private final String taskKey;
     private final long createdAt;
+    private final ConsumptionSelection selection;
 
     public ConsumptionIntent(String submissionKey, String sourceServer, UUID playerId, UUID questId, String taskKey,
         long createdAt) {
+        this(submissionKey, sourceServer, playerId, questId, taskKey, createdAt, null);
+    }
+
+    public ConsumptionIntent(String submissionKey, String sourceServer, UUID playerId, UUID questId, String taskKey,
+        long createdAt, ConsumptionSelection selection) {
         this.submissionKey = text(submissionKey, "submissionKey");
         this.sourceServer = text(sourceServer, "sourceServer");
         this.playerId = Objects.requireNonNull(playerId, "playerId");
         this.questId = Objects.requireNonNull(questId, "questId");
         this.taskKey = text(taskKey, "taskKey");
         this.createdAt = createdAt;
+        this.selection = selection;
     }
 
     public String getSubmissionKey() { return submissionKey; }
@@ -28,6 +35,7 @@ public final class ConsumptionIntent {
     public UUID getQuestId() { return questId; }
     public String getTaskKey() { return taskKey; }
     public long getCreatedAt() { return createdAt; }
+    public ConsumptionSelection getSelection() { return selection; }
 
     private static String text(String value, String name) {
         String normalized = Objects.requireNonNull(value, name).trim();

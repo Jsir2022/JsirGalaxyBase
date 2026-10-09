@@ -30,7 +30,7 @@ public final class ConsumptionAppliedTaskEvaluator implements TaskEvaluator {
     }
 
     private static boolean bool(String raw, boolean fallback) {
-        return raw == null ? fallback : Boolean.parseBoolean(raw);
+        return QuestBooleanParameter.parse(raw, fallback);
     }
     private static int integer(String raw, int fallback) { return raw == null ? fallback : Integer.parseInt(raw); }
     private static long positive(String raw) {

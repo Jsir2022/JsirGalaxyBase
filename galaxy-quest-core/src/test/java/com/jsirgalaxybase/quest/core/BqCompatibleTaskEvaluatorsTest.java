@@ -73,6 +73,25 @@ public class BqCompatibleTaskEvaluatorsTest {
     }
 
     @Test
+    public void craftingMatchesAnyDamageValueForDamageableItemsLikeBq() {
+        ItemVectorTaskEvaluator evaluator = new ItemVectorTaskEvaluator("bq_standard:crafting", "galaxy:item_produced");
+        TaskDefinition task = new TaskDefinition("craft", "bq_standard:crafting", false,
+            map("target", "1", "item.count", "1", "item.0.registryName", "gtnh:durable_tool",
+                "item.0.meta", "0", "item.0.amount", "1", "ignoreNBT", "true"));
+        TaskProgress start = TaskProgress.empty(task);
+
+        TaskProgress damagedOutput = evaluator.evaluate(task, start, fact("galaxy:item_produced",
+            map("registryName", "gtnh:durable_tool", "meta", "31", "damageable", "true",
+                "channel", "craft", "amount", "1")));
+        assertEquals(Arrays.asList(1L), damagedOutput.getValues());
+
+        TaskProgress wrongVariant = evaluator.evaluate(task, start, fact("galaxy:item_produced",
+            map("registryName", "gtnh:durable_tool", "meta", "31", "damageable", "false",
+                "channel", "craft", "amount", "1")));
+        assertEquals(Arrays.asList(0L), wrongVariant.getValues());
+    }
+
+    @Test
     public void craftingStatisticsUsesAbsoluteCountAndRequiresExplicitOption() {
         ItemVectorTaskEvaluator evaluator = new ItemVectorTaskEvaluator("bq_standard:crafting", "galaxy:item_produced");
         Map<String, String> params = map("target", "10", "item.count", "1", "item.0.registryName",
@@ -89,6 +108,48 @@ public class BqCompatibleTaskEvaluatorsTest {
         params.put("allowCraftedFromStatistics", "false");
         TaskDefinition disabled = new TaskDefinition("craft", "bq_standard:crafting", false, params);
         assertEquals(Arrays.asList(0L), evaluator.evaluate(disabled, TaskProgress.empty(disabled), statistics).getValues());
+    }
+
+    @Test
+    public void craftingStatisticsUsesBqItemIdCounterWithoutMetaOrNbtFiltering() {
+        ItemVectorTaskEvaluator evaluator = new ItemVectorTaskEvaluator("bq_standard:crafting", "galaxy:item_produced");
+        Map<String, PortableNbt> requiredNbt = new LinkedHashMap<String, PortableNbt>();
+        requiredNbt.put("display", PortableNbt.string("Named Tool"));
+        TaskDefinition task = new TaskDefinition("craft", "bq_standard:crafting", false,
+            map("target", "2", "item.count", "1", "item.0.registryName", "gtnh:durable_tool",
+                "item.0.meta", "0", "item.0.amount", "2", "item.0.nbtPortable",
+                PortableNbt.compound(requiredNbt).encode(), "ignoreNBT", "false",
+                "allowCraftedFromStatistics", "true"));
+        GameplayFact statistics = fact("galaxy:item_produced", map("registryName", "gtnh:durable_tool",
+            "meta", "99", "amount", "2", "channel", "craft-statistics"));
+
+        assertTrue(evaluator.evaluate(task, TaskProgress.empty(task), statistics).isComplete());
+    }
+
+    @Test
+    public void craftingStatisticsAutomaticRefreshRequiresMatchingEnabledOutputEvent() {
+        ItemVectorTaskEvaluator evaluator = new ItemVectorTaskEvaluator("bq_standard:crafting", "galaxy:item_produced");
+        TaskDefinition task = new TaskDefinition("craft", "bq_standard:crafting", false,
+            map("target", "2", "item.count", "1", "item.0.registryName", "minecraft:iron_ingot",
+                "item.0.meta", "0", "item.0.amount", "2", "allowCraft", "true", "allowSmelt", "false",
+                "allowAnvil", "false", "allowCraftedFromStatistics", "true"));
+        TaskProgress start = TaskProgress.empty(task);
+        Map<String, String> unrelated = map("registryName", "minecraft:iron_ingot", "meta", "0", "amount", "2",
+            "channel", "craft-statistics", "trigger.channel", "craft",
+            "trigger.registryName", "minecraft:gold_ingot", "trigger.meta", "0");
+        assertEquals(Arrays.asList(0L), evaluator.evaluate(task, start,
+            fact("galaxy:item_produced", unrelated)).getValues());
+
+        Map<String, String> matchingSmelt = map("registryName", "minecraft:iron_ingot", "meta", "0", "amount", "2",
+            "channel", "craft-statistics", "trigger.channel", "smelt",
+            "trigger.registryName", "minecraft:iron_ingot", "trigger.meta", "0");
+        assertEquals(Arrays.asList(0L), evaluator.evaluate(task, start,
+            fact("galaxy:item_produced", matchingSmelt)).getValues());
+
+        Map<String, String> matchingCraft = map("registryName", "minecraft:iron_ingot", "meta", "0", "amount", "2",
+            "channel", "craft-statistics", "trigger.channel", "craft",
+            "trigger.registryName", "minecraft:iron_ingot", "trigger.meta", "0");
+        assertTrue(evaluator.evaluate(task, start, fact("galaxy:item_produced", matchingCraft)).isComplete());
     }
 
     @Test
@@ -116,13 +177,69 @@ public class BqCompatibleTaskEvaluatorsTest {
     }
 
     @Test
+    public void blockBreakUsesNegativeMetadataAsDirectWildcardButNotOreWildcardSentinel() {
+        BlockVectorTaskEvaluator evaluator = new BlockVectorTaskEvaluator("bq_standard:block_break",
+            "galaxy:block_broken");
+        TaskDefinition oreWildcard = new TaskDefinition("break", "bq_standard:block_break", false,
+            map("target", "1", "block.count", "1", "block.0.registryName", "minecraft:stone",
+                "block.0.meta", "32767", "block.0.amount", "1", "block.0.oreDictionary", ""));
+        GameplayFact sameBlockDifferentMeta = fact("galaxy:block_broken",
+            map("registryName", "minecraft:stone", "meta", "3", "oreDictionary", ""));
+
+        assertFalse(evaluator.evaluate(oreWildcard, TaskProgress.empty(oreWildcard), sameBlockDifferentMeta)
+            .isComplete());
+
+        TaskDefinition legacyWildcard = new TaskDefinition("break", "bq_standard:block_break", false,
+            map("target", "1", "block.count", "1", "block.0.registryName", "minecraft:stone",
+                "block.0.meta", "-1", "block.0.amount", "1", "block.0.oreDictionary", ""));
+        assertTrue(evaluator.evaluate(legacyWildcard, TaskProgress.empty(legacyWildcard), sameBlockDifferentMeta)
+            .isComplete());
+    }
+
+    @Test
+    public void blockBreakKeepsOreDictionaryAndPartialNbtMatchingForWildcardSentinel() {
+        BlockVectorTaskEvaluator evaluator = new BlockVectorTaskEvaluator("bq_standard:block_break",
+            "galaxy:block_broken");
+        String requiredNbt = PortableNbt.compound(withNbt("variant", "reinforced")).encode();
+        TaskDefinition task = new TaskDefinition("break", "bq_standard:block_break", false,
+            map("target", "1", "block.count", "1", "block.0.registryName", "minecraft:stone",
+                "block.0.meta", "32767", "block.0.amount", "1", "block.0.oreDictionary", "oreTest",
+                "block.0.nbtPortable", requiredNbt));
+        Map<String, String> matching = map("registryName", "example:ore_block", "meta", "4",
+            "oreDictionary", "oreTest", "nbtPortable",
+            PortableNbt.compound(withNbt("variant", "reinforced", "owner", "test")).encode());
+        assertTrue(evaluator.evaluate(task, TaskProgress.empty(task), fact("galaxy:block_broken", matching))
+            .isComplete());
+
+        matching.put("nbtPortable", PortableNbt.compound(withNbt("variant", "unreinforced", "owner", "test"))
+            .encode());
+        assertFalse(evaluator.evaluate(task, TaskProgress.empty(task), fact("galaxy:block_broken", matching))
+            .isComplete());
+    }
+
+    @Test
+    public void zeroAmountBlockPlaceholderDoesNotPreventRealRequirementCompletion() {
+        BlockVectorTaskEvaluator evaluator = new BlockVectorTaskEvaluator("bq_standard:block_break", "galaxy:block_broken");
+        TaskDefinition task = new TaskDefinition("break", "bq_standard:block_break", false,
+            map("progressMode", "block-vector", "target", "1", "block.count", "2",
+                "block.0.registryName", "minecraft:log", "block.0.meta", "-1", "block.0.amount", "1",
+                "block.1.registryName", "minecraft:air", "block.1.meta", "0", "block.1.amount", "0"));
+        TaskProgress before = TaskProgress.empty(task);
+        assertEquals(Arrays.asList(0L, 0L), before.getValues());
+        TaskProgress after = evaluator.evaluate(task, before, fact("galaxy:block_broken",
+            map("registryName", "minecraft:log", "meta", "0")));
+        assertEquals(Arrays.asList(1L, 0L), after.getValues());
+        assertTrue(after.isComplete());
+    }
+
+    @Test
     public void retrievalUsesAbsoluteSnapshotAndDoesNotConsume() {
         InventorySnapshotTaskEvaluator evaluator = new InventorySnapshotTaskEvaluator("bq_standard:retrieval",
             "galaxy:inventory_observed");
         Map<String, String> params = map("progressMode", "item-vector", "target", "8", "item.count", "2",
             "item.0.registryName", "minecraft:iron_ingot", "item.0.meta", "0", "item.0.amount", "5",
             "item.0.oreDictionary", "ingotIron", "item.1.registryName", "minecraft:gold_ingot", "item.1.meta", "0",
-            "item.1.amount", "3", "item.1.oreDictionary", "ingotGold", "consume", "false", "ignoreNBT", "true");
+            "item.1.amount", "3", "item.1.oreDictionary", "ingotGold", "consume", "0", "ignoreNBT", "1");
         TaskDefinition task = new TaskDefinition("retrieve", "bq_standard:retrieval", false, params);
         GameplayFact snapshot = fact("galaxy:inventory_observed", map("inventory.count", "3",
             "inventory.0.registryName", "minecraft:iron_ingot", "inventory.0.meta", "0",
@@ -139,9 +256,162 @@ public class BqCompatibleTaskEvaluatorsTest {
             "inventory.0.oreDictionary", "ingotIron", "inventory.0.amount", "1"));
         assertEquals(Arrays.asList(1L, 0L), evaluator.evaluate(task, previous, smaller).getValues());
 
-        params.put("consume", "true");
+        TaskProgress oneRequirementAlreadySatisfied = new TaskProgress("retrieve", Arrays.asList(5L, 2L),
+            Arrays.asList(5L, 3L), false);
+        assertEquals(Arrays.asList(5L, 0L), evaluator.evaluate(task, oneRequirementAlreadySatisfied, smaller).getValues());
+        params.put("groupDetect", "true");
+        TaskDefinition groupDetect = new TaskDefinition("retrieve", "bq_standard:retrieval", false, params);
+        assertEquals(Arrays.asList(1L, 0L), evaluator.evaluate(groupDetect, oneRequirementAlreadySatisfied, smaller)
+            .getValues());
+
+        params.put("consume", "1");
         TaskDefinition consuming = new TaskDefinition("retrieve", "bq_standard:retrieval", false, params);
         assertEquals(Arrays.asList(0L, 0L), evaluator.evaluate(consuming, TaskProgress.empty(consuming), snapshot).getValues());
+    }
+
+    @Test
+    public void retrievalReadsNumericBqBooleanFlagsWithoutInvertingConsumeOrNbtRules() {
+        InventorySnapshotTaskEvaluator evaluator = new InventorySnapshotTaskEvaluator("bq_standard:retrieval",
+            "galaxy:inventory_observed");
+        Map<String, PortableNbt> requiredNbt = new LinkedHashMap<String, PortableNbt>();
+        requiredNbt.put("CustomName", PortableNbt.string("Required"));
+        TaskDefinition task = new TaskDefinition("retrieve", "bq_standard:retrieval", false,
+            map("progressMode", "item-vector", "target", "1", "item.count", "1",
+                "item.0.registryName", "minecraft:iron_ingot", "item.0.meta", "0", "item.0.amount", "1",
+                "item.0.nbtPortable", PortableNbt.compound(requiredNbt).encode(),
+                "consume", "0", "ignoreNBT", "0", "partialMatch", "1"));
+        GameplayFact matching = fact("galaxy:inventory_observed", map("inventory.count", "1",
+            "inventory.0.registryName", "minecraft:iron_ingot", "inventory.0.meta", "0",
+            "inventory.0.amount", "1", "inventory.0.nbtPortable", PortableNbt.compound(withNbt(
+                "CustomName", "Required", "Lore", "Extra")).encode()));
+        assertTrue(evaluator.evaluate(task, TaskProgress.empty(task), matching).isComplete());
+
+        GameplayFact mismatching = fact("galaxy:inventory_observed", map("inventory.count", "1",
+            "inventory.0.registryName", "minecraft:iron_ingot", "inventory.0.meta", "0",
+            "inventory.0.amount", "1", "inventory.0.nbtPortable", PortableNbt.compound(withNbt(
+                "CustomName", "Wrong")).encode()));
+        assertFalse(evaluator.evaluate(task, TaskProgress.empty(task), mismatching).isComplete());
+
+        TaskDefinition consuming = new TaskDefinition("retrieve", "bq_standard:retrieval", false,
+            map("progressMode", "item-vector", "target", "1", "item.count", "1",
+                "item.0.registryName", "minecraft:iron_ingot", "item.0.meta", "0", "item.0.amount", "1",
+                "consume", "1"));
+        assertEquals(Arrays.asList(0L), evaluator.evaluate(consuming, TaskProgress.empty(consuming), matching).getValues());
+    }
+
+    @Test
+    public void retrievalRequiresEmptyNbtToMatchEmptyObservedTagLikeBq() {
+        InventorySnapshotTaskEvaluator evaluator = new InventorySnapshotTaskEvaluator("bq_standard:retrieval",
+            "galaxy:inventory_observed");
+        TaskDefinition task = new TaskDefinition("retrieve", "bq_standard:retrieval", false,
+            map("progressMode", "item-vector", "item.count", "1", "item.0.registryName", "minecraft:iron_ingot",
+                "item.0.meta", "0", "item.0.amount", "1", "item.0.nbtPortable", PortableNbt.compound(
+                    new LinkedHashMap<String, PortableNbt>()).encode(), "ignoreNBT", "false", "partialMatch", "true"));
+        GameplayFact tagged = fact("galaxy:inventory_observed", map("inventory.count", "1",
+            "inventory.0.registryName", "minecraft:iron_ingot", "inventory.0.meta", "0", "inventory.0.amount", "1",
+            "inventory.0.nbtPortable", PortableNbt.compound(withNbt("display", "Custom")).encode()));
+        GameplayFact untagged = fact("galaxy:inventory_observed", map("inventory.count", "1",
+            "inventory.0.registryName", "minecraft:iron_ingot", "inventory.0.meta", "0", "inventory.0.amount", "1",
+            "inventory.0.nbtPortable", PortableNbt.compound(new LinkedHashMap<String, PortableNbt>()).encode()));
+
+        assertEquals(Arrays.asList(0L), evaluator.evaluate(task, TaskProgress.empty(task), tagged).getValues());
+        assertTrue(evaluator.evaluate(task, TaskProgress.empty(task), untagged).isComplete());
+    }
+
+    @Test
+    public void optionalRetrievalWithPartialMatchDisabledStillAllowsExtraCompoundFieldsLikeBq() {
+        InventorySnapshotTaskEvaluator evaluator = new InventorySnapshotTaskEvaluator(
+            "bq_standard:optional_retrieval", "galaxy:inventory_observed");
+        TaskDefinition task = new TaskDefinition("optional", "bq_standard:optional_retrieval", true,
+            map("progressMode", "item-vector", "item.count", "1", "item.0.registryName", "mod:quest_item",
+                "item.0.meta", "0", "item.0.amount", "1", "item.0.nbtPortable",
+                PortableNbt.compound(withNbt("grade", "2")).encode(), "consume", "false",
+                "ignoreNBT", "false", "partialMatch", "false"));
+        GameplayFact withAdditionalMetadata = fact("galaxy:inventory_observed", map("inventory.count", "1",
+            "inventory.0.registryName", "mod:quest_item", "inventory.0.meta", "0", "inventory.0.amount", "1",
+            "inventory.0.nbtPortable", PortableNbt.compound(withNbt("grade", "2", "owner", "Alex")).encode()));
+        GameplayFact missingRequiredField = fact("galaxy:inventory_observed", map("inventory.count", "1",
+            "inventory.0.registryName", "mod:quest_item", "inventory.0.meta", "0", "inventory.0.amount", "1",
+            "inventory.0.nbtPortable", PortableNbt.compound(withNbt("owner", "Alex")).encode()));
+
+        assertTrue(evaluator.evaluate(task, TaskProgress.empty(task), withAdditionalMetadata).isComplete());
+        assertEquals(Arrays.asList(0L), evaluator.evaluate(task, TaskProgress.empty(task), missingRequiredField)
+            .getValues());
+    }
+
+    @Test
+    public void retrievalOreDictionaryPreservesBqReverseNbtComparisonDirection() {
+        InventorySnapshotTaskEvaluator evaluator = new InventorySnapshotTaskEvaluator("bq_standard:retrieval",
+            "galaxy:inventory_observed");
+        TaskDefinition oreTask = new TaskDefinition("retrieve", "bq_standard:retrieval", false,
+            map("progressMode", "item-vector", "item.count", "1", "item.0.registryName", "mod:required_item",
+                "item.0.meta", "0", "item.0.amount", "1", "item.0.oreDictionary", "ingotExample",
+                "item.0.nbtPortable", PortableNbt.compound(withNbt("grade", "2", "extra", "required")).encode(),
+                "ignoreNBT", "false", "partialMatch", "true"));
+        GameplayFact oreSampleSubset = fact("galaxy:inventory_observed", map("inventory.count", "1",
+            "inventory.0.registryName", "mod:other_ingot", "inventory.0.meta", "0", "inventory.0.amount", "1",
+            "inventory.0.oreDictionary", "ingotExample", "inventory.0.nbtPortable",
+            PortableNbt.compound(withNbt("grade", "2")).encode()));
+        GameplayFact oreSampleSuperset = fact("galaxy:inventory_observed", map("inventory.count", "1",
+            "inventory.0.registryName", "mod:other_ingot", "inventory.0.meta", "0", "inventory.0.amount", "1",
+            "inventory.0.oreDictionary", "ingotExample", "inventory.0.nbtPortable",
+            PortableNbt.compound(withNbt("grade", "2", "extra", "required", "unexpected", "value")).encode()));
+
+        assertTrue(evaluator.evaluate(oreTask, TaskProgress.empty(oreTask), oreSampleSubset).isComplete());
+        assertEquals(Arrays.asList(0L), evaluator.evaluate(oreTask, TaskProgress.empty(oreTask), oreSampleSuperset).getValues());
+
+        ItemVectorTaskEvaluator consuming = new ItemVectorTaskEvaluator("bq_standard:retrieval",
+            "galaxy:item_consumed");
+        TaskDefinition consumeTask = new TaskDefinition("consume", "bq_standard:retrieval", false,
+            map("progressMode", "item-vector", "target", "1", "item.count", "1",
+                "item.0.registryName", "mod:required_item", "item.0.meta", "0", "item.0.amount", "1",
+                "item.0.oreDictionary", "ingotExample",
+                "item.0.nbtPortable", PortableNbt.compound(withNbt("grade", "2", "extra", "required")).encode(),
+                "ignoreNBT", "false", "partialMatch", "true", "consume", "true"));
+        GameplayFact consumed = fact("galaxy:item_consumed", map("registryName", "mod:other_ingot", "meta", "0",
+            "amount", "1", "oreDictionary", "ingotExample", "nbtPortable",
+            PortableNbt.compound(withNbt("grade", "2")).encode()));
+        assertTrue(consuming.evaluate(consumeTask, TaskProgress.empty(consumeTask), consumed).isComplete());
+        GameplayFact consumedSuperset = fact("galaxy:item_consumed", map("registryName", "mod:other_ingot", "meta", "0",
+            "amount", "1", "oreDictionary", "ingotExample", "nbtPortable",
+            PortableNbt.compound(withNbt("grade", "2", "extra", "required", "unexpected", "value")).encode()));
+        assertEquals(Arrays.asList(0L), consuming.evaluate(consumeTask, TaskProgress.empty(consumeTask),
+            consumedSuperset).getValues());
+
+        TaskDefinition directTask = new TaskDefinition("direct", "bq_standard:retrieval", false,
+            map("progressMode", "item-vector", "target", "1", "item.count", "1",
+                "item.0.registryName", "mod:other_ingot", "item.0.meta", "0", "item.0.amount", "1",
+                "item.0.nbtPortable", PortableNbt.compound(withNbt("grade", "2")).encode(),
+                "ignoreNBT", "false", "partialMatch", "true", "consume", "true"));
+        assertTrue(consuming.evaluate(directTask, TaskProgress.empty(directTask), consumedSuperset).isComplete());
+
+        TaskDefinition emptyTagTask = new TaskDefinition("empty-tag", "bq_standard:retrieval", false,
+            map("progressMode", "item-vector", "target", "1", "item.count", "1",
+                "item.0.registryName", "mod:other_ingot", "item.0.meta", "0", "item.0.amount", "1",
+                "item.0.nbtPortable", PortableNbt.compound(new LinkedHashMap<String, PortableNbt>()).encode(),
+                "ignoreNBT", "false", "partialMatch", "true", "consume", "true"));
+        assertEquals(Arrays.asList(0L), consuming.evaluate(emptyTagTask, TaskProgress.empty(emptyTagTask),
+            consumed).getValues());
+    }
+
+    @Test
+    public void craftingOreDictionaryUsesBqReverseNbtComparisonDirection() {
+        ItemVectorTaskEvaluator evaluator = new ItemVectorTaskEvaluator("bq_standard:crafting", "galaxy:item_produced");
+        TaskDefinition task = new TaskDefinition("craft", "bq_standard:crafting", false,
+            map("progressMode", "item-vector", "target", "1", "item.count", "1",
+                "item.0.registryName", "mod:required_item", "item.0.meta", "0", "item.0.amount", "1",
+                "item.0.oreDictionary", "ingotExample",
+                "item.0.nbtPortable", PortableNbt.compound(withNbt("grade", "2", "extra", "required")).encode(),
+                "ignoreNBT", "false", "partialMatch", "true", "allowCraft", "true", "allowSmelt", "false"));
+        GameplayFact subset = fact("galaxy:item_produced", map("registryName", "mod:other_ingot", "meta", "0",
+            "amount", "1", "oreDictionary", "ingotExample", "channel", "craft", "nbtPortable",
+            PortableNbt.compound(withNbt("grade", "2")).encode()));
+        GameplayFact superset = fact("galaxy:item_produced", map("registryName", "mod:other_ingot", "meta", "0",
+            "amount", "1", "oreDictionary", "ingotExample", "channel", "craft", "nbtPortable",
+            PortableNbt.compound(withNbt("grade", "2", "extra", "required", "unexpected", "value")).encode()));
+
+        assertTrue(evaluator.evaluate(task, TaskProgress.empty(task), subset).isComplete());
+        assertEquals(Arrays.asList(0L), evaluator.evaluate(task, TaskProgress.empty(task), superset).getValues());
     }
 
     @Test
@@ -157,6 +427,89 @@ public class BqCompatibleTaskEvaluatorsTest {
             "inventory.0.registryName", "minecraft:iron_ingot", "inventory.0.meta", "0",
             "inventory.0.oreDictionary", "ingotIron", "inventory.0.amount", "5"));
         assertEquals(Arrays.asList(4L, 1L), evaluator.evaluate(task, TaskProgress.empty(task), snapshot).getValues());
+    }
+
+    @Test
+    public void retrievalKeepsSatisfiedComponentAndReallocatesInventoryToLaterRequirements() {
+        InventorySnapshotTaskEvaluator evaluator = new InventorySnapshotTaskEvaluator("bq_standard:retrieval",
+            "galaxy:inventory_observed");
+        Map<String, String> params = map("progressMode", "item-vector", "target", "8", "item.count", "2",
+            "item.0.registryName", "minecraft:iron_ingot", "item.0.meta", "0", "item.0.amount", "4",
+            "item.1.registryName", "minecraft:iron_ingot", "item.1.meta", "0", "item.1.amount", "4",
+            "consume", "false", "groupDetect", "false", "ignoreNBT", "true");
+        TaskDefinition task = new TaskDefinition("retrieve", "bq_standard:retrieval", false, params);
+        TaskProgress previous = new TaskProgress("retrieve", Arrays.asList(4L, 0L), Arrays.asList(4L, 4L), false);
+        GameplayFact smaller = fact("galaxy:inventory_observed", map("inventory.count", "1",
+            "inventory.0.registryName", "minecraft:iron_ingot", "inventory.0.meta", "0",
+            "inventory.0.amount", "2"));
+        assertEquals(Arrays.asList(4L, 2L), evaluator.evaluate(task, previous, smaller).getValues());
+        GameplayFact empty = fact("galaxy:inventory_observed", map("inventory.count", "0"));
+        assertEquals(Arrays.asList(4L, 0L), evaluator.evaluate(task, previous, empty).getValues());
+    }
+
+    @Test
+    public void retrievalMatchesAnyDamageValueForDamageableItemsLikeBq() {
+        InventorySnapshotTaskEvaluator evaluator = new InventorySnapshotTaskEvaluator("bq_standard:retrieval",
+            "galaxy:inventory_observed");
+        TaskDefinition task = new TaskDefinition("retrieve", "bq_standard:retrieval", false,
+            map("progressMode", "item-vector", "target", "2", "item.count", "1",
+                "item.0.registryName", "gtnh:durable_tool", "item.0.meta", "0", "item.0.amount", "2",
+                "ignoreNBT", "true", "consume", "false"));
+        TaskProgress start = TaskProgress.empty(task);
+        GameplayFact damaged = fact("galaxy:inventory_observed", map("inventory.count", "1",
+            "inventory.0.registryName", "gtnh:durable_tool", "inventory.0.meta", "31",
+            "inventory.0.damageable", "true", "inventory.0.amount", "2"));
+        assertEquals(Arrays.asList(2L), evaluator.evaluate(task, start, damaged).getValues());
+
+        GameplayFact nonDamageableVariant = fact("galaxy:inventory_observed", map("inventory.count", "1",
+            "inventory.0.registryName", "gtnh:durable_tool", "inventory.0.meta", "31",
+            "inventory.0.damageable", "false", "inventory.0.amount", "2"));
+        assertEquals(Arrays.asList(0L), evaluator.evaluate(task, start, nonDamageableVariant).getValues());
+    }
+
+    @Test
+    public void retrievalMatchesRepeatedCompoundNbtListEntriesLikeBq() {
+        InventorySnapshotTaskEvaluator evaluator = new InventorySnapshotTaskEvaluator("bq_standard:retrieval",
+            "galaxy:inventory_observed");
+        Map<String, PortableNbt> matchingFields = new LinkedHashMap<String, PortableNbt>();
+        matchingFields.put("id", PortableNbt.number("7"));
+        PortableNbt matchingEntry = PortableNbt.compound(matchingFields);
+        Map<String, PortableNbt> nonMatchingFields = new LinkedHashMap<String, PortableNbt>();
+        nonMatchingFields.put("id", PortableNbt.number("8"));
+        PortableNbt nonMatchingEntry = PortableNbt.compound(nonMatchingFields);
+
+        Map<String, PortableNbt> requiredTagFields = new LinkedHashMap<String, PortableNbt>();
+        requiredTagFields.put("ench", PortableNbt.list(Arrays.asList(matchingEntry, matchingEntry)));
+        String requiredTag = PortableNbt.compound(requiredTagFields).encode();
+        Map<String, PortableNbt> actualTagFields = new LinkedHashMap<String, PortableNbt>();
+        actualTagFields.put("ench", PortableNbt.list(Arrays.asList(matchingEntry, nonMatchingEntry)));
+        String actualTag = PortableNbt.compound(actualTagFields).encode();
+
+        TaskDefinition task = new TaskDefinition("retrieve", "bq_standard:retrieval", false,
+            map("progressMode", "item-vector", "item.count", "1", "item.0.registryName", "gtnh:quest_item",
+                "item.0.meta", "0", "item.0.amount", "1", "item.0.nbtPortable", requiredTag,
+                "ignoreNBT", "false", "partialMatch", "true", "consume", "false"));
+        GameplayFact inventory = fact("galaxy:inventory_observed", map("inventory.count", "1",
+            "inventory.0.registryName", "gtnh:quest_item", "inventory.0.meta", "0", "inventory.0.amount", "1",
+            "inventory.0.nbtPortable", actualTag));
+
+        assertEquals(Arrays.asList(1L), evaluator.evaluate(task, TaskProgress.empty(task), inventory).getValues());
+    }
+
+    @Test
+    public void groupDetectRecalculatesIncompleteComponentsFromFreshAggregateSnapshot() {
+        InventorySnapshotTaskEvaluator evaluator = new InventorySnapshotTaskEvaluator("bq_standard:retrieval",
+            "galaxy:inventory_observed");
+        TaskDefinition task = new TaskDefinition("retrieve", "bq_standard:retrieval", false,
+            map("progressMode", "item-vector", "target", "8", "item.count", "2",
+                "item.0.registryName", "minecraft:iron_ingot", "item.0.meta", "0", "item.0.amount", "4",
+                "item.1.registryName", "minecraft:gold_ingot", "item.1.meta", "0", "item.1.amount", "4",
+                "groupDetect", "true", "consume", "false"));
+        TaskProgress previous = new TaskProgress("retrieve", Arrays.asList(3L, 0L), Arrays.asList(4L, 4L), false);
+        GameplayFact aggregate = fact("galaxy:inventory_observed", map("inventory.count", "1",
+            "inventory.0.registryName", "minecraft:iron_ingot", "inventory.0.meta", "0",
+            "inventory.0.amount", "2"));
+        assertEquals(Arrays.asList(2L, 0L), evaluator.evaluate(task, previous, aggregate).getValues());
     }
 
     @Test
@@ -176,6 +529,29 @@ public class BqCompatibleTaskEvaluatorsTest {
         TaskDefinition consuming = new TaskDefinition("fluid", "bq_standard:fluid", false, params);
         assertEquals(Arrays.asList(0L, 0L),
             evaluator.evaluate(consuming, TaskProgress.empty(consuming), snapshot).getValues());
+    }
+
+    @Test
+    public void fluidSnapshotUsesExactBqTagPresenceWhenNbtMatchingIsEnabled() {
+        FluidSnapshotTaskEvaluator evaluator = new FluidSnapshotTaskEvaluator("bq_standard:fluid",
+            "galaxy:fluid_inventory_observed");
+        Map<String, String> params = map("progressMode", "fluid-vector", "target", "1000", "fluid.count", "1",
+            "fluid.0.name", "water", "fluid.0.amount", "1000", "fluid.0.nbt", "{}",
+            "fluid.0.nbtPortable", "", "fluid.0.nbtPresent", "false", "consume", "false", "ignoreNBT", "false");
+        TaskDefinition noTag = new TaskDefinition("fluid-no-tag", "bq_standard:fluid", false, params);
+        GameplayFact untagged = fact("galaxy:fluid_inventory_observed", map("fluidInventory.count", "1",
+            "fluidInventory.0.name", "water", "fluidInventory.0.amount", "1000",
+            "fluidInventory.0.nbtPresent", "false"));
+        GameplayFact explicitlyEmpty = fact("galaxy:fluid_inventory_observed", map("fluidInventory.count", "1",
+            "fluidInventory.0.name", "water", "fluidInventory.0.amount", "1000",
+            "fluidInventory.0.nbtPresent", "true"));
+        assertTrue(evaluator.evaluate(noTag, TaskProgress.empty(noTag), untagged).isComplete());
+        assertFalse(evaluator.evaluate(noTag, TaskProgress.empty(noTag), explicitlyEmpty).isComplete());
+
+        params.put("fluid.0.nbtPresent", "true");
+        TaskDefinition emptyTag = new TaskDefinition("fluid-empty-tag", "bq_standard:fluid", false, params);
+        assertTrue(evaluator.evaluate(emptyTag, TaskProgress.empty(emptyTag), explicitlyEmpty).isComplete());
+        assertFalse(evaluator.evaluate(emptyTag, TaskProgress.empty(emptyTag), untagged).isComplete());
     }
 
     @Test
@@ -200,8 +576,38 @@ public class BqCompatibleTaskEvaluatorsTest {
 
         params.put("structure", "Village");
         TaskDefinition special = new TaskDefinition("visit", "bq_standard:location", false, params);
-        assertFalse(evaluator.evaluate(special, TaskProgress.empty(special), fact("galaxy:location_observed",
+        assertTrue(evaluator.evaluate(special, TaskProgress.empty(special), fact("galaxy:location_observed",
             map("dimension", "0", "x", "0", "y", "64", "z", "0", "biome", "1"))).isComplete());
+        assertFalse(evaluator.evaluate(special, TaskProgress.empty(special), fact("galaxy:location_observed",
+            map("dimension", "7", "x", "10", "y", "64", "z", "10", "biome", "3"))).isComplete());
+        assertTrue(evaluator.evaluate(special, TaskProgress.empty(special), fact("galaxy:location_observed",
+            map("dimension", "7", "x", "10", "y", "64", "z", "10", "biome", "3",
+                LocationTaskEvaluator.structureEvidenceKey("Village"), "false"))).isComplete());
+    }
+
+    @Test
+    public void locationVisibilityMatchesBqShortCircuitAndInfiniteRangeRules() {
+        LocationTaskEvaluator evaluator = new LocationTaskEvaluator("bq_standard:location", "galaxy:location_observed");
+        Map<String, String> params = map("target", "1", "dimension", "7", "posX", "10", "posY", "64",
+            "posZ", "10", "range", "-1", "biome", "3", "structure", "Village", "visible", "true",
+            "invert", "false", "taxiCabDist", "false");
+        TaskDefinition task = new TaskDefinition("visit", "bq_standard:location", false, params);
+        GameplayFact noLineOfSightData = fact("galaxy:location_observed", map("dimension", "7", "x", "10",
+            "y", "64", "z", "10", "biome", "3", LocationTaskEvaluator.structureEvidenceKey("Village"),
+            "true"));
+
+        // BQ only performs its visibility raycast for positive, finite ranges.
+        assertTrue(evaluator.evaluate(task, TaskProgress.empty(task), noLineOfSightData).isComplete());
+
+        params.put("range", "5");
+        TaskDefinition finite = new TaskDefinition("visit", "bq_standard:location", false, params);
+        assertFalse(evaluator.evaluate(finite, TaskProgress.empty(finite), noLineOfSightData).isComplete());
+        GameplayFact blocked = fact("galaxy:location_observed", map("dimension", "7", "x", "10", "y", "64",
+            "z", "10", "biome", "3", LocationTaskEvaluator.structureEvidenceKey("Village"), "true",
+            LocationTaskEvaluator.visibilityEvidenceKey(params), "false"));
+        params.put("invert", "true");
+        TaskDefinition inverted = new TaskDefinition("visit", "bq_standard:location", false, params);
+        assertTrue(evaluator.evaluate(inverted, TaskProgress.empty(inverted), blocked).isComplete());
     }
 
     @Test
@@ -333,6 +739,12 @@ public class BqCompatibleTaskEvaluatorsTest {
 
     private static GameplayFact fact(String type, Map<String, String> attributes) {
         return new GameplayFact("s2", UUID.randomUUID().toString(), UUID.randomUUID(), type, 1L, attributes);
+    }
+
+    private static Map<String, PortableNbt> withNbt(String... values) {
+        Map<String, PortableNbt> result = new LinkedHashMap<String, PortableNbt>();
+        for (int i = 0; i < values.length; i += 2) result.put(values[i], PortableNbt.string(values[i + 1]));
+        return result;
     }
 
     private static Map<String, String> map(String... values) {

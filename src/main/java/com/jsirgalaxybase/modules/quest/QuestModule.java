@@ -22,6 +22,10 @@ import com.jsirgalaxybase.quest.core.QuestCenterQuery;
 import com.jsirgalaxybase.quest.core.AuthenticatedQuestClaimService;
 import com.jsirgalaxybase.quest.core.AuthenticatedRewardChoiceService;
 import com.jsirgalaxybase.quest.core.AuthenticatedQuestTrackingService;
+import com.jsirgalaxybase.quest.core.AuthenticatedQuestConsumptionService;
+import com.jsirgalaxybase.quest.core.AuthenticatedCraftingStatisticsDetectionService;
+import com.jsirgalaxybase.quest.core.ConsumptionRequestAuthorizer;
+import com.jsirgalaxybase.quest.core.ConsumptionSubmissionService;
 import com.jsirgalaxybase.quest.core.AuthenticatedQuestDefinitionManagementQuery;
 import com.jsirgalaxybase.quest.core.AuthenticatedQuestChapterManagementQuery;
 import com.jsirgalaxybase.quest.core.AuthenticatedQuestChapterDependencyQuery;
@@ -36,6 +40,7 @@ import com.jsirgalaxybase.quest.core.StandardQuestEditorTypeRegistry;
 import com.jsirgalaxybase.quest.core.QuestRuntimeService;
 import com.jsirgalaxybase.quest.core.QuestFactProjector;
 import com.jsirgalaxybase.quest.core.QuestEngine;
+import com.jsirgalaxybase.quest.core.RewardSuppressionPolicy;
 import com.jsirgalaxybase.quest.core.QuestEvaluationPlanner;
 import com.jsirgalaxybase.quest.core.QuestClock;
 import com.jsirgalaxybase.quest.core.BqCompatibleTaskEvaluatorRegistry;
@@ -44,17 +49,20 @@ import com.jsirgalaxybase.quest.core.QuestObservationPlan;
 import com.jsirgalaxybase.quest.core.QuestObservationPlanProvider;
 import com.jsirgalaxybase.quest.core.QuestRuntimeTypeExtension;
 import com.jsirgalaxybase.quest.core.QuestRuntimeTypeRegistry;
+import com.jsirgalaxybase.quest.core.BqHuntPartyAssignmentPolicy;
 import com.jsirgalaxybase.quest.postgres.JdbcQuestCenterQuery;
 import com.jsirgalaxybase.quest.postgres.JdbcQuestConnectionManager;
 import com.jsirgalaxybase.quest.postgres.JdbcQuestDefinitionRepository;
 import com.jsirgalaxybase.quest.postgres.JdbcQuestChapterRepository;
 import com.jsirgalaxybase.quest.postgres.JdbcQuestRuntimeRepository;
 import com.jsirgalaxybase.quest.postgres.JdbcParticipantMembershipResolver;
+import com.jsirgalaxybase.quest.postgres.JdbcBqPartyInventorySnapshotRepository;
 import com.jsirgalaxybase.quest.postgres.JdbcQuestTransaction;
 import com.jsirgalaxybase.quest.postgres.JdbcRewardClaimRepository;
 import com.jsirgalaxybase.quest.postgres.JdbcRewardChoiceSelectionRepository;
 import com.jsirgalaxybase.quest.postgres.JdbcQuestTrackingRepository;
 import com.jsirgalaxybase.quest.postgres.JdbcQuestCompletionQuery;
+import com.jsirgalaxybase.quest.postgres.JdbcConsumptionSubmissionRepository;
 import com.jsirgalaxybase.quest.postgres.JdbcRewardDeliveryRepository;
 import com.jsirgalaxybase.quest.postgres.JdbcQuestCompletionRewardPort;
 import com.jsirgalaxybase.terminal.TerminalService;
@@ -62,12 +70,15 @@ import com.jsirgalaxybase.modules.quest.application.TrackedQuestSnapshotFactory;
 import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.TrackedQuestSyncController;
 import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.MinecraftQuestEditorAuthorization;
 import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.QuestGameplayEventHandler;
+import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.QuestConsumptionRecoveryHandler;
 import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.RuntimeQuestFactSink;
+import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.BqPartyInventorySnapshotFactSink;
 import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.MinecraftQuestFactFactory;
 import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.MinecraftItemRewardDeliveryHandler;
 import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.MinecraftXpRewardDeliveryHandler;
 import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.MinecraftScoreboardRewardDeliveryHandler;
 import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.MinecraftCommandRewardExecutor;
+import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.MinecraftQuestOnlinePlayerDirectory;
 import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.OnlineServerQuestPlayerResolver;
 import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.QuestPlayerResolver;
 import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.QuestRewardDeliveryController;
@@ -86,6 +97,9 @@ public class QuestModule extends ModModule {
     private com.jsirgalaxybase.quest.core.AuthenticatedParticipantAdministrationService participantAdministrationService;
     private AuthenticatedQuestClaimService questClaimService;
     private AuthenticatedRewardChoiceService rewardChoiceService;
+    private com.jsirgalaxybase.quest.core.AuthenticatedCheckboxConfirmationService checkboxConfirmationService;
+    private AuthenticatedCraftingStatisticsDetectionService craftingStatisticsDetectionService;
+    private AuthenticatedQuestConsumptionService questConsumptionService;
     private AuthenticatedQuestTrackingService questTrackingService;
     private QuestDraftManagementService draftManagementService;
     private com.jsirgalaxybase.quest.core.QuestDefinitionBatchRetirementService batchRetirementService;
@@ -101,7 +115,9 @@ public class QuestModule extends ModModule {
     private QuestRuntimeService questRuntimeService;
     private QuestRuntimeTypeRegistry questTypeRegistry;
     private QuestGameplayEventHandler gameplayEventHandler;
+    private QuestConsumptionRecoveryHandler consumptionRecoveryHandler;
     private boolean gameplayEventsRegistered;
+    private boolean consumptionRecoveryRegistered;
     private boolean trackingSyncRegistered;
     private QuestRewardDeliveryController rewardDeliveryController;
     private boolean rewardDeliveryRegistered;
@@ -117,6 +133,10 @@ public class QuestModule extends ModModule {
 
     @Override
     public void serverStarting(ModuleContext context,FMLServerStartingEvent event) {
+        if (consumptionRecoveryRegistered && consumptionRecoveryHandler != null) {
+            unregisterConsumptionRecovery(consumptionRecoveryHandler);
+            consumptionRecoveryRegistered = false;
+        }
         if (rewardDeliveryRegistered && rewardDeliveryController != null) {
             unregisterRewardDelivery(rewardDeliveryController);
             rewardDeliveryRegistered = false;
@@ -130,6 +150,9 @@ public class QuestModule extends ModModule {
         TerminalService.installQuestParticipantAdministrationService(null);
         TerminalService.installQuestClaimService(null);
         TerminalService.installRewardChoiceService(null);
+        TerminalService.installCheckboxConfirmationService(null);
+        TerminalService.installCraftingStatisticsDetectionService(null);
+        TerminalService.installQuestConsumptionService(null);
         TerminalService.installQuestTrackingService(null);
         TerminalService.installQuestDefinitionManagementQuery(null);
         TerminalService.installQuestDraftManagementService(null);
@@ -143,9 +166,10 @@ public class QuestModule extends ModModule {
         TerminalService.installQuestChapterOrderingService(null);
         TerminalService.installQuestChapterAlignmentService(null);
         questCenterQuery=null;participantDirectoryQuery=null;participantAdministrationService=null; batchRetirementService=null;
-        questClaimService=null;rewardChoiceService=null;questTrackingService=null;draftManagementService=null;definitionManagementQuery=null;
+        questClaimService=null;rewardChoiceService=null;checkboxConfirmationService=null;craftingStatisticsDetectionService=null;questTrackingService=null;draftManagementService=null;definitionManagementQuery=null;
+        questConsumptionService=null;
         chapterManagementQuery=null;chapterDependencyQuery=null;definitionImpactQuery=null;contentMigrationQuery=null;chapterManagementService=null;chapterCloneService=null;chapterOrderingService=null;chapterAlignmentService=null;
-        questRuntimeService=null;questTypeRegistry=null;gameplayEventHandler=null;rewardDeliveryController=null;
+        questRuntimeService=null;questTypeRegistry=null;gameplayEventHandler=null;consumptionRecoveryHandler=null;rewardDeliveryController=null;
         if(!requested)return;
         if(!isDedicatedServer()){
             unavailableReason="quest PostgreSQL read runtime requires a dedicated server";
@@ -158,12 +182,14 @@ public class QuestModule extends ModModule {
             unavailableReason="quest PostgreSQL read runtime requires the shared banking JDBC connection";
             GalaxyBase.LOG.warn(unavailableReason);return;
         }
+        boolean noRewards=context.getConfiguration().isQuestNoRewardsEnabled();
         try{
             questTypeRegistry=createQuestRuntimeTypeRegistry();
             questCenterQuery=createAndValidateQuery(shared);
+            if(noRewards)validateRewardSuppressionSchema(shared);
             participantDirectoryQuery=createParticipantDirectoryQuery(shared);
             participantAdministrationService=createParticipantAdministrationService(shared);
-            questClaimService=createClaimService(shared);
+            questClaimService=createClaimService(shared,noRewards);
             rewardChoiceService=createChoiceService(shared);
             questTrackingService=createTrackingService(shared);
             QuestEditorAuthorization editorAuthorization=createEditorAuthorization();
@@ -179,7 +205,14 @@ public class QuestModule extends ModModule {
             chapterOrderingService=createChapterOrderingService(shared,editorAuthorization);
             chapterAlignmentService=createChapterAlignmentService(shared,editorAuthorization);
             JdbcQuestConnectionManager runtimeManager=new JdbcQuestConnectionManager(new SharedDataSource(shared));
-            questRuntimeService=createQuestRuntimeService(runtimeManager);
+            questRuntimeService=createQuestRuntimeService(runtimeManager,noRewards);
+            checkboxConfirmationService=createCheckboxConfirmationService(runtimeManager,questRuntimeService,
+                context.getConfiguration().getBankingSourceServerId());
+            craftingStatisticsDetectionService=createCraftingStatisticsDetectionService(runtimeManager,questRuntimeService,
+                context.getConfiguration().getBankingSourceServerId());
+            questConsumptionService=createQuestConsumptionService(runtimeManager,questRuntimeService,
+                context.getConfiguration().getBankingSourceServerId());
+            consumptionRecoveryHandler=new QuestConsumptionRecoveryHandler(questConsumptionService);
             gameplayEventHandler=createGameplayEventHandler(runtimeManager, questRuntimeService,
                 context.getConfiguration().getBankingSourceServerId());
             rewardDeliveryController=createRewardDeliveryController(runtimeManager,
@@ -190,6 +223,9 @@ public class QuestModule extends ModModule {
             TerminalService.installQuestParticipantAdministrationService(participantAdministrationService);
             TerminalService.installQuestClaimService(questClaimService);
             TerminalService.installRewardChoiceService(rewardChoiceService);
+            TerminalService.installCheckboxConfirmationService(checkboxConfirmationService);
+            TerminalService.installCraftingStatisticsDetectionService(craftingStatisticsDetectionService);
+            TerminalService.installQuestConsumptionService(questConsumptionService);
             TerminalService.installQuestTrackingService(questTrackingService);
             TerminalService.installQuestDefinitionManagementQuery(definitionManagementQuery);
             TerminalService.installQuestDraftManagementService(draftManagementService);
@@ -204,10 +240,19 @@ public class QuestModule extends ModModule {
             TerminalService.installQuestChapterAlignmentService(chapterAlignmentService);
             if(!trackingSyncRegistered){registerTrackingSync(questCenterQuery);trackingSyncRegistered=true;}
             if(!gameplayEventsRegistered){registerGameplayEvents(gameplayEventHandler);gameplayEventsRegistered=true;}
+            if(!consumptionRecoveryRegistered){registerConsumptionRecovery(consumptionRecoveryHandler);consumptionRecoveryRegistered=true;}
             if(!rewardDeliveryRegistered){registerRewardDelivery(rewardDeliveryController);rewardDeliveryRegistered=true;}
             unavailableReason="";
             GalaxyBase.LOG.info("Quest PostgreSQL read runtime enabled after read-only schema validation");
         }catch(RuntimeException failure){
+            checkboxConfirmationService=null;
+            TerminalService.installCheckboxConfirmationService(null);
+            craftingStatisticsDetectionService=null;
+            TerminalService.installCraftingStatisticsDetectionService(null);
+            questConsumptionService=null;
+            if(consumptionRecoveryRegistered&&consumptionRecoveryHandler!=null){unregisterConsumptionRecovery(consumptionRecoveryHandler);consumptionRecoveryRegistered=false;}
+            consumptionRecoveryHandler=null;
+            TerminalService.installQuestConsumptionService(null);
             questCenterQuery=null;participantDirectoryQuery=null;participantAdministrationService=null;batchRetirementService=null;questClaimService=null;rewardChoiceService=null;questTrackingService=null;draftManagementService=null;definitionManagementQuery=null;chapterManagementQuery=null;chapterDependencyQuery=null;definitionImpactQuery=null;contentMigrationQuery=null;chapterManagementService=null;chapterCloneService=null;chapterOrderingService=null;chapterAlignmentService=null;TerminalService.installQuestCenterQuery(null);TerminalService.installQuestParticipantDirectoryQuery(null);TerminalService.installQuestParticipantAdministrationService(null);TerminalService.installQuestClaimService(null);TerminalService.installRewardChoiceService(null);TerminalService.installQuestTrackingService(null);TerminalService.installQuestDefinitionManagementQuery(null);TerminalService.installQuestDraftManagementService(null);TerminalService.installQuestBatchRetirementService(null);TerminalService.installQuestChapterManagementQuery(null);TerminalService.installQuestChapterDependencyQuery(null);TerminalService.installQuestDefinitionImpactQuery(null);TerminalService.installQuestContentMigrationQuery(null);TerminalService.installQuestChapterManagementService(null);TerminalService.installQuestChapterCloneService(null);TerminalService.installQuestChapterOrderingService(null);TerminalService.installQuestChapterAlignmentService(null);
             questRuntimeService=null;questTypeRegistry=null;gameplayEventHandler=null;rewardDeliveryController=null;
             unavailableReason="quest PostgreSQL read runtime failed schema validation: "+safe(failure.getMessage());
@@ -225,6 +270,12 @@ public class QuestModule extends ModModule {
         FMLCommonHandler.instance().bus().unregister(handler);
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.unregister(handler);
     }
+    protected void registerConsumptionRecovery(QuestConsumptionRecoveryHandler handler){
+        FMLCommonHandler.instance().bus().register(handler);
+    }
+    protected void unregisterConsumptionRecovery(QuestConsumptionRecoveryHandler handler){
+        FMLCommonHandler.instance().bus().unregister(handler);
+    }
     protected void registerRewardDelivery(QuestRewardDeliveryController controller){
         FMLCommonHandler.instance().bus().register(controller);
     }
@@ -235,10 +286,18 @@ public class QuestModule extends ModModule {
         JdbcQuestCenterQuery query=new JdbcQuestCenterQuery(new JdbcQuestConnectionManager(new SharedDataSource(shared)));
         query.validateSchema();return query;
     }
+    protected void validateRewardSuppressionSchema(JdbcConnectionManager shared){
+        new JdbcQuestCenterQuery(new JdbcQuestConnectionManager(new SharedDataSource(shared)))
+            .validateSuppressedRewardStatus();
+    }
     protected AuthenticatedQuestClaimService createClaimService(JdbcConnectionManager shared){
+        return createClaimService(shared,false);
+    }
+    protected AuthenticatedQuestClaimService createClaimService(JdbcConnectionManager shared,boolean noRewards){
         JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(new SharedDataSource(shared));
         return new AuthenticatedQuestClaimService(new JdbcQuestDefinitionRepository(manager),
-            new JdbcQuestRuntimeRepository(manager),new JdbcRewardClaimRepository(manager),new JdbcQuestTransaction(manager));
+            new JdbcQuestRuntimeRepository(manager),new JdbcRewardClaimRepository(manager),new JdbcQuestTransaction(manager),
+            new RewardSuppressionPolicy(noRewards),new JdbcRewardChoiceSelectionRepository(manager));
     }
     protected com.jsirgalaxybase.quest.core.ParticipantDirectoryQuery createParticipantDirectoryQuery(JdbcConnectionManager shared){JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(new SharedDataSource(shared));return new com.jsirgalaxybase.quest.postgres.JdbcParticipantDirectoryQuery(manager);}
     protected com.jsirgalaxybase.quest.core.AuthenticatedParticipantAdministrationService createParticipantAdministrationService(JdbcConnectionManager shared){JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(new SharedDataSource(shared));return new com.jsirgalaxybase.quest.core.AuthenticatedParticipantAdministrationService(new com.jsirgalaxybase.quest.postgres.JdbcParticipantAdministrationRepository(manager),new JdbcQuestTransaction(manager));}
@@ -246,6 +305,44 @@ public class QuestModule extends ModModule {
         JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(new SharedDataSource(shared));
         return new AuthenticatedRewardChoiceService(new JdbcQuestDefinitionRepository(manager),
             new JdbcQuestRuntimeRepository(manager),new JdbcRewardChoiceSelectionRepository(manager),new JdbcQuestTransaction(manager));
+    }
+    protected com.jsirgalaxybase.quest.core.AuthenticatedCheckboxConfirmationService createCheckboxConfirmationService(
+        JdbcQuestConnectionManager manager,QuestRuntimeService runtime,String sourceServer){
+        JdbcQuestDefinitionRepository definitions=new JdbcQuestDefinitionRepository(manager);
+        QuestEvaluationPlanner planner=new QuestEvaluationPlanner(definitions,new JdbcQuestCompletionQuery(manager),
+            new JdbcParticipantMembershipResolver(manager),new ScopedQuestAssignmentPolicy(),
+            createPartyActivityQuery(manager,sourceServer));
+        return new com.jsirgalaxybase.quest.core.AuthenticatedCheckboxConfirmationService(definitions,
+            new JdbcQuestRuntimeRepository(manager),runtime,planner,sourceServer);
+    }
+    protected AuthenticatedCraftingStatisticsDetectionService createCraftingStatisticsDetectionService(
+        JdbcQuestConnectionManager manager, QuestRuntimeService runtime, String sourceServer) {
+        JdbcQuestDefinitionRepository definitions = new JdbcQuestDefinitionRepository(manager);
+        JdbcQuestRuntimeRepository progress = new JdbcQuestRuntimeRepository(manager);
+        QuestEvaluationPlanner planner = new QuestEvaluationPlanner(definitions, new JdbcQuestCompletionQuery(manager),
+            new JdbcParticipantMembershipResolver(manager), new ScopedQuestAssignmentPolicy(),
+            createPartyActivityQuery(manager,sourceServer));
+        return new AuthenticatedCraftingStatisticsDetectionService(definitions, progress, runtime, planner,
+            new com.jsirgalaxybase.modules.quest.infrastructure.minecraft.MinecraftCraftingStatisticReader(
+                new OnlineServerQuestPlayerResolver()), sourceServer);
+    }
+    protected AuthenticatedQuestConsumptionService createQuestConsumptionService(JdbcQuestConnectionManager manager,
+        QuestRuntimeService runtime,String sourceServer){
+        JdbcQuestDefinitionRepository definitions=new JdbcQuestDefinitionRepository(manager);
+        JdbcQuestRuntimeRepository progress=new JdbcQuestRuntimeRepository(manager);
+        JdbcQuestCompletionQuery completions=new JdbcQuestCompletionQuery(manager);
+        JdbcParticipantMembershipResolver memberships=new JdbcParticipantMembershipResolver(manager);
+        ScopedQuestAssignmentPolicy assignments=new ScopedQuestAssignmentPolicy();
+        QuestEvaluationPlanner planner=new QuestEvaluationPlanner(definitions,completions,memberships,assignments,
+            createPartyActivityQuery(manager,sourceServer));
+        ConsumptionRequestAuthorizer authorizer=new ConsumptionRequestAuthorizer(definitions,progress,completions,
+            new QuestEngine(),memberships,assignments);
+        ConsumptionSubmissionService submissions=new ConsumptionSubmissionService(
+            new JdbcConsumptionSubmissionRepository(manager),
+            new com.jsirgalaxybase.modules.quest.infrastructure.minecraft.MinecraftPlayerConsumptionPort(
+                new OnlineServerQuestPlayerResolver(),new WorldSaveQuestPlayerDataFlusher()),runtime,planner,
+            new JdbcQuestTransaction(manager));
+        return new AuthenticatedQuestConsumptionService(submissions,authorizer,sourceServer);
     }
     protected AuthenticatedQuestTrackingService createTrackingService(JdbcConnectionManager shared){
         JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(new SharedDataSource(shared));
@@ -317,15 +414,19 @@ public class QuestModule extends ModModule {
     protected QuestChapterAlignmentService createChapterAlignmentService(JdbcConnectionManager shared,
         QuestEditorAuthorization authorization){JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(new SharedDataSource(shared));return new QuestChapterAlignmentService(new JdbcQuestChapterRepository(manager),new JdbcQuestTransaction(manager),authorization);}
     protected QuestRuntimeService createQuestRuntimeService(JdbcQuestConnectionManager manager){
+        return createQuestRuntimeService(manager,false);
+    }
+    protected QuestRuntimeService createQuestRuntimeService(JdbcQuestConnectionManager manager,boolean noRewards){
         return new QuestRuntimeService(new JdbcQuestRuntimeRepository(manager),new JdbcQuestTransaction(manager),
             new QuestFactProjector(questTypeRegistry==null?BqCompatibleTaskEvaluatorRegistry.firstEventDrivenBatch():
-                questTypeRegistry.getEvaluators()),new QuestEngine());
+                questTypeRegistry.getEvaluators()),new QuestEngine(),new RewardSuppressionPolicy(noRewards));
     }
     protected QuestGameplayEventHandler createGameplayEventHandler(JdbcQuestConnectionManager manager, QuestRuntimeService runtime,
         String sourceServer){
+        JdbcParticipantMembershipResolver memberships=new JdbcParticipantMembershipResolver(manager);
         QuestEvaluationPlanner planner=new QuestEvaluationPlanner(new JdbcQuestDefinitionRepository(manager),
-            new JdbcQuestCompletionQuery(manager),new JdbcParticipantMembershipResolver(manager),
-            new ScopedQuestAssignmentPolicy());
+            new JdbcQuestCompletionQuery(manager),memberships,
+            new BqHuntPartyAssignmentPolicy(),createPartyActivityQuery(manager,sourceServer));
         QuestObservationPlanProvider observations=new QuestObservationPlanProvider(){
             private volatile QuestObservationPlan cached=QuestObservationPlan.empty();
             private volatile long nextRefresh;
@@ -344,8 +445,19 @@ public class QuestModule extends ModModule {
             }
         };
         QuestClock clock=new QuestClock(){@Override public long currentTimeMillis(){return System.currentTimeMillis();}};
-        return new QuestGameplayEventHandler(new RuntimeQuestFactSink(runtime,planner,clock),
-            new MinecraftQuestFactFactory(sourceServer),observations);
+        MinecraftQuestFactFactory facts=new MinecraftQuestFactFactory(sourceServer);
+        RuntimeQuestFactSink runtimeSink=new RuntimeQuestFactSink(runtime,planner,clock);
+        BqPartyInventorySnapshotFactSink inventorySink=new BqPartyInventorySnapshotFactSink(runtimeSink,
+            new JdbcQuestTransaction(manager),new JdbcBqPartyInventorySnapshotRepository(manager),memberships,
+            facts,observations,clock);
+        return new QuestGameplayEventHandler(inventorySink,facts,observations,clock);
+    }
+
+    protected com.jsirgalaxybase.quest.core.QuestPartyActivityQuery createPartyActivityQuery(
+        JdbcQuestConnectionManager manager, String sourceServer) {
+        JdbcQuestCompletionQuery completions = new JdbcQuestCompletionQuery(manager);
+        return new com.jsirgalaxybase.quest.core.BqPartyActiveQuestQuery(sourceServer, completions,
+            new JdbcQuestRuntimeRepository(manager), new MinecraftQuestOnlinePlayerDirectory());
     }
     protected QuestRewardDeliveryController createRewardDeliveryController(JdbcQuestConnectionManager manager,
         String sourceServer, String[] commandAllowlist) {
@@ -388,6 +500,7 @@ public class QuestModule extends ModModule {
     public com.jsirgalaxybase.quest.core.AuthenticatedParticipantAdministrationService getParticipantAdministrationService(){return participantAdministrationService;}
     public AuthenticatedQuestClaimService getQuestClaimService(){return questClaimService;}
     public AuthenticatedRewardChoiceService getRewardChoiceService(){return rewardChoiceService;}
+    public AuthenticatedQuestConsumptionService getQuestConsumptionService(){return questConsumptionService;}
     public AuthenticatedQuestTrackingService getQuestTrackingService(){return questTrackingService;}
     public QuestDraftManagementService getDraftManagementService(){return draftManagementService;}
     public AuthenticatedQuestDefinitionManagementQuery getDefinitionManagementQuery(){return definitionManagementQuery;}

@@ -31,6 +31,19 @@ public class InventoryObservationCanonicalizerTest {
         assertEquals(Long.MAX_VALUE, result.get(0).getAmount());
     }
 
+    @Test
+    public void preservesDamageableIdentityWhenCanonicalizing() {
+        List<InventoryObservationEntry> result = new InventoryObservationCanonicalizer().canonicalize(Arrays.asList(
+            new InventoryObservationEntry("gtnh:tool", 12, 1L, "", "", "", true),
+            new InventoryObservationEntry("gtnh:tool", 12, 2L, "", "", "", true),
+            new InventoryObservationEntry("gtnh:tool", 12, 4L, "", "", "", false)));
+        assertEquals(2, result.size());
+        assertEquals(3L, result.get(0).getAmount());
+        org.junit.Assert.assertTrue(result.get(0).isDamageable());
+        org.junit.Assert.assertEquals(4L, result.get(1).getAmount());
+        org.junit.Assert.assertFalse(result.get(1).isDamageable());
+    }
+
     private static InventoryObservationEntry entry(String name, int meta, long amount, String ore, String nbt) {
         return new InventoryObservationEntry(name, meta, amount, ore, nbt, nbt);
     }

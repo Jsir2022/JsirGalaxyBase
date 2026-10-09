@@ -21,7 +21,10 @@ public class BqQuestDefinitionImporterTest {
             + "\"preRequisites:9\":{},\"tasks:9\":{\"0:10\":{\"index:3\":0,"
             + "\"taskID:8\":\"bq_standard:retrieval\",\"consume:1\":1,\"requiredItems:9\":{\"0:10\":{"
             + "\"id:8\":\"minecraft:iron_ingot\",\"Damage:2\":0,\"Count:3\":64}}}},"
-            + "\"rewards:9\":{\"0:10\":{\"index:3\":0,\"rewardID:8\":\"bq_standard:item\"}}}";
+            + "\"rewards:9\":{\"0:10\":{\"index:3\":0,\"rewardID:8\":\"bq_standard:item\"},"
+            + "\"1:10\":{\"index:3\":1,\"rewardID:8\":\"bq_standard:questcompletion\"},"
+            + "\"2:10\":{\"index:3\":2,\"rewardID:8\":\"bq_standard:command\",\"ignoreDisabled:1\":0},"
+            + "\"3:10\":{\"index:3\":3,\"rewardID:8\":\"bq_standard:scoreboard\"}}}";
         Files.write(file, json.getBytes(StandardCharsets.UTF_8));
         BqImportedQuest imported = new BqQuestDefinitionImporter().read(file);
         BqImportedQuest importedAgain = new BqQuestDefinitionImporter().read(file);
@@ -33,8 +36,13 @@ public class BqQuestDefinitionImporterTest {
         assertEquals("minecraft:iron_ingot",
             imported.getDefinition().getTasks().get(0).getParameters().get("item.0.registryName"));
         assertEquals("bq_standard:item", imported.getDefinition().getRewards().get(0).getTypeId());
+        assertEquals("false", imported.getDefinition().getRewards().get(0).getParameters().get("ignoreDisabled"));
+        assertEquals("true", imported.getDefinition().getRewards().get(1).getParameters().get("ignoreDisabled"));
+        assertEquals("false", imported.getDefinition().getRewards().get(2).getParameters().get("ignoreDisabled"));
+        assertEquals("true", imported.getRewardSpecs().get(1).getOptions().get("ignoreDisabled"));
+        assertEquals("true", imported.getDefinition().getRewards().get(3).getParameters().get("ignoreDisabled"));
         assertEquals(2L, imported.getDefinition().getId().getLeastSignificantBits());
-        assertEquals("1", imported.getTaskSpecs().get(0).getOptions().get("consume"));
+        assertEquals("true", imported.getTaskSpecs().get(0).getOptions().get("consume"));
         assertEquals(com.jsirgalaxybase.quest.core.QuestVisibility.SECRET,
             imported.getDefinition().getBehavior().getVisibility());
         assertTrue(imported.getDefinition().getBehavior().isAutoClaim());
@@ -46,6 +54,24 @@ public class BqQuestDefinitionImporterTest {
         assertEquals(imported.getRawJson(), importedAgain.getRawJson());
         assertEquals(imported.getDefinition().getTasks().get(0).getParameters(),
             importedAgain.getDefinition().getTasks().get(0).getParameters());
+    }
+
+    @Test
+    public void canonicalizesNumericBetterQuestingBooleanOptionsButPreservesRawSource() throws Exception {
+        Path file = Files.createTempFile("bq-boolean-options", ".json");
+        String json = "{\"questIDHigh:4\":0,\"questIDLow:4\":19,"
+            + "\"properties:10\":{\"betterquesting:10\":{\"name:8\":\"Flags\"}},"
+            + "\"tasks:9\":{\"0:10\":{\"index:3\":0,\"taskID:8\":\"bq_standard:retrieval\","
+            + "\"consume:1\":1,\"ignoreNBT:1\":0,\"partialMatch:1\":1,"
+            + "\"requiredItems:9\":{\"0:10\":{\"id:8\":\"minecraft:iron_ingot\",\"Count:3\":1}}}},"
+            + "\"rewards:9\":{}}";
+        Files.write(file, json.getBytes(StandardCharsets.UTF_8));
+        BqImportedQuest imported = new BqQuestDefinitionImporter().read(file);
+        assertEquals("true", imported.getTaskSpecs().get(0).getOptions().get("consume"));
+        assertEquals("false", imported.getTaskSpecs().get(0).getOptions().get("ignoreNBT"));
+        assertEquals("true", imported.getTaskSpecs().get(0).getOptions().get("partialMatch"));
+        assertEquals("true", imported.getDefinition().getTasks().get(0).getParameters().get("consume"));
+        assertTrue(imported.getDefinition().getTasks().get(0).getParameters().get("bq.raw").contains("consume:1"));
     }
 
     @Test
@@ -61,5 +87,15 @@ public class BqQuestDefinitionImporterTest {
         assertEquals(1, report.getQuestCount());
         assertTrue(report.getUnknownTaskTypes().contains("addon:special"));
         assertEquals(BqCompatibilityStatus.UNKNOWN, report.getTaskCompatibility().get("addon:special"));
+    }
+
+    @Test public void importsExclusivePrerequisitesWithoutSilentlyChangingThemToAnd() throws Exception {
+        Path file = Files.createTempFile("bq-xor-quest", ".json");
+        String json = "{\"questIDHigh:4\":0,\"questIDLow:4\":15,"
+            + "\"properties:10\":{\"betterquesting:10\":{\"name:8\":\"Choice\","
+            + "\"questLogic:8\":\"XOR\"}},\"tasks:9\":{},\"rewards:9\":{}}";
+        Files.write(file, json.getBytes(StandardCharsets.UTF_8));
+        assertEquals(com.jsirgalaxybase.quest.core.QuestLogic.XOR,
+            new BqQuestDefinitionImporter().read(file).getDefinition().getPrerequisiteLogic());
     }
 }

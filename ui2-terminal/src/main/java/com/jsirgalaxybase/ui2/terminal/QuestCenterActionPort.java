@@ -10,6 +10,11 @@ public interface QuestCenterActionPort {
         @Override public void changeQuestPage(int pageIndex) {}
         @Override public void backToBrowse() {}
         @Override public void claim(String questId) {}
+        @Override public void forceClaimWithRandomChoices(String questId) {}
+        @Override public void confirmTask(String questId,String taskKey) {}
+        @Override public void detectTask(String questId,String taskKey) {}
+        @Override public void submitTask(String questId,String taskKey) {}
+        @Override public void submitHeldStack(String questId,String taskKey) {}
         @Override public void selectRewardChoice(String questId,String rewardKey,int choiceIndex) {}
         @Override public void toggleTracking(String questId) {}
         @Override public void openManagement() {}
@@ -29,6 +34,14 @@ public interface QuestCenterActionPort {
     void changeQuestPage(int pageIndex);
     void backToBrowse();
     void claim(String questId);
+    /** Explicit BQ-compatible claim-all intent: choose unresolved reward options on the server, then claim. */
+    void forceClaimWithRandomChoices(String questId);
+    void confirmTask(String questId,String taskKey);
+    void detectTask(String questId,String taskKey);
+    /** Consumes all matching item stacks in the authenticated player's inventory for this task. */
+    void submitTask(String questId,String taskKey);
+    /** Consumes only the single stack selected by the server from the authenticated player's hotbar. */
+    void submitHeldStack(String questId,String taskKey);
     void selectRewardChoice(String questId,String rewardKey,int choiceIndex);
     void toggleTracking(String questId);
     void openManagement();

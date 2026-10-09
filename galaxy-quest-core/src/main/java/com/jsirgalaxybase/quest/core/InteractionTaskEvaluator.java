@@ -24,7 +24,7 @@ public final class InteractionTaskEvaluator implements TaskEvaluator {
         if (current.isComplete() || !factType.equals(fact.getTypeId())) return current;
         Map<String, String> parameters = definition.getParameters();
         Map<String, String> attributes = fact.getAttributes();
-        boolean hit = Boolean.parseBoolean(attributes.get("hit"));
+        boolean hit = QuestBooleanParameter.parse(attributes.get("hit"), false);
         if (hit && !bool(parameters.get("onHit"), false)
             || !hit && !bool(parameters.get("onInteract"), true)) return current;
         if (entity && !entityMatches(parameters, attributes)) return current;
@@ -94,7 +94,7 @@ public final class InteractionTaskEvaluator implements TaskEvaluator {
     }
 
     private static boolean bool(String value, boolean fallback) {
-        return value == null ? fallback : "1".equals(value) || Boolean.parseBoolean(value);
+        return QuestBooleanParameter.parse(value, fallback);
     }
 
     private static long saturatingAdd(long left, long right) {

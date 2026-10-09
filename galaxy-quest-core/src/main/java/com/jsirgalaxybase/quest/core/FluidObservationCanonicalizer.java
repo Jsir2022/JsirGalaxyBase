@@ -20,13 +20,14 @@ public final class FluidObservationCanonicalizer {
             FluidObservationEntry previous = unique.get(key);
             if (previous == null) unique.put(key, entry);
             else unique.put(key, new FluidObservationEntry(previous.getName(), saturatingAdd(
-                previous.getAmount(), entry.getAmount()), previous.getNbt(), previous.getNbtPortable()));
+                previous.getAmount(), entry.getAmount()), previous.getNbt(), previous.getNbtPortable(),
+                previous.isNbtPresent()));
         }
         return Collections.unmodifiableList(new ArrayList<FluidObservationEntry>(unique.values()));
     }
 
     private String key(FluidObservationEntry value) {
-        return value.getName() + "\u0000" + value.getNbtPortable();
+        return value.getName() + "\u0000" + value.isNbtPresent() + "\u0000" + value.getNbtPortable();
     }
 
     private long saturatingAdd(long left, long right) {

@@ -51,8 +51,28 @@ public final class JdbcQuestCenterQuery implements AuthenticatedQuestCenterQuery
             requireTable(connection,"galaxy_quest_player_preference");
             requireTable(connection,"galaxy_quest_participant");
             requireTable(connection,"galaxy_quest_participant_membership");
+            requireTable(connection,"galaxy_quest_active_inventory_snapshot");
             requireTable(connection,"galaxy_quest_content_migration_batch");
             requireTable(connection,"galaxy_quest_content_migration_item");
+            return null;
+        });
+    }
+
+    /** Read-only guard for the additive SUPPRESSED delivery status migration. */
+    public void validateSuppressedRewardStatus() {
+        connections.withConnection(connection -> {
+            String sql = "SELECT 1 FROM pg_constraint c WHERE c.conrelid=to_regclass(?) AND c.contype='c' "
+                + "AND upper(pg_get_constraintdef(c.oid)) LIKE '%DELIVERY_STATUS%' "
+                + "AND upper(pg_get_constraintdef(c.oid)) LIKE '%SUPPRESSED%' LIMIT 1";
+            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setString(1, "galaxy_quest_reward_entitlement");
+                try (ResultSet result = statement.executeQuery()) {
+                    if (!result.next()) {
+                        throw new IllegalStateException("quest reward suppression requires migration "
+                            + "20260929_001_add_quest_reward_suppressed_status.sql");
+                    }
+                }
+            }
             return null;
         });
     }
@@ -197,10 +217,11 @@ public final class JdbcQuestCenterQuery implements AuthenticatedQuestCenterQuery
             bindParticipant(statement,participant);try(ResultSet rows=statement.executeQuery()){
                 while(rows.next()){
                     String key=rewardKey((UUID)rows.getObject(1),rows.getInt(2),rows.getInt(3));int[] value=counts.get(key);
-                    if(value==null){value=new int[6];counts.put(key,value);}int count=rows.getInt(5);value[0]+=count;
+                    if(value==null){value=new int[7];counts.put(key,value);}int count=rows.getInt(5);value[0]+=count;
                     String status=rows.getString(4);if("CLAIMABLE".equals(status))value[1]+=count;else if("PENDING".equals(status))value[2]+=count;
                     else if("DELIVERING".equals(status))value[3]+=count;else if("DELIVERED".equals(status))value[4]+=count;
-                    else if("FAILED".equals(status)||"ABANDONED".equals(status))value[5]+=count;
+                    else if("SUPPRESSED".equals(status))value[5]+=count;
+                    else if("FAILED".equals(status)||"ABANDONED".equals(status))value[6]+=count;
                     int selected=rows.getInt(7);if(!rows.wasNull()){Map<String,Integer> selectedByReward=choices.get(key);
                         if(selectedByReward==null){selectedByReward=new LinkedHashMap<String,Integer>();choices.put(key,selectedByReward);}
                         selectedByReward.put(rows.getString(6),Integer.valueOf(selected));}
@@ -208,7 +229,7 @@ public final class JdbcQuestCenterQuery implements AuthenticatedQuestCenterQuery
             }
         }
         Map<String,QuestRewardSummary> result=new LinkedHashMap<String,QuestRewardSummary>();
-        for(Map.Entry<String,int[]> entry:counts.entrySet()){int[] c=entry.getValue();result.put(entry.getKey(),new QuestRewardSummary(c[0],c[1],c[2],c[3],c[4],c[5],choices.get(entry.getKey())));}
+        for(Map.Entry<String,int[]> entry:counts.entrySet()){int[] c=entry.getValue();result.put(entry.getKey(),new QuestRewardSummary(c[0],c[1],c[2],c[3],c[4],c[5],c[6],choices.get(entry.getKey()),null,0));}
         return result;
     }
 
@@ -221,8 +242,8 @@ public final class JdbcQuestCenterQuery implements AuthenticatedQuestCenterQuery
         try(PreparedStatement statement=connection.prepareStatement(sql)){statement.setObject(1,playerId);try(ResultSet rows=statement.executeQuery()){while(rows.next()){
             ParticipantId subject=new ParticipantId(ParticipantType.valueOf(rows.getString(1)),(UUID)rows.getObject(2));UUID quest=(UUID)rows.getObject(3);int version=rows.getInt(4),cycle=rows.getInt(5);String key=subjectRewardKey(subject,quest,version,cycle);
             batches.put(key,new RewardBatch(subject,quest,version,cycle));
-            int[] value=counts.get(key);if(value==null){value=new int[6];counts.put(key,value);}int count=rows.getInt(7);value[0]+=count;String status=rows.getString(6);
-            if("CLAIMABLE".equals(status))value[1]+=count;else if("PENDING".equals(status))value[2]+=count;else if("DELIVERING".equals(status))value[3]+=count;else if("DELIVERED".equals(status))value[4]+=count;else if("FAILED".equals(status)||"ABANDONED".equals(status))value[5]+=count;
+            int[] value=counts.get(key);if(value==null){value=new int[7];counts.put(key,value);}int count=rows.getInt(7);value[0]+=count;String status=rows.getString(6);
+            if("CLAIMABLE".equals(status))value[1]+=count;else if("PENDING".equals(status))value[2]+=count;else if("DELIVERING".equals(status))value[3]+=count;else if("DELIVERED".equals(status))value[4]+=count;else if("SUPPRESSED".equals(status))value[5]+=count;else if("FAILED".equals(status)||"ABANDONED".equals(status))value[6]+=count;
             int selected=rows.getInt(9);if(!rows.wasNull()){Map<String,Integer> selectedByReward=choices.get(key);if(selectedByReward==null){selectedByReward=new LinkedHashMap<String,Integer>();choices.put(key,selectedByReward);}selectedByReward.put(rows.getString(8),Integer.valueOf(selected));}
         }}}
         Map<String,RewardBatch> selected=new LinkedHashMap<String,RewardBatch>();
@@ -230,7 +251,7 @@ public final class JdbcQuestCenterQuery implements AuthenticatedQuestCenterQuery
             String questKey=versionKey(candidate.quest,candidate.version);RewardBatch current=selected.get(questKey);
             if(current==null||candidate.precedes(current))selected.put(questKey,candidate);}
         Map<String,QuestRewardSummary> result=new LinkedHashMap<String,QuestRewardSummary>();for(Map.Entry<String,RewardBatch> entry:selected.entrySet()){RewardBatch batch=entry.getValue();int[] c=batch.counts;
-            result.put(entry.getKey(),new QuestRewardSummary(c[0],c[1],c[2],c[3],c[4],c[5],choices.get(batch.key),batch.subject,batch.cycle));}return result;
+            result.put(entry.getKey(),new QuestRewardSummary(c[0],c[1],c[2],c[3],c[4],c[5],c[6],choices.get(batch.key),batch.subject,batch.cycle));}return result;
     }
 
     private static void bindParticipant(PreparedStatement statement,ParticipantId participant)throws SQLException{

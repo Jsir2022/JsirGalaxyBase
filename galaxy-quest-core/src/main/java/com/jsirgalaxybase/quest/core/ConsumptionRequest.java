@@ -10,6 +10,11 @@ import java.util.UUID;
 
 /** Immutable intent to consume player-owned resources for one task. */
 public final class ConsumptionRequest {
+    /** Reserved persisted request metadata; resource adapters ignore this key. */
+    public static final String QUEST_CYCLE_PARAMETER = "galaxy.quest.cycle";
+    /** Reserved, server-captured slot and fingerprint for a BQ SubmitStation-style single-stack submission. */
+    public static final String SELECTION_SLOT_PARAMETER = "galaxy.consumption.slot";
+    public static final String SELECTION_FINGERPRINT_PARAMETER = "galaxy.consumption.fingerprint";
     private final String submissionKey;
     private final String sourceServer;
     private final UUID playerId;
@@ -62,6 +67,18 @@ public final class ConsumptionRequest {
     public Map<String, String> getResourceParameters() { return resourceParameters; }
     public long getCreatedAt() { return createdAt; }
 
+    public int getQuestCycle() {
+        String value = resourceParameters.get(QUEST_CYCLE_PARAMETER);
+        if (value == null) return 0; // Legacy prepared submissions predate cycle-bound recovery.
+        try {
+            int cycle = Integer.parseInt(value);
+            if (cycle < 0) throw new NumberFormatException("negative");
+            return cycle;
+        } catch (NumberFormatException invalid) {
+            throw new IllegalArgumentException("invalid persisted quest cycle", invalid);
+        }
+    }
+
     public GameplayFact confirmedFact() {
         return confirmedFact(amounts);
     }
@@ -74,6 +91,7 @@ public final class ConsumptionRequest {
         attributes.put("kind", kind);
         attributes.put("questId", questId.toString());
         attributes.put("definitionVersion", Integer.toString(definitionVersion));
+        attributes.put("questCycle", Integer.toString(getQuestCycle()));
         attributes.put("progressParticipantType", participantId.getType().name());
         attributes.put("progressParticipantId", participantId.getId().toString());
         attributes.put("value.count", Integer.toString(appliedAmounts.size()));

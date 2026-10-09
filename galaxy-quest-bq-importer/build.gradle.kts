@@ -31,6 +31,18 @@ application {
     mainClass.set("com.jsirgalaxybase.quest.bqimport.BqMigrationMain")
 }
 
+tasks.register<JavaExec>("behaviorInventory") {
+    group = "verification"
+    description = "Reads only a BetterQuesting DefaultQuests definition directory and reports behavior usage"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("com.jsirgalaxybase.quest.bqimport.BqInventoryMain")
+    doFirst {
+        val source = providers.gradleProperty("bqDefaultQuests").orNull
+            ?: throw GradleException("Pass -PbqDefaultQuests=<DefaultQuests directory>")
+        args(source)
+    }
+}
+
 tasks.register<JavaExec>("progressInventory") {
     group = "verification"
     description = "Reads BetterQuesting player progress without modifying it"

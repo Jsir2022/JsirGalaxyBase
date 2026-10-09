@@ -11,7 +11,10 @@ public final class BqInventoryMain {
         java.nio.file.Path source = Paths.get(args[0]);
         BqMigrationManifest manifest = new BqMigrationPlanner().plan(source);
         System.out.print(manifest.toText());
+        System.out.println("behaviorInventory (unverified types remain BLOCKED):");
+        System.out.print(BqBehaviorInventory.from(manifest).toText());
         List<BqImportedQuest> quests = new BqQuestDefinitionImporter().readDirectory(source);
+        System.out.println("contentCodecCompatibility (ADAPTED means parsed, not runtime verified):");
         System.out.print(BqCompatibilityReport.create(quests, BqStandardCodec.supportedTaskTypes(),
             BqStandardCodec.supportedRewardTypes()).toText());
         List<BqImportedChapter> chapters = new BqQuestChapterImporter().readDirectory(source);

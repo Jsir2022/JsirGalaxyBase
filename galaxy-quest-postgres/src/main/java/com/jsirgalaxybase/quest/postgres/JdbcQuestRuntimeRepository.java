@@ -65,6 +65,158 @@ public final class JdbcQuestRuntimeRepository implements QuestRuntimeRepository 
     }
 
     @Override
+    public List<QuestProgressSnapshot> findLockedProgress(final ParticipantId participantId) {
+        if (participantId == null) throw new IllegalArgumentException("participant is required");
+        requireTransaction();
+        return connections.withConnection(new JdbcQuestConnectionManager.SqlWork<List<QuestProgressSnapshot>>() {
+            @Override
+            public List<QuestProgressSnapshot> execute(Connection connection) throws SQLException {
+                Map<String, LockedProgressAccumulator> locked = new LinkedHashMap<String, LockedProgressAccumulator>();
+                String sql = "SELECT p.quest_id,p.definition_version,p.completed_at,p.cycle,"
+                    + "t.task_key,t.progress_values,t.target_values,t.complete "
+                    + "FROM galaxy_quest_progress p LEFT JOIN galaxy_quest_task_progress t "
+                    + "ON t.participant_type=p.participant_type AND t.participant_id=p.participant_id "
+                    + "AND t.quest_id=p.quest_id AND t.definition_version=p.definition_version "
+                    + "WHERE p.participant_type=? AND p.participant_id=? AND p.status='LOCKED' "
+                    + "ORDER BY p.quest_id,p.definition_version,t.task_key FOR UPDATE OF p";
+                try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                    statement.setString(1, participantId.getType().name());
+                    statement.setObject(2, participantId.getId());
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) {
+                            UUID questId = UUID.fromString(rows.getString(1));
+                            int version = rows.getInt(2);
+                            String identity = questId + ":" + version;
+                            LockedProgressAccumulator value = locked.get(identity);
+                            if (value == null) {
+                                value = new LockedProgressAccumulator(questId, version, rows.getLong(3), rows.getInt(4));
+                                locked.put(identity, value);
+                            }
+                            String taskKey = rows.getString(5);
+                            if (taskKey != null) {
+                                value.tasks.put(taskKey, new TaskProgress(taskKey, longs(rows.getArray(6)),
+                                    longs(rows.getArray(7)), rows.getBoolean(8)));
+                            }
+                        }
+                    }
+                }
+                List<QuestProgressSnapshot> result = new ArrayList<QuestProgressSnapshot>(locked.size());
+                for (LockedProgressAccumulator value : locked.values()) {
+                    result.add(new QuestProgressSnapshot(participantId, value.questId, value.version,
+                        QuestStatus.LOCKED, value.tasks, value.completedAt, value.cycle));
+                }
+                return Collections.unmodifiableList(result);
+            }
+        });
+    }
+
+    @Override
+    public boolean wasEverCompleted(final ParticipantId participantId, final UUID questId,
+        final int definitionVersion) {
+        if (participantId == null || questId == null || definitionVersion < 1) {
+            throw new IllegalArgumentException("valid progress identity is required");
+        }
+        requireTransaction();
+        return connections.withConnection(new JdbcQuestConnectionManager.SqlWork<Boolean>() {
+            @Override
+            public Boolean execute(Connection connection) throws SQLException {
+                lockProgressIdentity(connection, participantId, questId, definitionVersion);
+                try (PreparedStatement statement = connection.prepareStatement(
+                    "SELECT ever_completed FROM galaxy_quest_progress "
+                        + "WHERE participant_type=? AND participant_id=? AND quest_id=? AND definition_version=?")) {
+                    bindIdentity(statement, participantId, questId, definitionVersion);
+                    try (ResultSet rows = statement.executeQuery()) {
+                        return Boolean.valueOf(rows.next() && rows.getBoolean(1));
+                    }
+                }
+            }
+        }).booleanValue();
+    }
+
+    @Override
+    public boolean hasPendingConsumptionSubmission(final ParticipantId participantId, final UUID questId,
+        final int definitionVersion, final int cycle) {
+        requireTransaction();
+        if (participantId == null || questId == null || definitionVersion < 1 || cycle < 0) {
+            throw new IllegalArgumentException("valid progress identity and cycle are required");
+        }
+        return connections.withConnection(new JdbcQuestConnectionManager.SqlWork<Boolean>() {
+            @Override
+            public Boolean execute(Connection connection) throws SQLException {
+                try (PreparedStatement statement = connection.prepareStatement(
+                    "SELECT 1 FROM galaxy_quest_consumption_submission "
+                        + "WHERE participant_type=? AND participant_id=? AND quest_id=? AND definition_version=? "
+                        + "AND submission_status IN ('PREPARED','APPLIED') "
+                        + "AND COALESCE(resource_parameters_json->>'galaxy.quest.cycle','0')=? LIMIT 1")) {
+                    statement.setString(1, participantId.getType().name());
+                    statement.setObject(2, participantId.getId());
+                    statement.setObject(3, questId);
+                    statement.setInt(4, definitionVersion);
+                    statement.setString(5, Integer.toString(cycle));
+                    try (ResultSet rows = statement.executeQuery()) {
+                        return Boolean.valueOf(rows.next());
+                    }
+                }
+            }
+        }).booleanValue();
+    }
+
+    @Override
+    public boolean hasClaimableRewardEntitlement(final ParticipantId participantId, final UUID questId,
+        final int definitionVersion, final int cycle) {
+        requireTransaction();
+        if (participantId == null || questId == null || definitionVersion < 1 || cycle < 0) {
+            throw new IllegalArgumentException("valid progress identity and cycle are required");
+        }
+        return connections.withConnection(new JdbcQuestConnectionManager.SqlWork<Boolean>() {
+            @Override
+            public Boolean execute(Connection connection) throws SQLException {
+                try (PreparedStatement statement = connection.prepareStatement(
+                    "SELECT 1 FROM galaxy_quest_reward_entitlement WHERE participant_type=? AND participant_id=? "
+                        + "AND quest_id=? AND definition_version=? AND cycle=? AND delivery_status='CLAIMABLE' LIMIT 1")) {
+                    statement.setString(1, participantId.getType().name());
+                    statement.setObject(2, participantId.getId());
+                    statement.setObject(3, questId);
+                    statement.setInt(4, definitionVersion);
+                    statement.setInt(5, cycle);
+                    try (ResultSet rows = statement.executeQuery()) { return Boolean.valueOf(rows.next()); }
+                }
+            }
+        }).booleanValue();
+    }
+
+    @Override
+    public long findRepeatCycleAnchorMillis(final ParticipantId participantId, final UUID questId,
+        final int definitionVersion, final int cycle, final long fallbackCompletedAt) {
+        requireTransaction();
+        if (participantId == null || questId == null || definitionVersion < 1 || cycle < 0
+            || fallbackCompletedAt < 0L) {
+            throw new IllegalArgumentException("valid progress identity, cycle, and fallback time are required");
+        }
+        Long claimedAt = connections.withConnection(new JdbcQuestConnectionManager.SqlWork<Long>() {
+            @Override
+            public Long execute(Connection connection) throws SQLException {
+                try (PreparedStatement statement = connection.prepareStatement(
+                    "SELECT floor(extract(epoch FROM max(claimed_at))*1000)::bigint "
+                        + "FROM galaxy_quest_reward_entitlement WHERE participant_type=? AND participant_id=? "
+                        + "AND quest_id=? AND definition_version=? AND cycle=?")) {
+                    statement.setString(1, participantId.getType().name());
+                    statement.setObject(2, participantId.getId());
+                    statement.setObject(3, questId);
+                    statement.setInt(4, definitionVersion);
+                    statement.setInt(5, cycle);
+                    try (ResultSet rows = statement.executeQuery()) {
+                        if (!rows.next()) return null;
+                        long value = rows.getLong(1);
+                        return rows.wasNull() ? null : Long.valueOf(value);
+                    }
+                }
+            }
+        });
+        return claimedAt == null ? fallbackCompletedAt : claimedAt.longValue();
+    }
+
+    @Override
     public boolean recordFactIfAbsent(final GameplayFact fact) {
         requireTransaction();
         return connections.withConnection(new JdbcQuestConnectionManager.SqlWork<Boolean>() {
@@ -78,11 +230,25 @@ public final class JdbcQuestRuntimeRepository implements QuestRuntimeRepository 
                     statement.setObject(3, fact.getPlayerId());
                     statement.setString(4, fact.getTypeId());
                     statement.setLong(5, fact.getOccurredAt());
-                    statement.setString(6, gson.toJson(fact.getAttributes()));
+                    statement.setString(6, gson.toJson(persistedFactAttributes(fact)));
                     return statement.executeUpdate() == 1;
                 }
             }
         });
+    }
+
+    /** Inventory attributes are evaluation input, not durable history; keep only non-sensitive audit metadata. */
+    private static Map<String, String> persistedFactAttributes(GameplayFact fact) {
+        if (!"galaxy:inventory_observed".equals(fact.getTypeId())) return fact.getAttributes();
+        Map<String, String> persisted = new LinkedHashMap<String, String>();
+        String count = fact.getAttributes().get("inventory.count");
+        if (count != null) persisted.put("inventory.count", count);
+        persisted.put("inventory.snapshotRedacted", "true");
+        String partySnapshot = fact.getAttributes().get("inventory.bqPartySnapshot");
+        String partyId = fact.getAttributes().get("inventory.bqPartyId");
+        if (partySnapshot != null) persisted.put("inventory.bqPartySnapshot", partySnapshot);
+        if (partyId != null) persisted.put("inventory.bqPartyId", partyId);
+        return persisted;
     }
 
     @Override
@@ -92,14 +258,16 @@ public final class JdbcQuestRuntimeRepository implements QuestRuntimeRepository 
             @Override
             public Void execute(Connection connection) throws SQLException {
                 try (PreparedStatement statement = connection.prepareStatement(
-                    "INSERT INTO galaxy_quest_progress(participant_type,participant_id,quest_id,definition_version,cycle,status,completed_at) "
-                        + "VALUES (?,?,?,?,?,?,?) ON CONFLICT (participant_type,participant_id,quest_id,definition_version) "
+                    "INSERT INTO galaxy_quest_progress(participant_type,participant_id,quest_id,definition_version,cycle,status,completed_at,ever_completed) "
+                        + "VALUES (?,?,?,?,?,?,?,?) ON CONFLICT (participant_type,participant_id,quest_id,definition_version) "
                         + "DO UPDATE SET cycle=EXCLUDED.cycle,status=EXCLUDED.status,completed_at=EXCLUDED.completed_at,"
+                        + "ever_completed=galaxy_quest_progress.ever_completed OR EXCLUDED.ever_completed,"
                         + "revision=galaxy_quest_progress.revision+1,updated_at=CURRENT_TIMESTAMP")) {
                     bindIdentity(statement, progress.getParticipantId(), progress.getQuestId(), progress.getDefinitionVersion());
                     statement.setInt(5, progress.getCycle());
                     statement.setString(6, progress.getStatus().name());
                     statement.setLong(7, progress.getCompletedAt());
+                    statement.setBoolean(8, progress.getStatus() == QuestStatus.COMPLETED);
                     statement.executeUpdate();
                 }
                 replaceTasks(connection, progress);
@@ -131,13 +299,37 @@ public final class JdbcQuestRuntimeRepository implements QuestRuntimeRepository 
                         statement.setString(9, entitlement.getReward().getTypeId());
                         statement.setString(10, gson.toJson(entitlement.getReward().getParameters()));
                         statement.setString(11, entitlement.getInitialDeliveryStatus().name());
-                        statement.addBatch();
+                        boolean inserted = statement.executeUpdate() == 1;
+                        if (inserted && "bq_standard:choice".equals(entitlement.getReward().getTypeId())
+                            && entitlement.getCycle() > 0) {
+                            inheritChoiceFromPreviousCycle(connection, entitlement.getEntitlementKey());
+                        }
                     }
-                    statement.executeBatch();
                 }
                 return null;
             }
         });
+    }
+
+    private static void inheritChoiceFromPreviousCycle(Connection connection, String entitlementKey)
+        throws SQLException {
+        String sql = "INSERT INTO galaxy_quest_reward_choice_selection(entitlement_key,choice_index,selected_at) "
+            + "SELECT fresh.entitlement_key,previous.choice_index,previous.selected_at "
+            + "FROM galaxy_quest_reward_entitlement fresh "
+            + "JOIN LATERAL (SELECT selection.choice_index,selection.selected_at "
+            + "FROM galaxy_quest_reward_entitlement prior "
+            + "JOIN galaxy_quest_reward_choice_selection selection ON selection.entitlement_key=prior.entitlement_key "
+            + "WHERE prior.quest_id=fresh.quest_id AND prior.definition_version=fresh.definition_version "
+            + "AND prior.reward_key=fresh.reward_key AND prior.reward_type='bq_standard:choice' "
+            + "AND prior.recipient_player_id=fresh.recipient_player_id AND prior.cycle<fresh.cycle "
+            + "ORDER BY prior.cycle DESC LIMIT 1) previous "
+            + "ON previous.choice_index<COALESCE((fresh.reward_parameters_json->>'item.count')::integer,0) "
+            + "WHERE fresh.entitlement_key=? AND fresh.reward_type='bq_standard:choice' "
+            + "ON CONFLICT (entitlement_key) DO NOTHING";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, entitlementKey);
+            statement.executeUpdate();
+        }
     }
 
     private Map<String, TaskProgress> readTasks(Connection connection, ParticipantId participantId, UUID questId,
@@ -184,6 +376,21 @@ public final class JdbcQuestRuntimeRepository implements QuestRuntimeRepository 
             } finally {
                 for (Array array : arrays) array.free();
             }
+        }
+    }
+
+    private static final class LockedProgressAccumulator {
+        private final UUID questId;
+        private final int version;
+        private final long completedAt;
+        private final int cycle;
+        private final Map<String, TaskProgress> tasks = new LinkedHashMap<String, TaskProgress>();
+
+        private LockedProgressAccumulator(UUID questId, int version, long completedAt, int cycle) {
+            this.questId = questId;
+            this.version = version;
+            this.completedAt = completedAt;
+            this.cycle = cycle;
         }
     }
 

@@ -82,6 +82,6 @@ public final class MinecraftScoreboardRewardDeliveryHandler implements RewardDel
         return created;
     }
     private static boolean bool(String value, boolean fallback) {
-        return value == null ? fallback : "1".equals(value) || Boolean.parseBoolean(value);
+        return com.jsirgalaxybase.quest.core.QuestBooleanParameter.parse(value, fallback);
     }
 }

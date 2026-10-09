@@ -15,7 +15,8 @@ public final class XpSnapshotTaskEvaluator implements TaskEvaluator {
     @Override public String getTypeId() { return typeId; }
 
     @Override public TaskProgress evaluate(TaskDefinition definition, TaskProgress current, GameplayFact fact) {
-        if (!factType.equals(fact.getTypeId()) || Boolean.parseBoolean(definition.getParameters().get("consume"))) {
+        if (!factType.equals(fact.getTypeId())
+            || QuestBooleanParameter.parse(definition.getParameters().get("consume"), false)) {
             return current;
         }
         String raw = fact.getAttributes().get("value");

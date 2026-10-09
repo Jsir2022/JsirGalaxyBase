@@ -78,6 +78,13 @@ public class AuthenticatedRewardChoiceServiceTest {
             return Optional.of(new QuestProgressSnapshot(participant,questId,questVersion,
                 QuestStatus.COMPLETED,Collections.<String,TaskProgress>emptyMap(),0L,cycle));
         }
+        @Override public boolean hasPendingConsumptionSubmission(ParticipantId participant,UUID questId,int questVersion,int questCycle) {
+            return false;
+        }
+        @Override public boolean hasClaimableRewardEntitlement(ParticipantId participant,UUID questId,int questVersion,
+            int questCycle) { return false; }
+        @Override public long findRepeatCycleAnchorMillis(ParticipantId participant,UUID questId,int questVersion,
+            int questCycle,long fallbackCompletedAt) { return fallbackCompletedAt; }
         @Override public boolean recordFactIfAbsent(GameplayFact fact){return false;}
         @Override public void saveProgress(QuestProgressSnapshot snapshot){throw new UnsupportedOperationException();}
         @Override public void insertEntitlementsIfAbsent(Set<RewardEntitlement> entitlements){throw new UnsupportedOperationException();}

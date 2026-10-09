@@ -37,7 +37,8 @@ public class BqStandardCodecTest {
             + "\"tag:10\":{\"grade:8\":\"pure\"}}}}", JsonObject.class);
         BqStandardTaskSpec spec = codec.task(task, 0);
         assertEquals("task-2", spec.getKey());
-        assertEquals("1", spec.getOptions().get("partialMatch"));
+        assertEquals("true", spec.getOptions().get("partialMatch"));
+        assertEquals("false", spec.getOptions().get("ignoreNBT"));
         assertEquals(1, spec.getItems().size());
         assertEquals("gregtech:item", spec.getItems().get(0).getRegistryName());
         assertEquals(64, spec.getItems().get(0).getCount());
@@ -52,10 +53,37 @@ public class BqStandardCodecTest {
         JsonObject fluid = new Gson().fromJson("{\"taskID:8\":\"bq_standard:fluid\",\"requiredFluids:9\":{"
             + "\"0:10\":{\"FluidName:8\":\"water\",\"Amount:3\":1000}}}", JsonObject.class);
         assertEquals(1000, codec.task(fluid, 0).getFluids().get(0).getAmount());
-        JsonObject block = new Gson().fromJson("{\"taskID:8\":\"bq_standard:block_break\",\"blocks:9\":{"
-            + "\"0:10\":{\"blockID:8\":\"minecraft:log\",\"meta:3\":-1,\"amount:3\":3}}}",
+        Map<String, String> fluidParams = codec.taskParameters(codec.task(fluid, 0), new Gson().toJson(fluid));
+        assertEquals("false", fluidParams.get("fluid.0.nbtPresent"));
+        JsonObject taggedFluid = new Gson().fromJson("{\"taskID:8\":\"bq_standard:fluid\",\"requiredFluids:9\":{"
+            + "\"0:10\":{\"FluidName:8\":\"water\",\"Amount:3\":1000,\"Tag:10\":{}}}}",
             JsonObject.class);
-        assertEquals(-1, codec.task(block, 0).getBlocks().get(0).getMeta());
+        Map<String, String> taggedParams = codec.taskParameters(codec.task(taggedFluid, 0),
+            new Gson().toJson(taggedFluid));
+        assertEquals("true", taggedParams.get("fluid.0.nbtPresent"));
+        JsonObject malformedTagFluid = new Gson().fromJson("{\"taskID:8\":\"bq_standard:fluid\",\"requiredFluids:9\":{"
+            + "\"0:10\":{\"FluidName:8\":\"water\",\"Amount:3\":1000,\"Tag:8\":\"not-a-compound\"}}}",
+            JsonObject.class);
+        Map<String, String> malformedTagParams = codec.taskParameters(codec.task(malformedTagFluid, 0),
+            new Gson().toJson(malformedTagFluid));
+        assertEquals("false", malformedTagParams.get("fluid.0.nbtPresent"));
+        JsonObject block = new Gson().fromJson("{\"taskID:8\":\"bq_standard:block_break\",\"blocks:9\":{"
+            + "\"0:10\":{\"blockID:8\":\"minecraft:log\",\"meta:3\":-1,\"amount:3\":3,"
+            + "\"oreDict:8\":\"logWood\",\"nbt:10\":{\"variant:8\":\"oak\"}}}}",
+            JsonObject.class);
+        BqStandardTaskSpec blockSpec = codec.task(block, 0);
+        assertEquals(-1, blockSpec.getBlocks().get(0).getMeta());
+        Map<String, String> blockParams = codec.taskParameters(blockSpec, new Gson().toJson(block));
+        assertEquals("block-vector", blockParams.get("progressMode"));
+        assertEquals("galaxy:block_broken", blockParams.get("factType"));
+        assertEquals("1", blockParams.get("block.count"));
+        assertEquals("minecraft:log", blockParams.get("block.0.registryName"));
+        assertEquals("-1", blockParams.get("block.0.meta"));
+        assertEquals("3", blockParams.get("block.0.amount"));
+        assertEquals("logWood", blockParams.get("block.0.oreDictionary"));
+        assertEquals("3", blockParams.get("target"));
+        assertEquals("oak", com.jsirgalaxybase.quest.core.PortableNbt.decode(
+            blockParams.get("block.0.nbtPortable")).getFields().get("variant").getScalar());
         JsonObject reward = new Gson().fromJson("{\"rewardID:8\":\"bq_standard:questcompletion\","
             + "\"questID:8\":\"AAAAAAAAAAAAAAAAAAAABw==\"}", JsonObject.class);
         assertEquals(new UUID(0L, 7L).toString(), codec.reward(reward, 0).getOptions().get("questUuid"));
@@ -84,7 +112,8 @@ public class BqStandardCodecTest {
         assertEquals("galaxy:location_observed", locationParams.get("factType"));
         assertEquals("1", locationParams.get("dimension"));
         assertEquals("-8", locationParams.get("posZ"));
-        assertEquals("1", locationParams.get("invert"));
+        assertEquals("true", locationParams.get("invert"));
+        assertEquals("true", locationParams.get("taxiCabDist"));
 
         JsonObject meeting = gson.fromJson("{\"taskID:8\":\"bq_standard:meeting\",\"target:8\":\"Villager\","
             + "\"range:3\":4,\"amount:3\":2}", JsonObject.class);
@@ -105,6 +134,7 @@ public class BqStandardCodecTest {
         Map<String, String> xpParams = codec.rewardParameters(codec.reward(xp, 0), gson.toJson(xp));
         assertEquals("10", xpParams.get("amount"));
         assertEquals("levels", xpParams.get("xpUnit"));
+        assertEquals("true", xpParams.get("isLevels"));
     }
 
     @Test public void mapsLessCommonStandardTasksAndRewardsWithoutDroppingTheirRawConfiguration() {
@@ -116,6 +146,7 @@ public class BqStandardCodecTest {
         assertEquals("galaxy:entity_interacted", interactParams.get("factType"));
         assertEquals("Villager", interactParams.get("subject"));
         assertEquals("4", interactParams.get("target"));
+        assertEquals("true", interactParams.get("onHit"));
         assertTrue(interactParams.get("bq.raw").contains("Profession:3"));
         assertEquals("2", com.jsirgalaxybase.quest.core.PortableNbt.decode(
             interactParams.get("targetNBT.portable")).getFields().get("Profession").getScalar());
@@ -141,6 +172,11 @@ public class BqStandardCodecTest {
             + "\"command:8\":\"say VAR_NAME\",\"viaPlayer:1\":0}", JsonObject.class);
         Map<String, String> commandParams = codec.rewardParameters(codec.reward(command, 0), gson.toJson(command));
         assertEquals("say VAR_NAME", commandParams.get("command"));
+        assertEquals("false", commandParams.get("viaPlayer"));
         assertTrue(commandParams.get("bq.raw").contains("viaPlayer:1"));
+
+        JsonObject scoreboardReward = gson.fromJson("{\"rewardID:8\":\"bq_standard:scoreboard\","
+            + "\"relative:1\":1}", JsonObject.class);
+        assertEquals("true", codec.reward(scoreboardReward, 0).getOptions().get("relative"));
     }
 }

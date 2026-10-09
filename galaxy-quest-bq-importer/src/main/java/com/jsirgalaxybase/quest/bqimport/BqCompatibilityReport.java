@@ -47,8 +47,19 @@ public final class BqCompatibilityReport {
         BqCompatibilityReport base=create(manifest.getQuests(),BqStandardCodec.supportedTaskTypes(),
             BqStandardCodec.supportedRewardTypes());
         Set<String> blocked=new TreeSet<String>();
-        for(BqMigrationIssue issue:manifest.getIssues())if(issue.getCode().startsWith("INVALID_TASK_")
-            ||issue.getCode().startsWith("INVALID_REWARD_"))blocked.add(issue.getSubject());
+        for(BqMigrationIssue issue:manifest.getIssues()) {
+            if(issue.getCode().startsWith("INVALID_TASK_")
+                ||issue.getCode().startsWith("INVALID_REWARD_"))blocked.add(issue.getSubject());
+            if("INVALID_ELEMENT_PARAMETER".equals(issue.getCode())) {
+                // The editor validator uses quest-id/tasks.key.field or quest-id/rewards.key.field.
+                String subject=issue.getSubject();
+                int slash=subject.indexOf('/');
+                int dot=subject.indexOf('.',slash+1);
+                int keyEnd=subject.indexOf('.',dot+1);
+                if(slash>0&&dot>slash&&keyEnd>dot)blocked.add(subject.substring(0,slash)+"/"
+                    +subject.substring(dot+1,keyEnd));
+            }
+        }
         Map<String,BqCompatibilityStatus> elements=new TreeMap<String,BqCompatibilityStatus>();
         Map<String,BqCompatibilityStatus> tasks=new TreeMap<String,BqCompatibilityStatus>(base.taskCompatibility);
         Map<String,BqCompatibilityStatus> rewards=new TreeMap<String,BqCompatibilityStatus>(base.rewardCompatibility);

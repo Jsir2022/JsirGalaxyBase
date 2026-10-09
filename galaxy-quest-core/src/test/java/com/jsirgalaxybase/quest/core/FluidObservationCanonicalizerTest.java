@@ -33,4 +33,14 @@ public class FluidObservationCanonicalizerTest {
         assertEquals("{A:2}", result.get(1).getNbtPortable());
         assertEquals("Water", result.get(2).getName());
     }
+
+    @Test
+    public void doesNotMergeMissingTagWithExplicitEmptyTag() {
+        List<FluidObservationEntry> result = new FluidObservationCanonicalizer().canonicalize(Arrays.asList(
+            new FluidObservationEntry("water", 1000L, "", "", false),
+            new FluidObservationEntry("water", 500L, "{}", "", true)));
+        assertEquals(2, result.size());
+        assertEquals(false, result.get(0).isNbtPresent());
+        assertEquals(true, result.get(1).isNbtPresent());
+    }
 }

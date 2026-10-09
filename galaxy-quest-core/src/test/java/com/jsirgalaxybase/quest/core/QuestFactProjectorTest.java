@@ -59,6 +59,133 @@ public class QuestFactProjectorTest {
             .get("meeting").getValue());
     }
 
+    @Test
+    public void singleMemberInventoryDoesNotOverwriteSharedRetrievalProgress() {
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        ParticipantId party = ParticipantId.party(UUID.randomUUID());
+        ParticipantMembership membership = new ParticipantMembership(party,
+            new HashSet<UUID>(Arrays.asList(first, second)));
+        TaskDefinition task = new TaskDefinition("items", "bq_standard:retrieval", false,
+            map("factType", "galaxy:inventory_observed", "progressMode", "item-vector", "item.count", "1",
+                "item.0.amount", "10", "consume", "false", "groupDetect", "false"));
+        QuestDefinition definition = new QuestDefinition(UUID.randomUUID(), 1, "Shared retrieval", "",
+            QuestLogic.AND, QuestLogic.AND, Collections.<UUID>emptySet(), Collections.singletonList(task),
+            Collections.<RewardDefinition>emptyList());
+        TaskProgress stored = new TaskProgress("items", Arrays.asList(3L), Arrays.asList(10L), false);
+        QuestProgressSnapshot current = new QuestProgressSnapshot(party, definition.getId(), definition.getVersion(),
+            QuestStatus.IN_PROGRESS, Collections.singletonMap("items", stored), 0L, 0);
+        TaskEvaluatorRegistry registry = BqCompatibleTaskEvaluatorRegistry.firstEventDrivenBatch();
+        GameplayFact inventory = new GameplayFact("s1", "inventory:" + first, first,
+            "galaxy:inventory_observed", 10L, map("inventory.count", "1", "inventory.0.amount", "10",
+                "inventory.0.registryName", "minecraft:iron_ingot", "inventory.0.meta", "0"));
+
+        Map<String, TaskProgress> projected = new QuestFactProjector(registry)
+            .project(definition, current, membership, inventory);
+        assertEquals(Arrays.asList(3L), projected.get("items").getValues());
+    }
+
+    @Test
+    public void groupInventorySnapshotUpdatesOnlyItsMatchingSharedParticipant() {
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        ParticipantId party = ParticipantId.party(UUID.randomUUID());
+        ParticipantMembership membership = new ParticipantMembership(party,
+            new HashSet<UUID>(Arrays.asList(first, second)));
+        TaskDefinition task = new TaskDefinition("items", "bq_standard:retrieval", false,
+            map("factType", "galaxy:inventory_observed", "progressMode", "item-vector", "item.count", "1",
+                "item.0.registryName", "minecraft:iron_ingot", "item.0.meta", "0", "item.0.amount", "10",
+                "consume", "false", "groupDetect", "true"));
+        QuestDefinition definition = new QuestDefinition(UUID.randomUUID(), 1, "Shared retrieval", "",
+            QuestLogic.AND, QuestLogic.AND, Collections.<UUID>emptySet(), Collections.singletonList(task),
+            Collections.<RewardDefinition>emptyList(), RepeatPolicy.never(),
+            QuestBehavior.builder().participantScope(QuestParticipantScope.PARTY).build());
+        TaskProgress stored = new TaskProgress("items", Arrays.asList(3L), Arrays.asList(10L), false);
+        QuestProgressSnapshot current = new QuestProgressSnapshot(party, definition.getId(), definition.getVersion(),
+            QuestStatus.IN_PROGRESS, Collections.singletonMap("items", stored), 0L, 0);
+        GameplayFact aggregate = new GameplayFact("s1", "party-inventory:" + party.getId(), first,
+            "galaxy:inventory_observed", 11L, map("inventory.groupSnapshot", "true",
+                "inventory.participantType", "PARTY", "inventory.participantId", party.getId().toString(),
+                "inventory.count", "1", "inventory.0.registryName", "minecraft:iron_ingot",
+                "inventory.0.meta", "0", "inventory.0.amount", "7"));
+
+        Map<String, TaskProgress> projected = new QuestFactProjector(BqCompatibleTaskEvaluatorRegistry
+            .firstEventDrivenBatch()).project(definition, current, membership, aggregate);
+        assertEquals(Arrays.asList(7L), projected.get("items").getValues());
+
+        ParticipantMembership anotherParty = new ParticipantMembership(ParticipantId.party(UUID.randomUUID()),
+            new HashSet<UUID>(Arrays.asList(first, second)));
+        QuestProgressSnapshot otherProgress = new QuestProgressSnapshot(anotherParty.getParticipantId(),
+            definition.getId(), definition.getVersion(), QuestStatus.IN_PROGRESS,
+            Collections.singletonMap("items", stored), 0L, 0);
+        assertEquals(Arrays.asList(3L), new QuestFactProjector(BqCompatibleTaskEvaluatorRegistry
+            .firstEventDrivenBatch()).project(definition, otherProgress, anotherParty, aggregate)
+            .get("items").getValues());
+    }
+
+    @Test
+    public void groupInventorySnapshotCannotUpdatePersonalRetrievalProgress() {
+        UUID player = UUID.randomUUID();
+        TaskDefinition task = new TaskDefinition("items", "bq_standard:retrieval", false,
+            map("factType", "galaxy:inventory_observed", "progressMode", "item-vector", "item.count", "1",
+                "item.0.amount", "10", "consume", "false", "groupDetect", "true"));
+        QuestDefinition definition = new QuestDefinition(UUID.randomUUID(), 1, "Personal retrieval", "",
+            QuestLogic.AND, QuestLogic.AND, Collections.<UUID>emptySet(), Collections.singletonList(task),
+            Collections.<RewardDefinition>emptyList());
+        QuestProgressSnapshot current = new QuestProgressSnapshot(ParticipantId.player(player), definition.getId(),
+            definition.getVersion(), QuestStatus.IN_PROGRESS,
+            Collections.singletonMap("items", new TaskProgress("items", Arrays.asList(2L), Arrays.asList(10L), false)),
+            0L, 0);
+        GameplayFact aggregate = new GameplayFact("s1", "team-inventory", player, "galaxy:inventory_observed",
+            11L, map("inventory.groupSnapshot", "true", "inventory.participantType", "TEAM",
+                "inventory.participantId", UUID.randomUUID().toString(), "inventory.count", "0"));
+
+        assertEquals(Arrays.asList(2L), new QuestFactProjector(BqCompatibleTaskEvaluatorRegistry
+            .firstEventDrivenBatch()).project(definition, current, ParticipantMembership.player(player), aggregate)
+            .get("items").getValues());
+    }
+
+    @Test
+    public void bqPartyInventorySnapshotUpdatesOnlyGroupDetectPersonalRetrieval() {
+        UUID player = UUID.randomUUID();
+        ParticipantId party = ParticipantId.party(UUID.randomUUID());
+        GameplayFact aggregate = new GameplayFact("s1", "bq-party-inventory", player,
+            "galaxy:inventory_observed", 12L, map("inventory.bqPartySnapshot", "true",
+                "inventory.bqPartyId", party.getId().toString(), "inventory.count", "1",
+                "inventory.0.registryName", "minecraft:iron_ingot", "inventory.0.meta", "0",
+                "inventory.0.amount", "7"));
+        TaskDefinition shared = new TaskDefinition("shared", "bq_standard:retrieval", false,
+            map("factType", "galaxy:inventory_observed", "progressMode", "item-vector", "item.count", "1",
+                "item.0.registryName", "minecraft:iron_ingot", "item.0.meta", "0", "item.0.amount", "10",
+                "consume", "false", "groupDetect", "true", "bq.raw", "{}"));
+        TaskDefinition personal = new TaskDefinition("personal", "bq_standard:optional_retrieval", false,
+            map("factType", "galaxy:inventory_observed", "progressMode", "item-vector", "item.count", "1",
+                "item.0.registryName", "minecraft:iron_ingot", "item.0.meta", "0", "item.0.amount", "10",
+                "consume", "false", "groupDetect", "false"));
+        QuestDefinition definition = new QuestDefinition(UUID.randomUUID(), 1, "Retrieval", "",
+            QuestLogic.AND, QuestLogic.AND, Collections.<UUID>emptySet(), Arrays.asList(shared, personal),
+            Collections.<RewardDefinition>emptyList());
+        Map<String, TaskProgress> progress = new LinkedHashMap<String, TaskProgress>();
+        progress.put("shared", new TaskProgress("shared", Arrays.asList(0L), Arrays.asList(10L), false));
+        progress.put("personal", new TaskProgress("personal", Arrays.asList(2L), Arrays.asList(10L), false));
+        QuestProgressSnapshot current = new QuestProgressSnapshot(ParticipantId.player(player), definition.getId(),
+            definition.getVersion(), QuestStatus.IN_PROGRESS, progress, 0L, 0);
+
+        GameplayFact singlePlayer = new GameplayFact("s1", "single-inventory", player,
+            "galaxy:inventory_observed", 11L, map("inventory.count", "1", "inventory.0.registryName",
+                "minecraft:iron_ingot", "inventory.0.meta", "0", "inventory.0.amount", "7"));
+        Map<String, TaskProgress> personalProjection = new QuestFactProjector(BqCompatibleTaskEvaluatorRegistry
+            .firstEventDrivenBatch()).project(definition, current, ParticipantMembership.player(player), singlePlayer);
+        assertEquals(Arrays.asList(0L), personalProjection.get("shared").getValues());
+        assertEquals(Arrays.asList(7L), personalProjection.get("personal").getValues());
+
+        Map<String, TaskProgress> projected = new QuestFactProjector(BqCompatibleTaskEvaluatorRegistry
+            .firstEventDrivenBatch()).project(definition, current, ParticipantMembership.player(player), aggregate);
+
+        assertEquals(Arrays.asList(7L), projected.get("shared").getValues());
+        assertEquals(Arrays.asList(2L), projected.get("personal").getValues());
+    }
+
     private static Map<String, String> map(String... values) {
         Map<String, String> result = new LinkedHashMap<String, String>();
         for (int i = 0; i < values.length; i += 2) result.put(values[i], values[i + 1]);

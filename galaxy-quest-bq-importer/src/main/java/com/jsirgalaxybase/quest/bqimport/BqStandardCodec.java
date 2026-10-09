@@ -17,6 +17,12 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 final class BqStandardCodec {
+    private static final Set<String> BOOLEAN_OPTIONS = Collections.unmodifiableSet(new LinkedHashSet<String>(Arrays.asList(
+        "allowAnvil", "allowCraft", "allowCraftedFromStatistics", "allowSmelt", "autoConsume", "consume",
+        "groupDetect", "ignoreDisabled", "ignoreItemNBT", "ignoreNbt", "ignoreNBT", "ignoreTargetNBT",
+        "invert", "isLevels", "onHit", "onInteract", "partialItemMatch", "partialMatch", "subtypes",
+        "relative", "targetSubtypes", "taxiCabDist", "viaPlayer", "visible")));
+
     static Set<String> supportedTaskTypes() {
         return Collections.unmodifiableSet(new LinkedHashSet<String>(Arrays.asList(
             "bq_standard:block_break", "bq_standard:checkbox", "bq_standard:crafting", "bq_standard:fluid",
@@ -47,10 +53,25 @@ final class BqStandardCodec {
         int index = (int) BqTypedJson.number(value, "index", fallbackIndex);
         String type = BqTypedJson.string(value, "rewardID", "betterquesting:unknown");
         Map<String, String> options = scalarOptions(value, "rewardID", "index");
+        if (!options.containsKey("ignoreDisabled") && isStandardRewardType(type)) {
+            options.put("ignoreDisabled", Boolean.toString(defaultIgnoreDisabled(type)));
+        }
         String compactQuestId = BqTypedJson.string(value, "questID", "");
         if (!compactQuestId.isEmpty()) options.put("questUuid", decodeCompactUuid(compactQuestId).toString());
         String itemField = "bq_standard:choice".equals(type) ? "choices" : "rewards";
         return new BqStandardRewardSpec("reward-" + index, type, options, items(value, itemField));
+    }
+
+    private static boolean defaultIgnoreDisabled(String rewardType) {
+        return "bq_standard:command".equals(rewardType)
+            || "bq_standard:questcompletion".equals(rewardType)
+            || "bq_standard:scoreboard".equals(rewardType);
+    }
+
+    private static boolean isStandardRewardType(String rewardType) {
+        return "bq_standard:choice".equals(rewardType) || "bq_standard:command".equals(rewardType)
+            || "bq_standard:item".equals(rewardType) || "bq_standard:questcompletion".equals(rewardType)
+            || "bq_standard:scoreboard".equals(rewardType) || "bq_standard:xp".equals(rewardType);
     }
 
     Map<String, String> taskParameters(BqStandardTaskSpec spec, String rawJson) {
@@ -108,7 +129,7 @@ final class BqStandardCodec {
         } else if ("bq_standard:xp".equals(type)) {
             result.put("progressMode", "numeric-observation");
             result.put("factType", "galaxy:xp_observed");
-            result.put("xpUnit", "1".equals(result.get("isLevels")) ? "levels" : "points");
+            result.put("xpUnit", booleanOption(result, "isLevels") ? "levels" : "points");
             result.put("target", Long.toString("levels".equals(result.get("xpUnit"))
                 ? levelXp((int) parseLong(valueOrDefault(result, "amount", "30"), 30L))
                 : parseLong(valueOrDefault(result, "amount", "30"), 30L)));
@@ -128,7 +149,7 @@ final class BqStandardCodec {
         appendItems(result, spec.getItems());
         if ("bq_standard:choice".equals(spec.getTypeId())) result.put("selectionMode", "player-required");
         if ("bq_standard:xp".equals(spec.getTypeId())) {
-            result.put("xpUnit", "1".equals(result.get("isLevels")) ? "levels" : "points");
+            result.put("xpUnit", booleanOption(result, "isLevels") ? "levels" : "points");
         }
         return result;
     }
@@ -197,6 +218,7 @@ final class BqStandardCodec {
             result.put(prefix + "amount", Integer.toString(fluid.getAmount()));
             result.put(prefix + "nbt", fluid.getTagJson());
             result.put(prefix + "nbtPortable", BqPortableNbtCodec.encodeJson(fluid.getTagJson()));
+            result.put(prefix + "nbtPresent", Boolean.toString(fluid.isTagPresent()));
         }
     }
 
@@ -241,10 +263,24 @@ final class BqStandardCodec {
         outer: for (Map.Entry<String, JsonElement> entry : value.entrySet()) {
             String logical = logicalName(entry.getKey());
             for (String name : excluded) if (name.equals(logical)) continue outer;
-            if (entry.getValue().isJsonPrimitive()) result.put(logical, entry.getValue().getAsString());
+            if (entry.getValue().isJsonPrimitive()) {
+                String raw = entry.getValue().getAsString();
+                result.put(logical, BOOLEAN_OPTIONS.contains(logical) ? normalizeBooleanOption(logical, raw) : raw);
+            }
             else result.put(logical + ".raw", gson.toJson(entry.getValue()));
         }
         return result;
+    }
+
+    private static String normalizeBooleanOption(String key, String raw) {
+        String normalized = raw == null ? "" : raw.trim();
+        if ("1".equals(normalized) || "true".equalsIgnoreCase(normalized)) return "true";
+        if ("0".equals(normalized) || "false".equalsIgnoreCase(normalized)) return "false";
+        throw new IllegalArgumentException("Invalid BetterQuesting boolean option " + key + "=" + raw);
+    }
+
+    private static boolean booleanOption(Map<String, String> values, String key) {
+        return "true".equals(values.get(key));
     }
 
     private List<BqItemStackSpec> items(JsonObject value, String field) {
@@ -261,7 +297,8 @@ final class BqStandardCodec {
         List<BqFluidStackSpec> result = new ArrayList<BqFluidStackSpec>();
         for (JsonObject fluid : BqTypedJson.indexedObjects(value, field)) {
             result.add(new BqFluidStackSpec(BqTypedJson.string(fluid, "FluidName", ""),
-                (int) BqTypedJson.number(fluid, "Amount", 0), gson.toJson(BqTypedJson.object(fluid, "Tag"))));
+                (int) BqTypedJson.number(fluid, "Amount", 0), gson.toJson(BqTypedJson.object(fluid, "Tag")),
+                BqTypedJson.hasCompound(fluid, "Tag")));
         }
         return result;
     }

@@ -46,7 +46,7 @@ public final class SubjectCountTaskEvaluator implements TaskEvaluator {
     }
 
     private boolean parseBoolean(String raw, boolean fallback) {
-        return raw == null ? fallback : Boolean.parseBoolean(raw);
+        return QuestBooleanParameter.parse(raw, fallback);
     }
 
     private long positive(String raw, long fallback) {

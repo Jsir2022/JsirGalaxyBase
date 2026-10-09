@@ -93,11 +93,18 @@ import com.jsirgalaxybase.quest.core.QuestElementTypeDescriptor;
 import com.jsirgalaxybase.quest.core.QuestEditorFieldDescriptor;
 import com.jsirgalaxybase.quest.core.StoredQuestDefinition;
 import com.jsirgalaxybase.quest.core.RewardChoiceSelectionStatus;
+import com.jsirgalaxybase.quest.core.AuthenticatedCheckboxConfirmationService;
+import com.jsirgalaxybase.quest.core.AuthenticatedQuestConsumptionService;
+import com.jsirgalaxybase.quest.core.AuthenticatedCraftingStatisticsDetectionService;
+import com.jsirgalaxybase.quest.core.ConsumptionSelection;
+import com.jsirgalaxybase.quest.core.ConsumptionSubmissionStatus;
+import com.jsirgalaxybase.quest.core.FactProcessingStatus;
 import com.jsirgalaxybase.quest.core.QuestCenterPage;
 import com.jsirgalaxybase.quest.core.QuestCenterPageRequest;
 import com.jsirgalaxybase.quest.core.QuestCenterQuery;
 import com.jsirgalaxybase.quest.core.RewardClaimStatus;
 import com.jsirgalaxybase.modules.quest.application.TerminalQuestCenterSnapshotMapper;
+import com.jsirgalaxybase.modules.quest.infrastructure.minecraft.MinecraftConsumptionSelection;
 
 public final class TerminalService {
 
@@ -117,6 +124,9 @@ public final class TerminalService {
     private static volatile com.jsirgalaxybase.quest.core.AuthenticatedParticipantAdministrationService questParticipantAdministrationService;
     private static volatile AuthenticatedQuestClaimService questClaimService;
     private static volatile AuthenticatedRewardChoiceService rewardChoiceService;
+    private static volatile AuthenticatedCheckboxConfirmationService checkboxConfirmationService;
+    private static volatile AuthenticatedCraftingStatisticsDetectionService craftingStatisticsDetectionService;
+    private static volatile AuthenticatedQuestConsumptionService questConsumptionService;
     private static volatile AuthenticatedQuestTrackingService questTrackingService;
     private static volatile AuthenticatedQuestDefinitionManagementQuery questDefinitionManagementQuery;
     private static volatile QuestDraftManagementService questDraftManagementService;
@@ -203,6 +213,9 @@ public final class TerminalService {
     public static void installQuestParticipantAdministrationService(com.jsirgalaxybase.quest.core.AuthenticatedParticipantAdministrationService service) { questParticipantAdministrationService = service; }
     public static void installQuestClaimService(AuthenticatedQuestClaimService service) { questClaimService = service; }
     public static void installRewardChoiceService(AuthenticatedRewardChoiceService service) { rewardChoiceService = service; }
+    public static void installCheckboxConfirmationService(AuthenticatedCheckboxConfirmationService service) { checkboxConfirmationService = service; }
+    public static void installCraftingStatisticsDetectionService(AuthenticatedCraftingStatisticsDetectionService service) { craftingStatisticsDetectionService = service; }
+    public static void installQuestConsumptionService(AuthenticatedQuestConsumptionService service) { questConsumptionService = service; }
     public static void installQuestTrackingService(AuthenticatedQuestTrackingService service) { questTrackingService = service; }
     public static void installQuestDefinitionManagementQuery(AuthenticatedQuestDefinitionManagementQuery query) { questDefinitionManagementQuery = query; }
     public static void installQuestDraftManagementService(QuestDraftManagementService service) { questDraftManagementService = service; }
@@ -854,6 +867,12 @@ public final class TerminalService {
                     ((EntityPlayerMP)player).getUniqueID(),player.getCommandSenderName(),TerminalQuestChapterOrderPayload.decode(payload));
                 else if(isParticipantMutationAction(actionType))questSnapshot=buildAuthenticatedParticipantMutation(
                     (EntityPlayerMP)player,actionType,TerminalQuestParticipantActionPayload.decode(payload));
+                else if(actionType==TerminalActionType.QUEST_SUBMIT_HELD_ITEM){
+                    EntityPlayerMP authenticatedPlayer=(EntityPlayerMP)player;
+                    ConsumptionSelection selection=MinecraftConsumptionSelection.captureHeldStack(authenticatedPlayer);
+                    questSnapshot=buildAuthenticatedQuestCenterSnapshot(authenticatedPlayer.getUniqueID(),
+                        player.getCommandSenderName(),actionType,TerminalQuestActionPayload.decode(payload),selection);
+                }
                 else questSnapshot=buildAuthenticatedQuestCenterSnapshot(((EntityPlayerMP)player).getUniqueID(),
                     player.getCommandSenderName(),actionType,TerminalQuestActionPayload.decode(payload));
             }catch(RuntimeException failure){
@@ -1173,6 +1192,12 @@ public final class TerminalService {
 
     static TerminalQuestCenterSectionSnapshot buildAuthenticatedQuestCenterSnapshot(UUID authenticatedPlayerId,
         String authenticatedPlayerName,TerminalActionType actionType,TerminalQuestActionPayload intent) {
+        return buildAuthenticatedQuestCenterSnapshot(authenticatedPlayerId,authenticatedPlayerName,actionType,intent,null);
+    }
+
+    static TerminalQuestCenterSectionSnapshot buildAuthenticatedQuestCenterSnapshot(UUID authenticatedPlayerId,
+        String authenticatedPlayerName,TerminalActionType actionType,TerminalQuestActionPayload intent,
+        ConsumptionSelection consumptionSelection) {
         if(authenticatedPlayerId==null||questCenterQuery==null)return TerminalQuestCenterSectionSnapshot.unavailable(
             "跨服任务运行时尚未启用；现有 BetterQuesting 不受影响。");
         TerminalQuestActionPayload safeIntent=intent==null?TerminalQuestActionPayload.empty():intent;
@@ -1193,6 +1218,69 @@ public final class TerminalService {
             else try{message=claimMessage(questClaimService.claim(authenticatedPlayerId,
                 UUID.fromString(safeIntent.getQuestId()),System.currentTimeMillis()));}
             catch(IllegalArgumentException invalid){message="任务标识无效，奖励状态没有改变。";}
+        }else if(actionType==TerminalActionType.QUEST_FORCE_CLAIM){
+            if(safeIntent.getQuestId().isEmpty())message="未选择要随机选择奖励并领取的任务。";
+            else if(questClaimService==null)message="奖励领取运行时尚未启用，任务状态没有改变。";
+            else try{message=claimMessage(questClaimService.forceClaimWithBqRandomChoices(authenticatedPlayerId,
+                UUID.fromString(safeIntent.getQuestId()),System.currentTimeMillis()));}
+            catch(IllegalArgumentException invalid){message="任务标识无效，奖励状态没有改变。";}
+        }else if(actionType==TerminalActionType.QUEST_CONFIRM_TASK){
+            if(safeIntent.getQuestId().isEmpty()||safeIntent.getTaskKey().isEmpty())
+                message="复选任务标识无效，进度没有改变。";
+            else if(checkboxConfirmationService==null)message="复选任务运行时尚未启用，进度没有改变。";
+            else try{
+                FactProcessingStatus status=checkboxConfirmationService.confirm(authenticatedPlayerId,
+                    UUID.fromString(safeIntent.getQuestId()),safeIntent.getTaskKey(),System.currentTimeMillis()).getStatus();
+                message=status==FactProcessingStatus.ACCEPTED?"已提交任务确认。"
+                    :status==FactProcessingStatus.DUPLICATE?"该任务确认已提交。":"任务不存在、不可确认或尚未满足完成条件。";
+            }catch(IllegalArgumentException invalid){message="复选任务标识无效，进度没有改变。";}
+        }else if(actionType==TerminalActionType.QUEST_DETECT_CRAFTING){
+            if(safeIntent.getQuestId().isEmpty()||safeIntent.getTaskKey().isEmpty())
+                message="合成检测任务标识无效，进度没有改变。";
+            else if(craftingStatisticsDetectionService==null)
+                message="合成统计检测尚未启用，任务进度没有改变。";
+            else try{
+                java.util.List<com.jsirgalaxybase.quest.core.FactProcessingResult> results =
+                    craftingStatisticsDetectionService.detect(authenticatedPlayerId,
+                        UUID.fromString(safeIntent.getQuestId()),safeIntent.getTaskKey(),System.currentTimeMillis());
+                boolean accepted=false,duplicate=false;
+                for(com.jsirgalaxybase.quest.core.FactProcessingResult result:results){
+                    accepted|=result.getStatus()==FactProcessingStatus.ACCEPTED;
+                    duplicate|=result.getStatus()==FactProcessingStatus.DUPLICATE;
+                }
+                message=accepted?"已检测当前玩家的合成统计并更新任务进度。":duplicate?"合成统计已检测，进度已是最新。"
+                    :"没有符合条件的合成统计，或任务尚未解锁。";
+            }catch(IllegalArgumentException invalid){message="合成检测任务标识无效，进度没有改变。";}
+            catch(RuntimeException failure){GalaxyBase.LOG.error("Quest crafting statistics detection failed for "
+                +authenticatedPlayerName,failure);message="合成统计检测遇到服务端错误，请刷新任务进度后再试。";}
+        }else if(actionType==TerminalActionType.QUEST_SUBMIT_TASK){
+            if(safeIntent.getQuestId().isEmpty()||safeIntent.getTaskKey().isEmpty())
+                message="消耗任务标识无效，背包没有改变。";
+            else if(questConsumptionService==null)message="检索任务提交运行时尚未启用，背包没有改变。";
+            else try{
+                ConsumptionSubmissionStatus status=questConsumptionService.submit(authenticatedPlayerId,
+                    UUID.fromString(safeIntent.getQuestId()),safeIntent.getTaskKey(),System.currentTimeMillis()).getStatus();
+                message=status==ConsumptionSubmissionStatus.CONFIRMED?"已提交并消耗该任务匹配的背包物品。"
+                    :status==ConsumptionSubmissionStatus.REJECTED?"没有可提交的物品，或任务当前不可提交。"
+                    :"物品提交仍在处理，请刷新查看任务进度。";
+            }catch(IllegalArgumentException invalid){message="消耗任务标识无效或任务当前不可提交，背包没有改变。";}
+            catch(RuntimeException failure){GalaxyBase.LOG.error("Quest inventory consumption submission failed for "
+                +authenticatedPlayerName,failure);message="物品提交遇到服务端错误，请刷新任务进度后再试。";}
+        }else if(actionType==TerminalActionType.QUEST_SUBMIT_HELD_ITEM){
+            if(safeIntent.getQuestId().isEmpty()||safeIntent.getTaskKey().isEmpty())
+                message="消耗任务标识无效，背包没有改变。";
+            else if(questConsumptionService==null)message="检索任务提交运行时尚未启用，背包没有改变。";
+            else if(consumptionSelection==null)message="请先将要提交的物品选为当前手持物品。";
+            else try{
+                ConsumptionSubmissionStatus status=questConsumptionService.submit(authenticatedPlayerId,
+                    UUID.fromString(safeIntent.getQuestId()),safeIntent.getTaskKey(),System.currentTimeMillis(),
+                    consumptionSelection).getStatus();
+                message=status==ConsumptionSubmissionStatus.CONFIRMED?"已提交当前手持物品栈。"
+                    :status==ConsumptionSubmissionStatus.REJECTED?"手持物品不符合任务需求，或任务当前不可提交。"
+                    :"物品提交仍在处理，请刷新查看任务进度。";
+            }catch(IllegalArgumentException invalid){message="消耗任务标识无效或任务当前不可提交，背包没有改变。";}
+            catch(RuntimeException failure){GalaxyBase.LOG.error("Quest held-stack submission failed for "
+                +authenticatedPlayerName,failure);message="手持物品提交遇到服务端错误，请刷新任务进度后再试。";}
         }else if(actionType==TerminalActionType.QUEST_SELECT_REWARD_CHOICE){
             if(safeIntent.getQuestId().isEmpty()||safeIntent.getRewardKey().isEmpty()||safeIntent.getChoiceIndex()<0)
                 message="奖励选择无效，任务状态没有改变。";
@@ -1212,7 +1300,8 @@ public final class TerminalService {
                 .loadPageForPlayer(authenticatedPlayerId,request)
             :questCenterQuery.loadPage(participant,request);
         boolean detail=!safeIntent.getQuestId().isEmpty()&&actionType!=TerminalActionType.QUEST_BACK;
-        return questCenterMapper.map(page,safeIntent.getFilter(),safeIntent.getQuery(),safeIntent.getQuestId(),detail,message)
+        return questCenterMapper.map(page,safeIntent.getFilter(),safeIntent.getQuery(),safeIntent.getQuestId(),detail,message,
+            questConsumptionService!=null,craftingStatisticsDetectionService!=null)
             .withParticipants(participantSnapshots(authenticatedPlayerId));
     }
 
@@ -1357,6 +1446,7 @@ public final class TerminalService {
 
     private static String claimMessage(RewardClaimStatus status){
         if(status==RewardClaimStatus.CLAIMED)return "奖励已进入跨服交付队列。";
+        if(status==RewardClaimStatus.SUPPRESSED)return "服务器奖励策略已停发该任务奖励，任务领取状态已记录。";
         if(status==RewardClaimStatus.ALREADY_CLAIMED)return "该任务奖励已经领取。";
         if(status==RewardClaimStatus.NEEDS_CHOICE)return "请先选择奖励内容。";
         if(status==RewardClaimStatus.NOT_OWNED)return "该奖励不属于当前玩家。";
@@ -1366,8 +1456,9 @@ public final class TerminalService {
 
     private static String choiceMessage(RewardChoiceSelectionStatus status){
         if(status==RewardChoiceSelectionStatus.SELECTED)return "奖励选项已确认，可以领取任务奖励。";
+        if(status==RewardChoiceSelectionStatus.RESELECTED)return "奖励选项已更改，请确认后领取任务奖励。";
         if(status==RewardChoiceSelectionStatus.ALREADY_SELECTED)return "该奖励选项已经确认。";
-        if(status==RewardChoiceSelectionStatus.CONFLICT)return "奖励选项已经锁定，不能改选。";
+        if(status==RewardChoiceSelectionStatus.CONFLICT)return "奖励已进入领取流程，不能再改选。";
         if(status==RewardChoiceSelectionStatus.INVALID)return "该奖励选项不可用，请刷新后重试。";
         return "未找到可选择的任务奖励。";
     }

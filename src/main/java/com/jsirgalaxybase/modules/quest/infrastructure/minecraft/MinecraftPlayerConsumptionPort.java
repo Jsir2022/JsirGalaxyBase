@@ -1,7 +1,6 @@
 package com.jsirgalaxybase.modules.quest.infrastructure.minecraft;
 
 import java.nio.charset.Charset;
-import java.lang.reflect.Field;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -37,7 +36,6 @@ import net.minecraftforge.oredict.OreDictionary;
  */
 public final class MinecraftPlayerConsumptionPort implements ConsumptionPort {
     private static final String MARKER_ROOT = "GalaxyQuestConsumption";
-    private static final Field TAG_LIST = tagListField();
     private final QuestPlayerResolver players;
     private final QuestPlayerDataFlusher flusher;
     private final QuestFluidContainerAdapter fluids;
@@ -72,15 +70,24 @@ public final class MinecraftPlayerConsumptionPort implements ConsumptionPort {
 
         List<ItemStack> before = snapshot(player);
         List<ItemStack> after;
+        List<Long> appliedAmounts = request.getAmounts();
         try {
-            after = "item".equals(request.getKind()) ? planItems(before, request) : planFluids(before, request);
+            if ("item".equals(request.getKind())) {
+                ItemPlan plan = planItems(before, request);
+                after = plan == null ? null : plan.inventory;
+                if (plan != null) appliedAmounts = plan.appliedAmounts;
+            } else {
+                FluidPlan plan = planFluidsDetailed(before, request);
+                after = plan == null ? null : plan.inventory;
+                if (plan != null) appliedAmounts = plan.appliedAmounts;
+            }
         } catch (IllegalArgumentException invalid) {
             return ConsumptionApplyResult.insufficient("invalid-request:" + invalid.getMessage());
         }
         if (after == null) return ConsumptionApplyResult.insufficient("insufficient-" + request.getKind());
 
         restore(player, after);
-        markers.setTag(marker, markerValue(request.getAmounts()));
+        markers.setTag(marker, markerValue(appliedAmounts));
         persisted.setTag(MARKER_ROOT, markers);
         try {
             flusher.flush(player);
@@ -90,7 +97,7 @@ public final class MinecraftPlayerConsumptionPort implements ConsumptionPort {
             persisted.setTag(MARKER_ROOT, markers);
             throw failure;
         }
-        return ConsumptionApplyResult.applied("inventory:" + marker, request.getAmounts());
+        return ConsumptionApplyResult.applied("inventory:" + marker, appliedAmounts);
     }
 
     private ConsumptionApplyResult applyXp(EntityPlayerMP player, ConsumptionRequest request, NBTTagCompound markers,
@@ -141,76 +148,192 @@ public final class MinecraftPlayerConsumptionPort implements ConsumptionPort {
         return result;
     }
 
-    private List<ItemStack> planItems(List<ItemStack> before, ConsumptionRequest request) {
+    ItemPlan planItems(List<ItemStack> before, ConsumptionRequest request) {
         Map<String, String> parameters = request.getResourceParameters();
         int count = integer(parameters.get("item.count"), -1);
         if (count < 0 || count != request.getAmounts().size()) throw new IllegalArgumentException("item vector width");
+        final boolean ignoreNbt = bool(parameters.get("ignoreNBT"), true);
+        final boolean partial = bool(parameters.get("partialMatch"), true);
+        int selectedSlot = -1;
+        if (parameters.containsKey(ConsumptionRequest.SELECTION_SLOT_PARAMETER)) {
+            selectedSlot = integer(parameters.get(ConsumptionRequest.SELECTION_SLOT_PARAMETER), -1);
+            String expectedFingerprint = parameters.get(ConsumptionRequest.SELECTION_FINGERPRINT_PARAMETER);
+            if (selectedSlot < 0 || selectedSlot >= before.size() || expectedFingerprint == null
+                || expectedFingerprint.trim().isEmpty()
+                || !expectedFingerprint.equals(fingerprint(before.get(selectedSlot)))) return null;
+        }
+        return planItems(before, request.getAmounts(), new ItemRequirementMatcher() {
+            @Override public boolean matches(ItemStack stack, int requirement) {
+                return MinecraftPlayerConsumptionPort.this.matches(stack, parameters, requirement, ignoreNbt, partial);
+            }
+        }, selectedSlot);
+    }
+
+    ItemPlan planItems(List<ItemStack> before, List<Long> amounts, ItemRequirementMatcher matcher) {
+        return planItems(before, amounts, matcher, -1);
+    }
+
+    ItemPlan planItems(List<ItemStack> before, List<Long> amounts, ItemRequirementMatcher matcher, int selectedSlot) {
+        if (before == null || amounts == null || amounts.isEmpty() || matcher == null) throw new IllegalArgumentException(
+            "inventory, amounts and matcher are required");
+        if (selectedSlot < -1 || selectedSlot >= before.size()) throw new IllegalArgumentException(
+            "selected inventory slot is outside the inventory");
         List<ItemStack> working = copy(before);
         int size = working.size();
         int[] available = new int[size];
         for (int slot = 0; slot < size; slot++) {
             ItemStack stack = working.get(slot);
-            available[slot] = stack == null ? 0 : Math.max(0, stack.stackSize);
+            available[slot] = stack == null || selectedSlot >= 0 && selectedSlot != slot
+                ? 0 : Math.max(0, stack.stackSize);
+            if (selectedSlot == slot) available[slot] = Math.min(64, available[slot]);
         }
-        boolean partial = bool(parameters.get("partialMatch"), true);
-        boolean ignoreNbt = bool(parameters.get("ignoreNBT"), true);
-        for (int requirement = 0; requirement < count; requirement++) {
-            long remaining = request.getAmounts().get(requirement);
+        List<Long> appliedAmounts = new ArrayList<Long>(amounts.size());
+        long appliedTotal = 0L;
+        for (int requirement = 0; requirement < amounts.size(); requirement++) {
+            long requested = amounts.get(requirement);
+            if (requested < 0L) throw new IllegalArgumentException("negative item amount");
+            long remaining = requested;
             for (int slot = 0; slot < size && remaining > 0; slot++) {
                 ItemStack stack = working.get(slot);
-                if (available[slot] <= 0 || !matches(stack, parameters, requirement, ignoreNbt, partial)) continue;
+                if (available[slot] <= 0 || !matcher.matches(stack, requirement)) continue;
                 int take = (int) Math.min(remaining, available[slot]);
                 available[slot] -= take;
                 stack.stackSize -= take;
                 if (stack.stackSize <= 0) working.set(slot, null);
                 remaining -= take;
             }
-            if (remaining > 0) return null;
+            long applied = requested - remaining;
+            appliedAmounts.add(applied);
+            appliedTotal += applied;
         }
-        return working;
+        return appliedTotal <= 0L ? null : new ItemPlan(working, appliedAmounts);
+    }
+
+    static String fingerprint(ItemStack stack) {
+        if (stack == null) return "";
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                .digest(stack.writeToNBT(new NBTTagCompound()).toString().getBytes(Charset.forName("UTF-8")));
+            StringBuilder result = new StringBuilder(64);
+            for (byte value : digest) result.append(String.format("%02x", value & 255));
+            return result.toString();
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 unavailable", impossible);
+        }
+    }
+
+    interface ItemRequirementMatcher {
+        boolean matches(ItemStack stack, int requirementIndex);
+    }
+
+    static final class ItemPlan {
+        final List<ItemStack> inventory;
+        final List<Long> appliedAmounts;
+        ItemPlan(List<ItemStack> inventory, List<Long> appliedAmounts) {
+            this.inventory = inventory;
+            this.appliedAmounts = appliedAmounts;
+        }
     }
 
     List<ItemStack> planFluids(List<ItemStack> before, ConsumptionRequest request) {
+        FluidPlan plan = planFluidsDetailed(before, request);
+        return plan == null ? null : plan.inventory;
+    }
+
+    FluidPlan planFluidsDetailed(List<ItemStack> before, ConsumptionRequest request) {
+        if (before == null || request == null) throw new IllegalArgumentException("inventory and request are required");
         Map<String, String> parameters = request.getResourceParameters();
         int count = integer(parameters.get("fluid.count"), -1);
         if (count < 0 || count != request.getAmounts().size()) throw new IllegalArgumentException("fluid vector width");
         boolean ignoreNbt = bool(parameters.get("ignoreNBT"), true);
+        int selectedSlot = -1;
+        if (parameters.containsKey(ConsumptionRequest.SELECTION_SLOT_PARAMETER)) {
+            selectedSlot = integer(parameters.get(ConsumptionRequest.SELECTION_SLOT_PARAMETER), -1);
+            String expectedFingerprint = parameters.get(ConsumptionRequest.SELECTION_FINGERPRINT_PARAMETER);
+            if (selectedSlot < 0 || selectedSlot >= before.size() || expectedFingerprint == null
+                || expectedFingerprint.trim().isEmpty()
+                || !expectedFingerprint.equals(fingerprint(before.get(selectedSlot)))) return null;
+        }
         List<ItemStack> working = copy(before);
-        for (int requirement = 0; requirement < count; requirement++) {
-            long remaining = request.getAmounts().get(requirement);
-            String prefix = "fluid." + requirement + ".";
-            String requiredName = parameters.get(prefix + "name");
-            NBTTagCompound requiredNbt = BqTypedNbtCodec.compound(parameters.get(prefix + "nbt"));
-            for (int slot = 0; slot < working.size() && remaining > 0; slot++) {
-                while (remaining > 0) {
+        List<Long> remaining = new ArrayList<Long>(request.getAmounts());
+        List<Long> applied = new ArrayList<Long>(count);
+        for (int requirement = 0; requirement < count; requirement++) applied.add(0L);
+        boolean anyApplied = false;
+        for (int slot = 0; slot < working.size(); slot++) {
+            if (selectedSlot >= 0 && selectedSlot != slot) continue;
+            ItemStack initial = working.get(slot);
+            if (initial == null || initial.stackSize <= 0 || initial.getItem() == null) continue;
+            // BQ SubmitStation accepts one item, even when the selected hotbar stack contains more.
+            int containersRemaining = selectedSlot == slot ? 1 : initial.stackSize;
+            for (int requirement = 0; requirement < count && containersRemaining > 0; requirement++) {
+                if (remaining.get(requirement) <= 0L) continue;
+                String prefix = "fluid." + requirement + ".";
+                String requiredName = parameters.get(prefix + "name");
+                if (requiredName == null || requiredName.trim().isEmpty()) throw new IllegalArgumentException(
+                    "fluid name is required");
+                boolean requiredTagPresent = fluidTagPresent(parameters, prefix);
+                NBTTagCompound requiredNbt = requiredTagPresent
+                    ? BqTypedNbtCodec.compound(parameters.get(prefix + "nbt")) : null;
+                while (remaining.get(requirement) > 0L && containersRemaining > 0) {
                     ItemStack source = working.get(slot);
                     if (source == null || source.stackSize <= 0 || source.getItem() == null) break;
                     ItemStack one = source.copy();
                     one.stackSize = 1;
                     QuestFluidContainerAdapter.FluidView available = fluids.inspect(one);
-                    if (!fluidMatches(available, requiredName, requiredNbt, ignoreNbt)) break;
+                    if (!fluidMatches(available, requiredName, requiredNbt, requiredTagPresent, ignoreNbt)) break;
                     QuestFluidContainerAdapter.FluidDrain result = fluids.drain(one,
-                        (int) Math.min(Integer.MAX_VALUE, remaining));
+                        (int) Math.min(Integer.MAX_VALUE, remaining.get(requirement)));
                     QuestFluidContainerAdapter.FluidView drained = result == null ? null : result.getDrained();
                     ItemStack returned = result == null ? null : result.getReturnedContainer();
-                    if (!fluidMatches(drained, requiredName, requiredNbt, ignoreNbt)) break;
+                    if (!fluidMatches(drained, requiredName, requiredNbt, requiredTagPresent, ignoreNbt)) break;
+                    long drainedAmount = drained.getAmount();
+                    if (drainedAmount <= 0L) break;
                     removeOne(working, slot);
+                    containersRemaining--;
                     if (returned != null && returned.getItem() != null && returned.stackSize > 0
                         && !insert(working, returned)) return null;
-                    remaining = Math.max(0L, remaining - drained.getAmount());
+                    // Some Forge registered containers are indivisible; BQ consumes the whole container but
+                    // task progress is bounded by the remaining requirement.
+                    long credited = Math.min(remaining.get(requirement), drainedAmount);
+                    remaining.set(requirement, remaining.get(requirement) - credited);
+                    applied.set(requirement, applied.get(requirement) + credited);
+                    anyApplied |= credited > 0L;
                 }
             }
-            if (remaining > 0) return null;
         }
-        return working;
+        return !anyApplied ? null : new FluidPlan(working, applied);
+    }
+
+    private boolean fluidTagPresent(Map<String, String> parameters, String prefix) {
+        String explicit = parameters.get(prefix + "nbtPresent");
+        if (explicit != null) return bool(explicit, false);
+        String raw = parameters.get(prefix + "nbt");
+        if (raw != null && !raw.trim().isEmpty() && !"{}".equals(raw.trim())) return true;
+        return !value(parameters, prefix + "nbtPortable").isEmpty();
+    }
+
+    private String value(Map<String, String> parameters, String key) {
+        String value = parameters.get(key);
+        return value == null ? "" : value;
     }
 
     private boolean fluidMatches(QuestFluidContainerAdapter.FluidView actual, String requiredName,
-        NBTTagCompound requiredNbt,
-        boolean ignoreNbt) {
+        NBTTagCompound requiredNbt, boolean requiredTagPresent, boolean ignoreNbt) {
         if (actual == null || actual.getAmount() <= 0 || requiredName == null
             || !requiredName.equals(actual.getName())) return false;
-        return ignoreNbt || compareNbt(requiredNbt, actual.getTag(), false);
+        if (ignoreNbt) return true;
+        NBTTagCompound actualNbt = actual.getTag();
+        if (requiredTagPresent != (actualNbt != null)) return false;
+        return !requiredTagPresent || requiredNbt.equals(actualNbt);
+    }
+
+    static final class FluidPlan {
+        final List<ItemStack> inventory;
+        final List<Long> appliedAmounts;
+        FluidPlan(List<ItemStack> inventory, List<Long> appliedAmounts) {
+            this.inventory = inventory;
+            this.appliedAmounts = appliedAmounts;
+        }
     }
 
     private void removeOne(List<ItemStack> inventory, int slot) {
@@ -255,7 +378,15 @@ public final class MinecraftPlayerConsumptionPort implements ConsumptionPort {
         if (!direct && !ore) return false;
         if (ignoreNbt) return true;
         NBTBase required = BqTypedNbtCodec.compound(values.get(prefix + "nbt"));
-        return compareNbt(required, stack.getTagCompound(), partial);
+        NBTBase actual = stack.getTagCompound();
+        return (direct && matchesItemNbt(required, actual, partial, false))
+            || (ore && matchesItemNbt(required, actual, partial, true));
+    }
+
+    static boolean matchesItemNbt(NBTBase required, NBTBase actual, boolean partial, boolean oreDictionaryMatch) {
+        // BetterQuesting's OreDictionaryMatch reverses CompareNBTTagCompound's arguments
+        // compared with StackMatch; match that source behavior rather than normalizing it.
+        return oreDictionaryMatch ? compareNbt(actual, required, partial) : compareNbt(required, actual, partial);
     }
 
     private boolean containsOre(ItemStack stack, String expected) {
@@ -272,7 +403,6 @@ public final class MinecraftPlayerConsumptionPort implements ConsumptionPort {
         if (required instanceof NBTTagCompound) {
             NBTTagCompound left = (NBTTagCompound) required;
             NBTTagCompound right = (NBTTagCompound) actual;
-            if (!partial && left.func_150296_c().size() != right.func_150296_c().size()) return false;
             for (String key : (java.util.Set<String>) left.func_150296_c()) {
                 if (!right.hasKey(key) || !compareNbt(left.getTag(key), right.getTag(key), partial)) return false;
             }
@@ -282,16 +412,16 @@ public final class MinecraftPlayerConsumptionPort implements ConsumptionPort {
             NBTTagList left = (NBTTagList) required;
             NBTTagList right = (NBTTagList) actual;
             if (left.tagCount() > right.tagCount() || (!partial && left.tagCount() != right.tagCount())) return false;
-            boolean[] used = new boolean[right.tagCount()];
-            List<NBTBase> leftValues = listValues(left);
-            List<NBTBase> rightValues = listValues(right);
             for (int i = 0; i < left.tagCount(); i++) {
                 boolean found = false;
-                for (int j = 0; j < right.tagCount(); j++) if (!used[j]
-                    && compareNbt(leftValues.get(i), rightValues.get(j), partial)) {
-                    used[j] = true;
-                    found = true;
-                    break;
+                // BetterQuesting searches the complete NBTTagList independently for every
+                // requested entry via getCompoundTagAt. Non-compound entries therefore become
+                // empty compounds; unlike byte/int arrays, matched list indices are reusable.
+                for (int j = 0; j < right.tagCount(); j++) {
+                    if (compareNbt(left.getCompoundTagAt(i), right.getCompoundTagAt(j), partial)) {
+                        found = true;
+                        break;
+                    }
                 }
                 if (!found) return false;
             }
@@ -352,26 +482,6 @@ public final class MinecraftPlayerConsumptionPort implements ConsumptionPort {
             || tag instanceof NBTTagList && ((NBTTagList) tag).tagCount() == 0;
     }
 
-    @SuppressWarnings("unchecked")
-    private static List<NBTBase> listValues(NBTTagList list) {
-        try {
-            return (List<NBTBase>) TAG_LIST.get(list);
-        } catch (IllegalAccessException failure) {
-            throw new IllegalStateException("cannot inspect NBT list", failure);
-        }
-    }
-
-    private static Field tagListField() {
-        for (String name : new String[] { "tagList", "field_74747_a" }) {
-            try {
-                Field field = NBTTagList.class.getDeclaredField(name);
-                field.setAccessible(true);
-                return field;
-            } catch (NoSuchFieldException ignored) {}
-        }
-        throw new ExceptionInInitializerError("NBTTagList backing field not found");
-    }
-
     private NBTTagCompound persisted(EntityPlayer player) {
         NBTTagCompound entity = player.getEntityData();
         if (!entity.hasKey(EntityPlayer.PERSISTED_NBT_TAG, 10)) entity.setTag(EntityPlayer.PERSISTED_NBT_TAG,
@@ -412,5 +522,7 @@ public final class MinecraftPlayerConsumptionPort implements ConsumptionPort {
     }
 
     private int integer(String value, int fallback) { return value == null ? fallback : Integer.parseInt(value); }
-    private boolean bool(String value, boolean fallback) { return value == null ? fallback : Boolean.parseBoolean(value); }
+    private boolean bool(String value, boolean fallback) {
+        return com.jsirgalaxybase.quest.core.QuestBooleanParameter.parse(value, fallback);
+    }
 }

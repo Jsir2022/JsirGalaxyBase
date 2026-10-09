@@ -45,6 +45,7 @@ public class ModConfiguration {
     private final String[] targetServerRtpProfiles;
     private final boolean questPostgresReadEnabled;
     private final String[] questCommandRewardAllowlist;
+    private final boolean questNoRewardsEnabled;
 
     private ModConfiguration(File minecraftDirectory, boolean autoDumpItemsOnClientStart, String itemDumpDirectory,
         int terminalAccentColor, float terminalPanelWidthRatio, float terminalPanelHeightRatio,
@@ -84,6 +85,22 @@ public class ModConfiguration {
         String[] landReservedChunks, boolean landAllowFakePlayers, boolean warehouseEnabled, boolean itemPolicyEnabled,
         String[] itemPolicyRules, String globalHubTarget, String[] targetServerRtpProfiles,
         boolean questPostgresReadEnabled, String[] questCommandRewardAllowlist) {
+        this(minecraftDirectory, autoDumpItemsOnClientStart, itemDumpDirectory, terminalAccentColor,
+            terminalPanelWidthRatio, terminalPanelHeightRatio, terminalNavigationWidthRatio, bankingPostgresEnabled,
+            bankingJdbcUrl, bankingJdbcUsername, bankingJdbcPassword, bankingSourceServerId, landEnabled,
+            landProtectionMode, landMaxClaimsPerPlayer, landBlockedDimensions, landReservedChunks, landAllowFakePlayers,
+            warehouseEnabled, itemPolicyEnabled, itemPolicyRules, globalHubTarget, targetServerRtpProfiles,
+            questPostgresReadEnabled, questCommandRewardAllowlist, false);
+    }
+
+    private ModConfiguration(File minecraftDirectory, boolean autoDumpItemsOnClientStart, String itemDumpDirectory,
+        int terminalAccentColor, float terminalPanelWidthRatio, float terminalPanelHeightRatio,
+        float terminalNavigationWidthRatio, boolean bankingPostgresEnabled, String bankingJdbcUrl,
+        String bankingJdbcUsername, String bankingJdbcPassword, String bankingSourceServerId, boolean landEnabled,
+        String landProtectionMode, int landMaxClaimsPerPlayer, int[] landBlockedDimensions,
+        String[] landReservedChunks, boolean landAllowFakePlayers, boolean warehouseEnabled, boolean itemPolicyEnabled,
+        String[] itemPolicyRules, String globalHubTarget, String[] targetServerRtpProfiles,
+        boolean questPostgresReadEnabled, String[] questCommandRewardAllowlist, boolean questNoRewardsEnabled) {
         this.minecraftDirectory = minecraftDirectory;
         this.autoDumpItemsOnClientStart = autoDumpItemsOnClientStart;
         this.itemDumpDirectory = itemDumpDirectory;
@@ -110,6 +127,7 @@ public class ModConfiguration {
         this.questPostgresReadEnabled = questPostgresReadEnabled;
         this.questCommandRewardAllowlist = questCommandRewardAllowlist == null ? new String[0]
             : questCommandRewardAllowlist.clone();
+        this.questNoRewardsEnabled = questNoRewardsEnabled;
     }
 
     /**
@@ -269,6 +287,11 @@ public class ModConfiguration {
         final String[] questCommandRewardAllowlist = serverConfiguration == null ? new String[0]
             : serverConfiguration.getStringList("commandRewardAllowlist", QUEST_CATEGORY, new String[0],
                 "Command roots allowed for quest rewards. Empty denies command rewards; only add idempotent commands.");
+        final boolean questNoRewardsEnabled = serverConfiguration != null && serverConfiguration.getBoolean(
+            "noRewards",
+            QUEST_CATEGORY,
+            false,
+            "Matches BetterQuesting: suppress rewards unless the reward has ignoreDisabled enabled.");
 
         if (clientConfiguration.hasCategory(BANKING_CATEGORY)) {
             clientConfiguration.removeCategory(clientConfiguration.getCategory(BANKING_CATEGORY));
@@ -320,7 +343,8 @@ public class ModConfiguration {
             globalHubTarget,
             targetServerRtpProfiles,
             questPostgresReadEnabled,
-            questCommandRewardAllowlist);
+            questCommandRewardAllowlist,
+            questNoRewardsEnabled);
     }
 
     private static float parseRatio(String value, float fallback) {
@@ -461,4 +485,5 @@ public class ModConfiguration {
 
     public boolean isQuestPostgresReadEnabled() { return questPostgresReadEnabled; }
     public String[] getQuestCommandRewardAllowlist() { return questCommandRewardAllowlist.clone(); }
+    public boolean isQuestNoRewardsEnabled() { return questNoRewardsEnabled; }
 }

@@ -92,7 +92,10 @@ final class QuestEditorParameterValidation {
             if (empty(amount)) issue(result, prefix + "amount", "required", "Entry amount is required");
             else {
                 try {
-                    if (Long.parseLong(amount) <= 0L) issue(result, prefix + "amount", "minimum", "Entry amount must be positive");
+                    long parsed = Long.parseLong(amount);
+                    if (parsed < 0L || (parsed == 0L && field.getType() != QuestEditorFieldType.BLOCK_LIST)) {
+                        issue(result, prefix + "amount", "minimum", "Entry amount must be positive");
+                    }
                 } catch (NumberFormatException invalid) {
                     issue(result, prefix + "amount", "number", "Entry amount must be an integer");
                 }

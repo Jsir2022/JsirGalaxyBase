@@ -40,10 +40,10 @@ public final class ConsumptionRequestAuthorizer {
     public ConsumptionRequest authorize(ConsumptionIntent intent, long now) {
         QuestDefinition definition = published(intent);
         TaskDefinition task = task(definition, intent.getTaskKey());
-        String kind = kind(task);
-        if (!Boolean.parseBoolean(task.getParameters().get("consume"))) {
-            throw new IllegalArgumentException("task does not consume resources");
+        if (!supports(definition, task)) {
+            throw new IllegalArgumentException("task is outside the verified manual item-consumption subset");
         }
+        String kind = kind(task);
         List<ParticipantMembership> selected = assignments.select(definition, memberships.resolve(intent.getPlayerId()));
         if (selected.isEmpty()) throw new IllegalArgumentException("player has no active participant for quest scope");
         ParticipantMembership membership = selected.get(0);
@@ -51,8 +51,15 @@ public final class ConsumptionRequestAuthorizer {
         Optional<QuestProgressSnapshot> stored = progress.findProgress(participant, definition.getId(),
             definition.getVersion());
         Set<java.util.UUID> completed = completions.findCompletedQuestIds(participant);
+        int activeCycle = stored.isPresent() ? stored.get().getCycle() : 0;
+        boolean pendingActiveCycle = progress.hasPendingConsumptionSubmission(participant, definition.getId(),
+            definition.getVersion(), activeCycle);
         QuestProgressSnapshot normalized = engine.evaluate(membership, definition, stored.orElse(null), null,
-            completed, now).getProgress();
+            completed, now, pendingActiveCycle).getProgress();
+        if (progress.hasPendingConsumptionSubmission(participant, definition.getId(), definition.getVersion(),
+            normalized.getCycle())) {
+            throw new IllegalArgumentException("another item submission is pending for this quest cycle");
+        }
         if (normalized.getStatus() == QuestStatus.LOCKED || normalized.getStatus() == QuestStatus.COMPLETED) {
             throw new IllegalArgumentException("quest is not accepting consumption in status " + normalized.getStatus());
         }
@@ -67,9 +74,27 @@ public final class ConsumptionRequestAuthorizer {
             any |= value > 0;
         }
         if (!any) throw new IllegalArgumentException("task has no remaining consumption");
+        Map<String, String> parameters = resourceParameters(task, kind);
+        parameters.put(ConsumptionRequest.QUEST_CYCLE_PARAMETER, Integer.toString(normalized.getCycle()));
+        if (intent.getSelection() != null) {
+            parameters.put(ConsumptionRequest.SELECTION_SLOT_PARAMETER,
+                Integer.toString(intent.getSelection().getInventorySlot()));
+            parameters.put(ConsumptionRequest.SELECTION_FINGERPRINT_PARAMETER,
+                intent.getSelection().getStackFingerprint());
+        }
         return new ConsumptionRequest(intent.getSubmissionKey(), intent.getSourceServer(), intent.getPlayerId(),
             participant, definition.getId(), definition.getVersion(), task.getKey(), kind, remaining,
-            resourceParameters(task, kind), intent.getCreatedAt());
+            parameters, intent.getCreatedAt());
+    }
+
+    /** Manual item retrieval is supported for player-owned quests; other consumption types remain gated. */
+    public static boolean supports(QuestDefinition definition, TaskDefinition task) {
+        if (definition == null || task == null
+            || definition.getBehavior().getParticipantScope() != QuestParticipantScope.PLAYER) return false;
+        String type = task.getTypeId();
+        if (!"bq_standard:retrieval".equals(type) && !"bq_standard:optional_retrieval".equals(type)
+            && !"bq_standard:fluid".equals(type)) return false;
+        return flag(task.getParameters().get("consume")) && !flag(task.getParameters().get("autoConsume"));
     }
 
     private QuestDefinition published(ConsumptionIntent intent) {
@@ -93,8 +118,11 @@ public final class ConsumptionRequestAuthorizer {
         if ("bq_standard:retrieval".equals(task.getTypeId())
             || "bq_standard:optional_retrieval".equals(task.getTypeId())) return "item";
         if ("bq_standard:fluid".equals(task.getTypeId())) return "fluid";
-        if ("bq_standard:xp".equals(task.getTypeId())) return "xp";
         throw new IllegalArgumentException("task type is not a supported consumption task");
+    }
+
+    private static boolean flag(String value) {
+        return QuestBooleanParameter.parse(value, false);
     }
 
     private Map<String, String> resourceParameters(TaskDefinition task, String kind) {

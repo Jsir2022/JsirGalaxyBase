@@ -7,7 +7,7 @@ import java.util.UUID;
 import com.jsirgalaxybase.quest.core.RewardChoiceSelectionRepository;
 import com.jsirgalaxybase.quest.core.RewardChoiceSelectionStatus;
 
-/** PostgreSQL authority for immutable player choice selection. */
+/** PostgreSQL authority for player choice selection before reward claiming. */
 public final class JdbcRewardChoiceSelectionRepository implements RewardChoiceSelectionRepository {
     private final JdbcQuestConnectionManager connections;
 
@@ -19,28 +19,24 @@ public final class JdbcRewardChoiceSelectionRepository implements RewardChoiceSe
     @Override
     public RewardChoiceSelectionStatus select(final String entitlementKey, final UUID playerId,
         final int choiceIndex, final long selectedAt) {
+        return selectInternal(entitlementKey,playerId,choiceIndex,selectedAt,false);
+    }
+
+    @Override
+    public RewardChoiceSelectionStatus selectForForcedClaim(final String entitlementKey, final UUID playerId,
+        final int choiceIndex, final long selectedAt) {
+        return selectInternal(entitlementKey,playerId,choiceIndex,selectedAt,true);
+    }
+
+    private RewardChoiceSelectionStatus selectInternal(final String entitlementKey, final UUID playerId,
+        final int choiceIndex, final long selectedAt, final boolean allowQueuedFirstSelection) {
         requireTransaction();
         if (entitlementKey == null || entitlementKey.trim().isEmpty() || playerId == null) {
             throw new IllegalArgumentException("entitlementKey and playerId are required");
         }
         return connections.withConnection(connection -> {
-            String insert = "INSERT INTO galaxy_quest_reward_choice_selection(entitlement_key,choice_index,selected_at) "
-                + "SELECT entitlement_key,?,to_timestamp(?/1000.0) FROM galaxy_quest_reward_entitlement "
-                + "WHERE entitlement_key=? AND recipient_player_id=? "
-                + "AND reward_type='bq_standard:choice' AND delivery_status IN ('CLAIMABLE','PENDING','FAILED') "
-                + "AND ?>=0 AND ?<COALESCE((reward_parameters_json->>'item.count')::integer,0) "
-                + "ON CONFLICT (entitlement_key) DO NOTHING";
-            try (PreparedStatement statement = connection.prepareStatement(insert)) {
-                statement.setInt(1, choiceIndex);
-                statement.setLong(2, selectedAt);
-                statement.setString(3, entitlementKey);
-                statement.setObject(4, playerId);
-                statement.setInt(5, choiceIndex);
-                statement.setInt(6, choiceIndex);
-                if (statement.executeUpdate() == 1) return RewardChoiceSelectionStatus.SELECTED;
-            }
             String inspect = "SELECT participant_type,recipient_player_id,reward_type,"
-                + "COALESCE((reward_parameters_json->>'item.count')::integer,0),s.choice_index "
+                + "COALESCE((reward_parameters_json->>'item.count')::integer,0),e.delivery_status,s.choice_index "
                 + "FROM galaxy_quest_reward_entitlement e LEFT JOIN galaxy_quest_reward_choice_selection s "
                 + "ON s.entitlement_key=e.entitlement_key WHERE e.entitlement_key=? FOR UPDATE OF e";
             try (PreparedStatement statement = connection.prepareStatement(inspect)) {
@@ -50,10 +46,35 @@ public final class JdbcRewardChoiceSelectionRepository implements RewardChoiceSe
                     if (!playerId.equals(row.getObject(2))
                         || !"bq_standard:choice".equals(row.getString(3))
                         || choiceIndex < 0 || choiceIndex >= row.getInt(4)) return RewardChoiceSelectionStatus.INVALID;
-                    int existing = row.getInt(5);
-                    if (!row.wasNull()) return existing == choiceIndex ? RewardChoiceSelectionStatus.ALREADY_SELECTED
-                        : RewardChoiceSelectionStatus.CONFLICT;
-                    return RewardChoiceSelectionStatus.INVALID;
+                    String deliveryStatus = row.getString(5);
+                    int existing = row.getInt(6);
+                    boolean hasSelection = !row.wasNull();
+                    if (hasSelection && existing == choiceIndex) return RewardChoiceSelectionStatus.ALREADY_SELECTED;
+                    if (hasSelection) {
+                        if (!"CLAIMABLE".equals(deliveryStatus)) return RewardChoiceSelectionStatus.CONFLICT;
+                        try (PreparedStatement update = connection.prepareStatement(
+                            "UPDATE galaxy_quest_reward_choice_selection SET choice_index=?,selected_at=to_timestamp(?/1000.0) "
+                                + "WHERE entitlement_key=?")) {
+                            update.setInt(1, choiceIndex);
+                            update.setLong(2, selectedAt);
+                            update.setString(3, entitlementKey);
+                            return update.executeUpdate() == 1 ? RewardChoiceSelectionStatus.RESELECTED
+                                : RewardChoiceSelectionStatus.CONFLICT;
+                        }
+                    }
+                    boolean claimable="CLAIMABLE".equals(deliveryStatus);
+                    boolean queuedFirstSelectionAllowed=allowQueuedFirstSelection
+                        &&("PENDING".equals(deliveryStatus)||"FAILED".equals(deliveryStatus));
+                    if (!claimable&&!queuedFirstSelectionAllowed)return RewardChoiceSelectionStatus.INVALID;
+                    try (PreparedStatement insert = connection.prepareStatement(
+                        "INSERT INTO galaxy_quest_reward_choice_selection(entitlement_key,choice_index,selected_at) "
+                            + "VALUES(?,?,to_timestamp(?/1000.0)) ON CONFLICT (entitlement_key) DO NOTHING")) {
+                        insert.setString(1, entitlementKey);
+                        insert.setInt(2, choiceIndex);
+                        insert.setLong(3, selectedAt);
+                        return insert.executeUpdate() == 1 ? RewardChoiceSelectionStatus.SELECTED
+                            : RewardChoiceSelectionStatus.CONFLICT;
+                    }
                 }
             }
         });

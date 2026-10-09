@@ -4,6 +4,8 @@
 
 ## 当前最建议先看的内容
 
+- [BQ 替代进度与代码质量收口（2026-10-02）](betterquesting-progress-quality-review-2026-10-02.md)
+  - 当前 M.2 状态、五项运行/测试风险、背包主链优先级和本轮验证受阻边界
 - `betterquesting-capability-absorption-matrix-2026-09-13.md`
   - BetterQuesting 替代工作的唯一权威进度表；区分已完成、部分完成和未完成，并明确当前稳定检查点不代表
     正式替代、生产迁移或切换已经完成
@@ -227,6 +229,8 @@
   - 暂停新玩法后，按内容清点、定义导入、行为兼容、玩家进度合并、影子双算和正式切换推进 BQ 吸收；包含下一长期目标与 M.1 自动验收边界
 - `betterquesting-replacement-goal-handoff-2026-09-17.md`
   - 可直接用于设立下一长期目标的交接单；明确当前 M.1 工作树状态、完成判据、禁止范围及 M.2-M.6 后续顺序
+- `betterquesting-m2-behavior-compatibility-2026-09-23.md`
+  - M.2 按真实任务书频率推进的行为兼容矩阵、证据口径和已知差异
 # Galaxy UI 2 正式迁移
 
 - `galaxy-ui2-production-migration-roadmap-2026-09-05.md`：从生产组件、资产中心纵向迁移到旧 Canvas 删除的阶段状态与人工闸门。

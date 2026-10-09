@@ -19,6 +19,7 @@ public final class InventorySnapshotTaskEvaluator implements TaskEvaluator {
     @Override
     public TaskProgress evaluate(TaskDefinition definition, TaskProgress current, GameplayFact fact) {
         if (!factType.equals(fact.getTypeId()) || bool(definition.getParameters().get("consume"), false)) return current;
+        boolean groupDetect = bool(definition.getParameters().get("groupDetect"), false);
         int requirements = integer(definition.getParameters().get("item.count"), 0);
         if (current.getValues().size() != requirements) throw new IllegalArgumentException(
             "retrieval task vector width does not match definition");
@@ -28,15 +29,22 @@ public final class InventorySnapshotTaskEvaluator implements TaskEvaluator {
             fact.getAttributes().get("inventory." + item + ".amount"), 0L);
         List<Long> values = new ArrayList<Long>(requirements);
         for (int requirement = 0; requirement < requirements; requirement++) {
+            long target = current.getTargets().get(requirement);
+            // Ordinary detection retains satisfied components. groupDetect starts a fresh
+            // aggregate pass across active members and recalculates every incomplete component.
+            if (!groupDetect && current.getValues().get(requirement) >= target) {
+                values.add(target);
+                continue;
+            }
             long total = 0L;
             for (int item = 0; item < observed; item++) {
                 if (!matches(definition.getParameters(), requirement, fact.getAttributes(), item)) continue;
-                long needed = Math.max(0L, current.getTargets().get(requirement) - total);
+                long needed = Math.max(0L, target - total);
                 long allocated = Math.min(needed, remaining[item]);
                 total = saturatingAdd(total, allocated);
                 remaining[item] -= allocated;
             }
-            values.add(Math.min(current.getTargets().get(requirement), total));
+            values.add(Math.min(target, total));
         }
         return current.replaceIncomplete(values);
     }
@@ -48,16 +56,21 @@ public final class InventorySnapshotTaskEvaluator implements TaskEvaluator {
         int requiredMeta = integer(parameters.get(required + "meta"), 0);
         int actualMeta = integer(fact.get(observed + "meta"), 0);
         boolean direct = requiredName != null && requiredName.equals(fact.get(observed + "registryName"))
-            && (requiredMeta == 32767 || requiredMeta == actualMeta);
+            && (requiredMeta == 32767 || requiredMeta == actualMeta
+                || bool(fact.get(observed + "damageable"), false));
         String ore = parameters.get(required + "oreDictionary");
         boolean oreMatch = ore != null && !ore.isEmpty()
             && delimitedContains(fact.get(observed + "oreDictionary"), ore);
         if (!direct && !oreMatch) return false;
         if (bool(parameters.get("ignoreNBT"), true)) return true;
         String requiredNbt = parameters.get(required + "nbtPortable");
-        return requiredNbt == null || PortableNbt.decode(requiredNbt).isEmpty()
-            || PortableNbtMatcher.matches(requiredNbt, fact.get(observed + "nbtPortable"),
-                bool(parameters.get("partialMatch"), false));
+        String actualNbt = fact.get(observed + "nbtPortable");
+        boolean partial = bool(parameters.get("partialMatch"), false);
+        // BQ StackMatch compares required NBT against the observed stack. Its separate
+        // OreDictionaryMatch passes the observed stack tag as the required side, so preserve
+        // that historical direction (including its unusual subset behavior).
+        return (direct && PortableNbtMatcher.matches(requiredNbt, actualNbt, partial))
+            || (oreMatch && PortableNbtMatcher.matches(actualNbt, requiredNbt, partial));
     }
 
     private boolean delimitedContains(String values, String expected) {
@@ -65,7 +78,7 @@ public final class InventorySnapshotTaskEvaluator implements TaskEvaluator {
         for (String value : values.split("\\|", -1)) if (expected.equals(value)) return true;
         return false;
     }
-    private boolean bool(String raw, boolean fallback) { return raw == null ? fallback : Boolean.parseBoolean(raw); }
+    private boolean bool(String raw, boolean fallback) { return QuestBooleanParameter.parse(raw, fallback); }
     private int integer(String raw, int fallback) { return raw == null ? fallback : Integer.parseInt(raw); }
     private long positive(String raw, long fallback) {
         long value = raw == null ? fallback : Long.parseLong(raw);

@@ -5,15 +5,25 @@ import java.sql.ResultSet;
 import java.util.UUID;
 import java.util.OptionalInt;
 import java.util.Optional;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.jsirgalaxybase.quest.core.ParticipantId;
 import com.jsirgalaxybase.quest.core.ParticipantType;
+import com.jsirgalaxybase.quest.core.RewardDefinition;
 import com.jsirgalaxybase.quest.core.RewardClaimRepository;
 import com.jsirgalaxybase.quest.core.RewardClaimStatus;
 import com.jsirgalaxybase.quest.core.RewardClaimTarget;
+import com.jsirgalaxybase.quest.core.RewardSuppressionPolicy;
 
 public final class JdbcRewardClaimRepository implements RewardClaimRepository {
     private final JdbcQuestConnectionManager connections;
+    private final Gson gson = new Gson();
 
     public JdbcRewardClaimRepository(JdbcQuestConnectionManager connections) {
         if (connections == null) throw new IllegalArgumentException("connections must not be null");
@@ -23,31 +33,47 @@ public final class JdbcRewardClaimRepository implements RewardClaimRepository {
     @Override
     public RewardClaimStatus claim(final UUID questId, final int version, final int cycle,
         final UUID currentPlayerId, final long claimedAt) {
-        return claimInternal(null, questId, version, cycle, currentPlayerId, claimedAt);
+        return claimInternal(null, questId, version, cycle, currentPlayerId, claimedAt, false);
+    }
+
+    @Override
+    public RewardClaimStatus claim(final UUID questId, final int version, final int cycle,
+        final UUID currentPlayerId, final long claimedAt, final boolean noRewards) {
+        return claimInternal(null, questId, version, cycle, currentPlayerId, claimedAt, noRewards);
     }
 
     @Override
     public RewardClaimStatus claim(final RewardClaimTarget target, final UUID questId, final int version,
         final UUID currentPlayerId, final long claimedAt) {
         if (target == null) throw new IllegalArgumentException("target is required");
-        return claimInternal(target.getParticipantId(), questId, version, target.getCycle(), currentPlayerId, claimedAt);
+        return claimInternal(target.getParticipantId(), questId, version, target.getCycle(), currentPlayerId,
+            claimedAt, false);
+    }
+
+    @Override
+    public RewardClaimStatus claim(final RewardClaimTarget target, final UUID questId, final int version,
+        final UUID currentPlayerId, final long claimedAt, final boolean noRewards) {
+        if (target == null) throw new IllegalArgumentException("target is required");
+        return claimInternal(target.getParticipantId(), questId, version, target.getCycle(), currentPlayerId,
+            claimedAt, noRewards);
     }
 
     private RewardClaimStatus claimInternal(final ParticipantId subject, final UUID questId, final int version,
-        final int cycle, final UUID currentPlayerId, final long claimedAt) {
+        final int cycle, final UUID currentPlayerId, final long claimedAt, final boolean noRewards) {
         requireTransaction();
         if (questId == null || currentPlayerId == null || version < 1 || cycle < 0 || claimedAt < 0L) {
             throw new IllegalArgumentException("valid quest identity, cycle, and current player are required");
         }
         return connections.withConnection(connection -> {
             String subjectFilter = subject == null ? "" : "AND e.participant_type=? AND e.participant_id=? ";
-            String inspect = "SELECT delivery_status,reward_type,s.choice_index "
+            String inspect = "SELECT e.entitlement_key,e.delivery_status,e.reward_type,e.reward_parameters_json::text,s.choice_index "
                 + "FROM galaxy_quest_reward_entitlement e LEFT JOIN galaxy_quest_reward_choice_selection s "
                 + "ON s.entitlement_key=e.entitlement_key WHERE e.quest_id=? AND e.definition_version=? AND e.cycle=? "
                 + "AND e.recipient_player_id=? " + subjectFilter + "ORDER BY e.entitlement_key FOR UPDATE OF e";
             int rows = 0;
             boolean claimable = false;
             boolean alreadyClaimed = true;
+            List<ClaimableReward> claimableRewards = new ArrayList<ClaimableReward>();
             try (PreparedStatement statement = connection.prepareStatement(inspect)) {
                 statement.setObject(1, questId);
                 statement.setInt(2, version);
@@ -57,40 +83,67 @@ public final class JdbcRewardClaimRepository implements RewardClaimRepository {
                 try (ResultSet result = statement.executeQuery()) {
                     while (result.next()) {
                         rows++;
-                        String status = result.getString(1);
+                        String key = result.getString(1);
+                        String status = result.getString(2);
                         claimable |= "CLAIMABLE".equals(status);
                         alreadyClaimed &= !"CLAIMABLE".equals(status);
-                        if ("CLAIMABLE".equals(status) && "bq_standard:choice".equals(result.getString(2))) {
-                            result.getInt(3);
+                        if ("CLAIMABLE".equals(status) && "bq_standard:choice".equals(result.getString(3))) {
+                            result.getInt(5);
                             if (result.wasNull()) return RewardClaimStatus.NEEDS_CHOICE;
                         }
                         if (!"CLAIMABLE".equals(status) && !"PENDING".equals(status)
                             && !"DELIVERING".equals(status) && !"DELIVERED".equals(status)
-                            && !"FAILED".equals(status) && !"ABANDONED".equals(status)) {
+                            && !"SUPPRESSED".equals(status) && !"FAILED".equals(status)
+                            && !"ABANDONED".equals(status)) {
                             return RewardClaimStatus.INVALID_STATE;
                         }
+                        if ("CLAIMABLE".equals(status)) claimableRewards.add(new ClaimableReward(key,
+                            new RewardDefinition("claim", result.getString(3), parameters(result.getString(4)))));
                     }
                 }
             }
             if (rows == 0) return existsForOtherPlayer(connection, subject, questId, version, cycle, currentPlayerId)
                 ? RewardClaimStatus.NOT_OWNED : RewardClaimStatus.NOT_FOUND;
             if (!claimable && alreadyClaimed) return RewardClaimStatus.ALREADY_CLAIMED;
+            int queued = 0;
+            int suppressed = 0;
             try (PreparedStatement statement = connection.prepareStatement(
-                "UPDATE galaxy_quest_reward_entitlement SET delivery_status='PENDING',next_attempt_at=NULL,"
-                    + "claimed_at=to_timestamp(?/1000.0) "
-                    + "WHERE quest_id=? AND definition_version=? AND cycle=? AND recipient_player_id=? "
-                    + (subject == null ? "" : "AND participant_type=? AND participant_id=? ")
+                "UPDATE galaxy_quest_reward_entitlement SET delivery_status=?,next_attempt_at=NULL,"
+                    + "claimed_at=to_timestamp(?/1000.0) WHERE entitlement_key=? AND recipient_player_id=? "
                     + "AND delivery_status='CLAIMABLE'")) {
-                statement.setLong(1, claimedAt);
-                statement.setObject(2, questId);
-                statement.setInt(3, version);
-                statement.setInt(4, cycle);
-                statement.setObject(5, currentPlayerId);
-                if (subject != null) { statement.setString(6, subject.getType().name()); statement.setObject(7, subject.getId()); }
-                if (statement.executeUpdate() < 1) return RewardClaimStatus.INVALID_STATE;
+                RewardSuppressionPolicy policy = new RewardSuppressionPolicy(noRewards);
+                for (ClaimableReward reward : claimableRewards) {
+                    boolean suppress = policy.suppresses(reward.definition);
+                    statement.setString(1, suppress ? "SUPPRESSED" : "PENDING");
+                    statement.setLong(2, claimedAt);
+                    statement.setString(3, reward.key);
+                    statement.setObject(4, currentPlayerId);
+                    if (statement.executeUpdate() != 1) return RewardClaimStatus.INVALID_STATE;
+                    if (suppress) suppressed++; else queued++;
+                }
             }
-            return RewardClaimStatus.CLAIMED;
+            return queued == 0 && suppressed > 0 ? RewardClaimStatus.SUPPRESSED : RewardClaimStatus.CLAIMED;
         });
+    }
+
+    private Map<String, String> parameters(String json) {
+        JsonObject object = gson.fromJson(json, JsonObject.class);
+        Map<String, String> result = new LinkedHashMap<String, String>();
+        if (object == null) return result;
+        for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
+            JsonElement value = entry.getValue();
+            if (value != null && !value.isJsonNull()) result.put(entry.getKey(), value.getAsString());
+        }
+        return result;
+    }
+
+    private static final class ClaimableReward {
+        private final String key;
+        private final RewardDefinition definition;
+        private ClaimableReward(String key, RewardDefinition definition) {
+            this.key = key;
+            this.definition = definition;
+        }
     }
 
     private boolean existsForOtherPlayer(java.sql.Connection connection, ParticipantId subject, UUID questId, int version, int cycle,

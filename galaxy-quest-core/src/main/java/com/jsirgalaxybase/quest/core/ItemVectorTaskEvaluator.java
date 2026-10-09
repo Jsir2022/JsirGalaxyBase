@@ -20,6 +20,10 @@ public final class ItemVectorTaskEvaluator implements TaskEvaluator {
     @Override
     public TaskProgress evaluate(TaskDefinition definition, TaskProgress current, GameplayFact fact) {
         if (!factType.equals(fact.getTypeId()) || !channelAllowed(definition.getParameters(), fact)) return current;
+        String targetTaskKey = fact.getAttributes().get("targetTaskKey");
+        if (targetTaskKey != null && !targetTaskKey.equals(definition.getKey())) return current;
+        if ("craft-statistics".equals(fact.getAttributes().get("channel"))
+            && !statisticsDetectionAllowed(definition.getParameters(), fact.getAttributes())) return current;
         int count = integer(definition.getParameters().get("item.count"), 0);
         if (current.getValues().size() != count) throw new IllegalArgumentException(
             "item task vector width does not match definition");
@@ -35,8 +39,33 @@ public final class ItemVectorTaskEvaluator implements TaskEvaluator {
         return current.merge(next, false);
     }
 
+    private boolean statisticsDetectionAllowed(Map<String, String> parameters, Map<String, String> attributes) {
+        String triggerChannel = attributes.get("trigger.channel");
+        if (triggerChannel == null || triggerChannel.isEmpty()) return true; // explicit Detect request
+        Map<String, String> trigger = new java.util.LinkedHashMap<String, String>();
+        trigger.put("channel", triggerChannel);
+        copy(attributes, trigger, "trigger.registryName", "registryName");
+        copy(attributes, trigger, "trigger.meta", "meta");
+        copy(attributes, trigger, "trigger.damageable", "damageable");
+        copy(attributes, trigger, "trigger.oreDictionary", "oreDictionary");
+        copy(attributes, trigger, "trigger.nbtPortable", "nbtPortable");
+        if (!channelAllowed(parameters, trigger)) return false;
+        int count = integer(parameters.get("item.count"), 0);
+        for (int i = 0; i < count; i++) if (matches(parameters, i, trigger)) return true;
+        return false;
+    }
+
+    private void copy(Map<String, String> source, Map<String, String> target, String sourceKey, String targetKey) {
+        String value = source.get(sourceKey);
+        if (value != null) target.put(targetKey, value);
+    }
+
     private boolean channelAllowed(Map<String, String> parameters, GameplayFact fact) {
-        String channel = fact.getAttributes().get("channel");
+        return channelAllowed(parameters, fact.getAttributes());
+    }
+
+    private boolean channelAllowed(Map<String, String> parameters, Map<String, String> fact) {
+        String channel = fact.get("channel");
         if (channel == null) return true;
         if ("craft".equals(channel)) return bool(parameters.get("allowCraft"), true);
         if ("smelt".equals(channel)) return bool(parameters.get("allowSmelt"), true);
@@ -48,21 +77,31 @@ public final class ItemVectorTaskEvaluator implements TaskEvaluator {
     private boolean matches(Map<String, String> parameters, int index, Map<String, String> fact) {
         String prefix = "item." + index + ".";
         String requiredName = parameters.get(prefix + "registryName");
-        if (requiredName != null && requiredName.equals(fact.get("registryName"))) {
+        if ("craft-statistics".equals(fact.get("channel"))) {
+            // BQ's statistics fallback reads objectCraftStats by Item ID only; it does
+            // not re-check metadata, OreDictionary membership, or NBT for this branch.
+            return requiredName != null && requiredName.equals(fact.get("registryName"));
+        }
+        boolean direct = requiredName != null && requiredName.equals(fact.get("registryName"));
+        if (direct) {
             int requiredMeta = integer(parameters.get(prefix + "meta"), 0);
             int actualMeta = integer(fact.get("meta"), 0);
-            if (requiredMeta == 32767 || requiredMeta == actualMeta) return nbtMatches(parameters, prefix, fact);
+            // BQ ItemComparison.StackMatch treats every damage value as compatible when
+            // the required item's Item.isDamageable() is true. The adapter records that
+            // property on produced-item facts so this remains platform independent.
+            direct = requiredMeta == 32767 || requiredMeta == actualMeta || bool(fact.get("damageable"), false);
         }
         String ore = parameters.get(prefix + "oreDictionary");
-        return ore != null && !ore.isEmpty() && delimitedContains(fact.get("oreDictionary"), ore)
-            && nbtMatches(parameters, prefix, fact);
-    }
-
-    private boolean nbtMatches(Map<String, String> parameters, String prefix, Map<String, String> fact) {
+        boolean oreMatch = ore != null && !ore.isEmpty() && delimitedContains(fact.get("oreDictionary"), ore);
+        if (!direct && !oreMatch) return false;
         if (bool(parameters.get("ignoreNBT"), true)) return true;
-        String required = parameters.get(prefix + "nbtPortable");
-        return required == null || PortableNbt.decode(required).isEmpty()
-            || PortableNbtMatcher.matches(required, fact.get("nbtPortable"), bool(parameters.get("partialMatch"), false));
+        String requiredNbt = parameters.get(prefix + "nbtPortable");
+        String actualNbt = fact.get("nbtPortable");
+        boolean partial = bool(parameters.get("partialMatch"), false);
+        // Keep BQ's two APIs distinct: StackMatch uses (required, actual), while
+        // OreDictionaryMatch calls CompareNBTTagCompound(actual, required).
+        return (direct && PortableNbtMatcher.matches(requiredNbt, actualNbt, partial))
+            || (oreMatch && PortableNbtMatcher.matches(actualNbt, requiredNbt, partial));
     }
 
     private boolean delimitedContains(String values, String expected) {
@@ -71,7 +110,7 @@ public final class ItemVectorTaskEvaluator implements TaskEvaluator {
         return false;
     }
 
-    private boolean bool(String raw, boolean fallback) { return raw == null ? fallback : Boolean.parseBoolean(raw); }
+    private boolean bool(String raw, boolean fallback) { return QuestBooleanParameter.parse(raw, fallback); }
     private int integer(String raw, int fallback) { return raw == null ? fallback : Integer.parseInt(raw); }
     private long positive(String raw, long fallback) {
         long value = raw == null ? fallback : Long.parseLong(raw);

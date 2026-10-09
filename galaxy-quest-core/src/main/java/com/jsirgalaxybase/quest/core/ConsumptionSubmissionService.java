@@ -23,6 +23,17 @@ public final class ConsumptionSubmissionService {
         final long now) {
         if (intent == null || authorizer == null) throw new IllegalArgumentException("intent and authorizer are required");
         Authorized prepared = transaction.inTransaction(() -> {
+            java.util.Optional<ConsumptionSubmission> existing = submissions.find(intent.getSubmissionKey());
+            if (existing.isPresent()) {
+                ConsumptionRequest request = existing.get().getRequest();
+                if (!request.getSourceServer().equals(intent.getSourceServer())
+                    || !request.getPlayerId().equals(intent.getPlayerId())
+                    || !request.getQuestId().equals(intent.getQuestId())
+                    || !request.getTaskKey().equals(intent.getTaskKey())) {
+                    throw new IllegalArgumentException("consumption submission key belongs to a different request");
+                }
+                return new Authorized(request, existing.get());
+            }
             ConsumptionRequest request = authorizer.authorize(intent, now);
             return new Authorized(request, submissions.prepareIfAbsent(request));
         });
@@ -33,6 +44,25 @@ public final class ConsumptionSubmissionService {
         ConsumptionSubmission submission = transaction.inTransaction(() -> submissions.find(submissionKey)
             .orElseThrow(() -> new IllegalArgumentException("unknown consumption submission")));
         return process(submission.getRequest(), submission, now);
+    }
+
+    /** Resumes at most a bounded batch after the submitting player is online on the originating server. */
+    public java.util.List<ConsumptionSubmission> resumePendingForPlayer(final java.util.UUID playerId,
+        final String sourceServer, final long now) {
+        if (playerId == null) throw new IllegalArgumentException("playerId is required");
+        if (sourceServer == null || sourceServer.trim().isEmpty()) throw new IllegalArgumentException(
+            "sourceServer is required");
+        java.util.List<ConsumptionSubmission> pending = transaction.inTransaction(
+            () -> submissions.findPendingForPlayer(playerId, sourceServer.trim(), 64));
+        java.util.List<ConsumptionSubmission> resumed = new java.util.ArrayList<ConsumptionSubmission>(pending.size());
+        for (ConsumptionSubmission submission : pending) {
+            ConsumptionRequest request = submission.getRequest();
+            if (!playerId.equals(request.getPlayerId()) || !sourceServer.trim().equals(request.getSourceServer())) {
+                throw new IllegalStateException("pending consumption query crossed its player or source-server boundary");
+            }
+            resumed.add(process(submission.getRequest(), submission, now));
+        }
+        return java.util.Collections.unmodifiableList(resumed);
     }
 
     private ConsumptionSubmission process(final ConsumptionRequest request, ConsumptionSubmission submission,

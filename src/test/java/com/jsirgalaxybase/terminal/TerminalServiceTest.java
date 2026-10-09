@@ -177,6 +177,32 @@ public class TerminalServiceTest {
     }
 
     @Test
+    public void forceClaimActionFailsClosedWhenQuestClaimRuntimeIsDisabled() {
+        final UUID authenticatedPlayer=UUID.fromString("7a4f08d5-4180-487b-94d0-5c103f510f60");
+        TerminalService.installQuestCenterQuery(new QuestCenterQuery(){
+            @Override public QuestCenterSnapshot load(ParticipantId participantId){
+                return new QuestCenterSnapshot(participantId,Collections.emptyList(),Collections.emptyList());
+            }
+            @Override public QuestCenterPage loadPage(ParticipantId participantId,QuestCenterPageRequest request){
+                return new QuestCenterPage(participantId,request.getSelectedChapterId(),Collections.emptyList(),
+                    request.getChapterPageIndex(),request.getChapterPageSize(),0,Collections.emptyList(),
+                    request.getQuestPageIndex(),request.getQuestPageSize(),0);
+            }
+        });
+        TerminalService.installQuestClaimService(null);
+        try{
+            TerminalQuestCenterSectionSnapshot result=TerminalService.buildAuthenticatedQuestCenterSnapshot(
+                authenticatedPlayer,"Player",TerminalActionType.QUEST_FORCE_CLAIM,
+                new TerminalQuestActionPayload("chapter-a","550e8400-e29b-41d4-a716-446655440000","all","",0,0));
+            assertEquals("EMPTY",result.getServiceState());
+            assertTrue(result.getMessage().contains("奖励领取运行时尚未启用"));
+        }finally{
+            TerminalService.installQuestClaimService(null);
+            TerminalService.installQuestCenterQuery(null);
+        }
+    }
+
+    @Test
     public void questManagementUsesAuthenticatedActorAndBoundedServerQuery() {
         final UUID player=UUID.randomUUID();final com.jsirgalaxybase.quest.core.QuestEditorActor[] actor={null};
         final com.jsirgalaxybase.quest.core.QuestDefinitionManagementRequest[] request={null};

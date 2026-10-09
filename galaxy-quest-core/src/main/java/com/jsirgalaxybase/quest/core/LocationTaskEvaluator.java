@@ -19,26 +19,35 @@ public final class LocationTaskEvaluator implements TaskEvaluator {
         if (!factType.equals(fact.getTypeId()) || current.isComplete()) return current;
         Map<String, String> parameters = definition.getParameters();
         Map<String, String> attributes = fact.getAttributes();
+        boolean invert = bool(parameters.get("invert"), false);
         String structure = value(parameters, "structure");
-        boolean visible = bool(parameters.get("visible"), false);
-        String structureEvidence = structure.isEmpty() ? null : attributes.get(structureEvidenceKey(structure));
-        String visibilityEvidence = visible ? attributes.get(visibilityEvidenceKey(parameters)) : null;
-
-        // Structure lookup and line-of-sight are platform-derived. Missing evidence is unknown, not false;
-        // in particular an inverted task must never complete merely because an adapter omitted evidence.
-        if ((!structure.isEmpty() && structureEvidence == null) || (visible && visibilityEvidence == null)) {
-            return current;
-        }
-
+        int range = integer(parameters.get("range"), -1);
         boolean matches = integer(attributes.get("dimension"), Integer.MIN_VALUE)
             == integer(parameters.get("dimension"), 0);
-        int range = integer(parameters.get("range"), -1);
         if (matches && range > 0) matches = distance(parameters, attributes) <= range;
         int biome = integer(parameters.get("biome"), -1);
         if (matches && biome >= 0) matches = integer(attributes.get("biome"), Integer.MIN_VALUE) == biome;
-        if (matches && !structure.isEmpty()) matches = Boolean.parseBoolean(structureEvidence);
-        if (matches && visible) matches = Boolean.parseBoolean(visibilityEvidence);
-        if (matches == bool(parameters.get("invert"), false)) return current;
+        if (!matches) return result(current, false, invert);
+
+        // BQ short-circuits in dimension/range -> biome -> structure -> visibility order. Missing evidence is
+        // unknown only when the corresponding platform query would actually be reached.
+        if (!structure.isEmpty()) {
+            String evidence = attributes.get(structureEvidenceKey(structure));
+            if (evidence == null) return current;
+            if (!QuestBooleanParameter.parse(evidence, false)) return result(current, false, invert);
+        }
+
+        if (bool(parameters.get("visible"), false) && range > 0) {
+            String evidence = attributes.get(visibilityEvidenceKey(parameters));
+            if (evidence == null) return current;
+            matches = QuestBooleanParameter.parse(evidence, false);
+            return result(current, matches, invert);
+        }
+        return result(current, true, invert);
+    }
+
+    private static TaskProgress result(TaskProgress current, boolean matches, boolean invert) {
+        if (matches == invert) return current;
         return current.merge(current.getTargets(), true);
     }
 
@@ -66,7 +75,7 @@ public final class LocationTaskEvaluator implements TaskEvaluator {
     }
 
     private static boolean bool(String raw, boolean fallback) {
-        return raw == null ? fallback : Boolean.parseBoolean(raw);
+        return QuestBooleanParameter.parse(raw, fallback);
     }
 
     private static int integer(String raw, int fallback) {

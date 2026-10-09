@@ -3,7 +3,7 @@ package com.jsirgalaxybase.quest.core;
 import java.util.Optional;
 import java.util.UUID;
 
-/** Resolves the authoritative reward entitlement before recording a player's immutable choice. */
+/** Resolves the authoritative reward entitlement before recording a player's choice. */
 public final class AuthenticatedRewardChoiceService {
     private static final String CHOICE_TYPE = "bq_standard:choice";
 

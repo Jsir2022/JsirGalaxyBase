@@ -16,6 +16,7 @@ import com.jsirgalaxybase.quest.core.QuestChapterEntry;
 import com.jsirgalaxybase.quest.core.QuestDefinition;
 import com.jsirgalaxybase.quest.core.QuestDefinitionValidator;
 import com.jsirgalaxybase.quest.core.QuestEditorValidationIssue;
+import com.jsirgalaxybase.quest.core.QuestLogic;
 import com.jsirgalaxybase.quest.core.StandardQuestEditorTypeRegistry;
 
 /** Builds a deterministic, fail-closed plan without writing source files or a database. */
@@ -66,9 +67,11 @@ public final class BqMigrationPlanner {
             if (!chapterIds.add(id)) error(issues, "DUPLICATE_CHAPTER_UUID", id, "chapter UUID appears more than once");
             validateResource(id, "icon", chapter.getDefinition().getIconReference(), issues);
             validateResource(id, "background", chapter.getDefinition().getBackgroundReference(), issues);
+            Set<UUID> chapterEntries = new HashSet<UUID>();
             for (QuestChapterEntry entry : chapter.getDefinition().getEntries()) {
                 if (!definitions.containsKey(entry.getQuestId())) error(issues, "DANGLING_CHAPTER_ENTRY", id, entry.getQuestId().toString());
-                if (!placed.add(entry.getQuestId())) error(issues, "DUPLICATE_CHAPTER_PLACEMENT", entry.getQuestId(), "quest appears more than once in chapter catalog");
+                if (!chapterEntries.add(entry.getQuestId())) error(issues, "DUPLICATE_CHAPTER_PLACEMENT", entry.getQuestId(), "quest appears more than once in one chapter");
+                placed.add(entry.getQuestId());
             }
         }
         for (UUID id : definitions.keySet()) if (!placed.contains(id)) issues.add(new BqMigrationIssue(BqMigrationIssue.Severity.WARNING, "UNPLACED_QUEST", id.toString(), "quest is not present in a chapter"));
@@ -76,8 +79,7 @@ public final class BqMigrationPlanner {
     }
 
     private static void detectCycles(Map<UUID, QuestDefinition> definitions, List<BqMigrationIssue> issues) {
-        Set<UUID> visited = new HashSet<UUID>(), active = new HashSet<UUID>();
-        for (UUID id : definitions.keySet()) visit(id, definitions, visited, active, issues);
+        new CycleScanner(definitions, issues).scan();
     }
     private static void validateChapterOrder(Path source,List<BqImportedChapter> chapters,List<BqMigrationIssue> issues)throws java.io.IOException{
         Set<UUID> chapterIds=new HashSet<UUID>();for(BqImportedChapter chapter:chapters){chapterIds.add(chapter.getDefinition().getId());if(chapter.getDisplayOrder()==Integer.MAX_VALUE)error(issues,"MISSING_CHAPTER_ORDER",chapter.getDefinition().getId(),"chapter is absent from QuestLinesOrder.txt");}
@@ -93,17 +95,72 @@ public final class BqMigrationPlanner {
     }
     private static void validateReward(UUID questId,com.jsirgalaxybase.quest.core.RewardDefinition reward,List<BqMigrationIssue> issues){
         Map<String,String> values=reward.getParameters();String subject=questId+"/"+reward.getKey();if(!values.containsKey("bq.raw"))error(issues,"INVALID_REWARD_PARAMETER",subject,"missing preserved BQ payload");
-        if(("bq_standard:item".equals(reward.getTypeId())||"bq_standard:choice".equals(reward.getTypeId()))&&positive(values.get("item.count"))<1)error(issues,"INVALID_REWARD_PARAMETER",subject,"at least one item is required");
+        if("bq_standard:choice".equals(reward.getTypeId())&&positive(values.get("item.count"))<1)error(issues,"INVALID_REWARD_PARAMETER",subject,"at least one choice is required");
         if("bq_standard:questcompletion".equals(reward.getTypeId()))try{UUID.fromString(values.get("questUuid"));}catch(RuntimeException invalid){error(issues,"INVALID_REWARD_PARAMETER",subject,"questUuid is invalid");}
     }
     private static long positive(String value){try{return Math.max(0L,Long.parseLong(value));}catch(RuntimeException invalid){return 0L;}}
     private static void validateResource(UUID chapterId,String field,String value,List<BqMigrationIssue> issues){if(value==null||value.isEmpty())return;if(value.indexOf('\0')>=0||value.contains("..")||value.startsWith("/")||value.startsWith("\\")||value.contains("://"))error(issues,"INVALID_RESOURCE_REFERENCE",chapterId+"/"+field,"unsafe resource reference");}
-    private static void visit(UUID id, Map<UUID, QuestDefinition> definitions, Set<UUID> visited, Set<UUID> active, List<BqMigrationIssue> issues) {
-        if (visited.contains(id)) return;
-        if (!active.add(id)) { error(issues, "PREREQUISITE_CYCLE", id, "cycle detected"); return; }
-        QuestDefinition definition = definitions.get(id);
-        if (definition != null) for (UUID prerequisite : definition.getPrerequisites()) if (definitions.containsKey(prerequisite)) visit(prerequisite, definitions, visited, active, issues);
-        active.remove(id); visited.add(id);
+    private static final class CycleScanner {
+        private final Map<UUID, QuestDefinition> definitions;
+        private final List<BqMigrationIssue> issues;
+        private final Map<UUID, Integer> index = new HashMap<UUID, Integer>();
+        private final Map<UUID, Integer> low = new HashMap<UUID, Integer>();
+        private final List<UUID> stack = new ArrayList<UUID>();
+        private final Set<UUID> onStack = new HashSet<UUID>();
+        private int next;
+
+        private CycleScanner(Map<UUID, QuestDefinition> definitions, List<BqMigrationIssue> issues) {
+            this.definitions = definitions;
+            this.issues = issues;
+        }
+
+        private void scan() {
+            for (UUID id : new java.util.TreeSet<UUID>(definitions.keySet())) if (!index.containsKey(id)) visit(id);
+        }
+
+        private void visit(UUID id) {
+            index.put(id, next);
+            low.put(id, next++);
+            stack.add(id);
+            onStack.add(id);
+            for (UUID prerequisite : new java.util.TreeSet<UUID>(definitions.get(id).getPrerequisites())) {
+                if (!definitions.containsKey(prerequisite)) continue;
+                if (!index.containsKey(prerequisite)) {
+                    visit(prerequisite);
+                    low.put(id, Math.min(low.get(id), low.get(prerequisite)));
+                } else if (onStack.contains(prerequisite)) {
+                    low.put(id, Math.min(low.get(id), index.get(prerequisite)));
+                }
+            }
+            if (!low.get(id).equals(index.get(id))) return;
+            Set<UUID> component = new HashSet<UUID>();
+            UUID member;
+            do {
+                member = stack.remove(stack.size() - 1);
+                onStack.remove(member);
+                component.add(member);
+            } while (!member.equals(id));
+            if (component.size() == 1 && !definitions.get(id).getPrerequisites().contains(id)) return;
+
+            boolean seededExclusive = true;
+            for (UUID quest : component) {
+                QuestDefinition definition = definitions.get(quest);
+                if (definition.getPrerequisiteLogic() != QuestLogic.XOR) seededExclusive = false;
+                boolean externalSeed = false;
+                for (UUID prerequisite : definition.getPrerequisites()) {
+                    if (definitions.containsKey(prerequisite) && !component.contains(prerequisite)) externalSeed = true;
+                }
+                if (!externalSeed) seededExclusive = false;
+            }
+            String subject = new java.util.TreeSet<UUID>(component).first().toString();
+            if (seededExclusive) {
+                issues.add(new BqMigrationIssue(BqMigrationIssue.Severity.WARNING,
+                    "SEEDED_XOR_CYCLE", subject, component.size() + " exclusive quests share an external prerequisite"));
+            } else {
+                error(issues, "PREREQUISITE_CYCLE", subject,
+                    component.size() + " quests form an unseeded or non-exclusive prerequisite cycle");
+            }
+        }
     }
     private static void error(List<BqMigrationIssue> issues, String code, Object subject, String message) { issues.add(new BqMigrationIssue(BqMigrationIssue.Severity.ERROR, code, String.valueOf(subject), message)); }
     private static String join(List<String> values) { StringBuilder out = new StringBuilder(); for (String value : values) out.append(value).append('\n'); return out.toString(); }

@@ -99,7 +99,8 @@ public final class BqQuestDefinitionImporter {
     }
 
     private static QuestLogic logic(String raw) {
-        return "OR".equalsIgnoreCase(raw) ? QuestLogic.OR : QuestLogic.AND;
+        try { return QuestLogic.valueOf(raw.toUpperCase(java.util.Locale.ROOT)); }
+        catch (RuntimeException invalid) { throw new IllegalArgumentException("unsupported BQ logic: " + raw, invalid); }
     }
 
     private static QuestVisibility visibility(String raw) {
