@@ -43,6 +43,9 @@ public class BqQuestDefinitionImporterTest {
         assertEquals("bq_standard:retrieval", imported.getDefinition().getTasks().get(0).getTypeId());
         assertTrue(imported.getDefinition().getTasks().get(0).getParameters().get("bq.raw").contains("consume:1"));
         assertEquals("item-vector", imported.getDefinition().getTasks().get(0).getParameters().get("progressMode"));
+        assertEquals("false", imported.getDefinition().getTasks().get(0).getParameters().get("bq.partyShare"));
+        assertEquals(com.jsirgalaxybase.quest.core.QuestParticipantScope.PLAYER,
+            imported.getDefinition().getBehavior().getParticipantScope());
         assertEquals("64", imported.getDefinition().getTasks().get(0).getParameters().get("target"));
         assertEquals("minecraft:iron_ingot",
             imported.getDefinition().getTasks().get(0).getParameters().get("item.0.registryName"));

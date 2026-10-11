@@ -15,7 +15,7 @@ final class BqPartyTaskProgressScope {
     static boolean supports(QuestDefinition definition, GameplayFact fact) {
         if (definition == null || fact == null) return false;
         for (TaskDefinition task : definition.getTasks()) {
-            if ("bq_standard:hunt".equals(task.getTypeId())
+            if (BqImportedTaskScope.sharesParty(task) && "bq_standard:hunt".equals(task.getTypeId())
                 && fact.getTypeId().equals(task.getParameters().get("factType"))) return true;
             if (isImportedLocationTask(task) && fact.getTypeId().equals(task.getParameters().get("factType"))) {
                 return true;
@@ -58,7 +58,8 @@ final class BqPartyTaskProgressScope {
         String channel = fact.getAttributes().get("channel");
         if (!"craft".equals(channel) && !"smelt".equals(channel) && !"anvil".equals(channel)) return false;
         for (TaskDefinition task : definition.getTasks()) {
-            if (!CRAFTING.equals(task.getTypeId()) || !task.getParameters().containsKey("bq.raw")
+            if (!CRAFTING.equals(task.getTypeId()) || !BqImportedTaskScope.isImported(task)
+                || !BqImportedTaskScope.sharesParty(task)
                 || !ITEM_PRODUCED.equals(task.getParameters().get("factType"))) continue;
             if (CRAFTING_MATCHER.matchesCraftingProgressEvent(task, fact.getAttributes())) return true;
         }
@@ -66,12 +67,14 @@ final class BqPartyTaskProgressScope {
     }
 
     private static boolean isImportedLocationTask(TaskDefinition task) {
-        return LOCATION.equals(task.getTypeId()) && task.getParameters().containsKey("bq.raw");
+        return LOCATION.equals(task.getTypeId()) && BqImportedTaskScope.isImported(task)
+            && BqImportedTaskScope.sharesParty(task);
     }
 
     private static boolean isImportedMeetingTask(TaskDefinition task) {
         return MEETING.equals(task.getTypeId()) && NEARBY_ENTITIES_OBSERVED.equals(
-            task.getParameters().get("factType")) && task.getParameters().containsKey("bq.raw");
+            task.getParameters().get("factType")) && BqImportedTaskScope.isImported(task)
+            && BqImportedTaskScope.sharesParty(task);
     }
 
     static boolean authorizesPlayerRequest(QuestEvaluationRequest request, GameplayFact fact) {

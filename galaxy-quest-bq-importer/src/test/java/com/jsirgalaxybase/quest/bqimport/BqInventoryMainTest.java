@@ -40,6 +40,6 @@ public class BqInventoryMainTest {
         assertFalse(text.contains(privateQuestName));
         assertFalse(text.contains(privateQuestId));
         assertFalse(text.contains("quest|"));
-        assertTrue(text.contains("TASK|bq_standard:checkbox|1|BLOCKED"));
+        assertTrue(text.contains("TASK|bq_standard:checkbox|1|SUPPORTED"));
     }
 }

@@ -569,7 +569,7 @@ public class BqPartyInventorySnapshotFactSinkPostgresTest {
             BqPartyInventorySnapshotFactSink producer = fixture.sink(fact ->
                 sourceOutcomes.add(runtime.apply(fact, planner, 1500L).getStatus()));
             assertTrue(producer.beginInventorySession(fixture.inventory(recipient, UUID.randomUUID(), 1L)));
-            assertEquals(Arrays.asList(FactProcessingStatus.IGNORED, FactProcessingStatus.ACCEPTED), sourceOutcomes);
+            assertEquals(1, count(sourceOutcomes, FactProcessingStatus.ACCEPTED));
             QuestProgressSnapshot sourceProgress = runtimeRepository.findProgress(
                 ParticipantId.player(recipient), sourceId, 1).get();
             assertEquals("imported retrieval progress=" + sourceProgress.getTasks().get("task-0").getValues()
@@ -611,7 +611,7 @@ public class BqPartyInventorySnapshotFactSinkPostgresTest {
     }
 
     @Test
-    public void importedBqRetrievalFlowsThroughPartyInventoryObservationIntoJdbcProgress() throws Exception {
+    public void importedBqRetrievalRemainsPersonalThroughPartyInventoryObservation() throws Exception {
         Fixture fixture = Fixture.open();
         Path source = null;
         try {
@@ -647,19 +647,20 @@ public class BqPartyInventorySnapshotFactSinkPostgresTest {
 
             UUID peerSession = UUID.randomUUID();
             assertTrue(producer.beginInventorySession(fixture.inventory(fixture.peer, peerSession, 3L)));
-            for (UUID player : Arrays.asList(fixture.owner, fixture.peer, fixture.staleMember)) {
-                QuestProgressSnapshot progress = progress(fixture, runtimeRepository, quest, player);
-                assertEquals(QuestStatus.IN_PROGRESS, progress.getStatus());
-                assertEquals(Arrays.asList(3L), progress.getTasks().get("task-0").getValues());
-            }
+            QuestProgressSnapshot peerProgress = progress(fixture, runtimeRepository, quest, fixture.peer);
+            assertEquals(QuestStatus.IN_PROGRESS, peerProgress.getStatus());
+            assertEquals(Arrays.asList(3L), peerProgress.getTasks().get("task-0").getValues());
+            assertFalse(runtimeRepository.findProgress(ParticipantId.player(fixture.owner), quest.getId(), 1).isPresent());
+            assertFalse(runtimeRepository.findProgress(ParticipantId.player(fixture.staleMember), quest.getId(), 1).isPresent());
 
             UUID ownerSession = UUID.randomUUID();
             assertTrue(producer.beginInventorySession(fixture.inventory(fixture.owner, ownerSession, 4L)));
-            for (UUID player : Arrays.asList(fixture.owner, fixture.peer, fixture.staleMember)) {
-                QuestProgressSnapshot progress = progress(fixture, runtimeRepository, quest, player);
-                assertEquals(QuestStatus.COMPLETED, progress.getStatus());
-                assertEquals(Arrays.asList(7L), progress.getTasks().get("task-0").getValues());
-            }
+            QuestProgressSnapshot ownerProgress = progress(fixture, runtimeRepository, quest, fixture.owner);
+            assertEquals(QuestStatus.IN_PROGRESS, ownerProgress.getStatus());
+            assertEquals(Arrays.asList(4L), ownerProgress.getTasks().get("task-0").getValues());
+            assertEquals(Arrays.asList(3L), progress(fixture, runtimeRepository, quest, fixture.peer)
+                .getTasks().get("task-0").getValues());
+            assertFalse(runtimeRepository.findProgress(ParticipantId.player(fixture.staleMember), quest.getId(), 1).isPresent());
             assertEquals(2, count(outcomes, FactProcessingStatus.ACCEPTED));
         } finally {
             if (source != null) Files.deleteIfExists(source);

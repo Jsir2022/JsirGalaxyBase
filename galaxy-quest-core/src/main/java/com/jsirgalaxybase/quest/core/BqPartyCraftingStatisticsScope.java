@@ -36,7 +36,7 @@ public final class BqPartyCraftingStatisticsScope {
             if (targetTaskKey == null || registryName == null) return false;
             for (TaskDefinition task : definition.getTasks()) {
                 if (!targetTaskKey.equals(task.getKey()) || !"bq_standard:crafting".equals(task.getTypeId())
-                    || !task.getParameters().containsKey("bq.raw")
+                    || !BqImportedTaskScope.isImported(task) || !BqImportedTaskScope.sharesParty(task)
                     || !QuestBooleanParameter.parse(task.getParameters().get("allowCraftedFromStatistics"), false)) {
                     continue;
                 }
@@ -63,7 +63,7 @@ public final class BqPartyCraftingStatisticsScope {
 
         for (TaskDefinition task : definition.getTasks()) {
             if ("bq_standard:crafting".equals(task.getTypeId())
-                && task.getParameters().containsKey("bq.raw")
+                && BqImportedTaskScope.isImported(task) && BqImportedTaskScope.sharesParty(task)
                 && CRAFTING_MATCHER.matchesCraftingStatisticsTrigger(task, output)) return true;
         }
         return false;

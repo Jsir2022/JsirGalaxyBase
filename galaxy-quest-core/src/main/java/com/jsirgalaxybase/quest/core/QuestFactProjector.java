@@ -63,9 +63,10 @@ public final class QuestFactProjector {
         if (BqPartyInventorySnapshotScope.isPartySnapshot(fact)) {
             // Every imported non-consuming BQ Retrieval scans active party inventories. groupDetect
             // changes component reset semantics, not whether this aggregate fact is authoritative.
-            return owner.getType() != ParticipantType.PLAYER || !task.getParameters().containsKey("bq.raw");
+            return owner.getType() != ParticipantType.PLAYER || !BqImportedTaskScope.isImported(task)
+                || !BqImportedTaskScope.sharesParty(task);
         }
-        if (task.getParameters().containsKey("bq.raw")
+        if (BqImportedTaskScope.isImported(task) && BqImportedTaskScope.sharesParty(task)
             && !QuestBooleanParameter.parse(task.getParameters().get("consume"), false)) return true;
         if (InventorySnapshotScope.isGroupSnapshot(fact)) {
             // Aggregate facts are scoped to exactly one authenticated group and never update

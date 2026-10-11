@@ -47,7 +47,7 @@ final class BqPartyInventorySnapshotScope {
             if (("bq_standard:retrieval".equals(task.getTypeId())
                 || "bq_standard:optional_retrieval".equals(task.getTypeId()))
                 && "galaxy:inventory_observed".equals(task.getParameters().get("factType"))
-                && task.getParameters().containsKey("bq.raw")
+                && BqImportedTaskScope.isImported(task) && BqImportedTaskScope.sharesParty(task)
                 && !QuestBooleanParameter.parse(task.getParameters().get("consume"), false)) return true;
         }
         return false;
@@ -67,7 +67,7 @@ final class BqPartyInventorySnapshotScope {
             && "galaxy:fluid_inventory_observed".equals(fact.getTypeId())
             && "bq_standard:fluid".equals(task.getTypeId())
             && "galaxy:fluid_inventory_observed".equals(task.getParameters().get("factType"))
-            && task.getParameters().containsKey("bq.raw")
+            && BqImportedTaskScope.isImported(task) && BqImportedTaskScope.sharesParty(task)
             && !QuestBooleanParameter.parse(task.getParameters().get("consume"), false);
     }
 

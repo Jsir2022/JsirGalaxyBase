@@ -62,6 +62,135 @@ public class BqMigrationDatabaseIntegrationTest {
         service.rollback(first.getBatchId());assertEquals(0,countPublished("galaxy_quest_definition"));assertEquals(0,countPublished("galaxy_quest_chapter_definition"));assertEquals(0,count("galaxy_quest_chapter_catalog"));assertEquals("ROLLED_BACK",status(first.getBatchId()));
         service.rollback(first.getBatchId());assertEquals("ROLLED_BACK",status(first.getBatchId()));
     }
+
+    @Test public void serviceRejectsParsableButUnverifiedRuntimeTypeBeforeWriting() throws Exception {
+        Path source=fixture();Path quest=source.resolve("Quests/line/q.json");
+        String json=new String(Files.readAllBytes(quest),StandardCharsets.UTF_8)
+            .replace("bq_standard:checkbox","bq_standard:interact_item");
+        Files.write(quest,json.getBytes(StandardCharsets.UTF_8));
+        BqMigrationManifest manifest=new BqMigrationPlanner().plan(source);
+        assertTrue(manifest.toText(),manifest.isApplicable());
+        JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(scoped);
+        BqMigrationDatabaseService service=new BqMigrationDatabaseService(new JdbcQuestTransaction(manager),
+            new JdbcQuestDefinitionRepository(manager),new JdbcQuestChapterRepository(manager),
+            new JdbcQuestContentMigrationRepository(manager));
+        try{service.apply(manifest,1000L);fail("parsing support must not bypass runtime gate");}
+        catch(IllegalStateException expected){assertTrue(expected.getMessage().contains("interact_item"));}
+        assertEquals(0,count("galaxy_quest_content_migration_batch"));
+        assertEquals(0,count("galaxy_quest_definition"));
+    }
+
+    @Test public void concurrentIdenticalImportsCreateOneBatchAndOneVersion() throws Exception {
+        BqMigrationManifest manifest=new BqMigrationPlanner().plan(fixture());
+        java.util.concurrent.ExecutorService workers=java.util.concurrent.Executors.newFixedThreadPool(2);
+        java.util.concurrent.CountDownLatch start=new java.util.concurrent.CountDownLatch(1);
+        try {
+            java.util.concurrent.Callable<String> apply=()->{
+                JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(scoped);
+                BqMigrationDatabaseService service=new BqMigrationDatabaseService(new JdbcQuestTransaction(manager),
+                    new JdbcQuestDefinitionRepository(manager),new JdbcQuestChapterRepository(manager),
+                    new JdbcQuestContentMigrationRepository(manager));
+                if(!start.await(10,java.util.concurrent.TimeUnit.SECONDS))throw new IllegalStateException("start timeout");
+                return service.apply(manifest,1000L).getBatchId();
+            };
+            java.util.concurrent.Future<String> first=workers.submit(apply),second=workers.submit(apply);
+            start.countDown();
+            assertEquals(first.get(30,java.util.concurrent.TimeUnit.SECONDS),second.get(30,java.util.concurrent.TimeUnit.SECONDS));
+            assertEquals(1,count("galaxy_quest_content_migration_batch"));
+            assertEquals(1,count("galaxy_quest_definition"));
+            assertEquals(1,count("galaxy_quest_chapter_definition"));
+        } finally {workers.shutdownNow();assertTrue(workers.awaitTermination(10,java.util.concurrent.TimeUnit.SECONDS));}
+    }
+
+    @Test public void unchangedLaterBatchStillPreventsEarlierRollback() throws Exception {
+        Path source=fixture();
+        JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(scoped);
+        BqMigrationDatabaseService service=new BqMigrationDatabaseService(new JdbcQuestTransaction(manager),
+            new JdbcQuestDefinitionRepository(manager),new JdbcQuestChapterRepository(manager),
+            new JdbcQuestContentMigrationRepository(manager));
+        QuestContentMigrationBatch first=service.apply(new BqMigrationPlanner().plan(source),1000L);
+        BqMigrationManifest original=new BqMigrationPlanner().plan(source);
+        // A different source batch with the same entity content must still protect the previous catalog.
+        BqMigrationManifest equivalent=new BqMigrationManifest("bq-equivalent-source", "equivalent-source",
+            original.getQuests(),original.getChapters(),original.getIssues());
+        QuestContentMigrationBatch later=service.apply(equivalent,2000L);
+        assertNotEquals(first.getBatchId(),later.getBatchId());
+        assertEquals(1,count("galaxy_quest_definition"));
+        try {service.rollback(first.getBatchId());fail("a later applied batch must protect catalog order");}
+        catch(IllegalStateException expected){assertTrue(expected.getMessage().contains("latest"));}
+        service.rollback(later.getBatchId());
+        assertEquals(1,countPublished("galaxy_quest_definition"));
+        service.rollback(first.getBatchId());
+        assertEquals(0,countPublished("galaxy_quest_definition"));
+    }
+
+    @Test public void runtimeHealthTracksPublishedContentAndRollbackWithoutPlayerData() throws Exception {
+        JdbcQuestConnectionManager manager = new JdbcQuestConnectionManager(scoped);
+        JdbcQuestContentMigrationRepository migrations = new JdbcQuestContentMigrationRepository(manager);
+        assertEquals(0L, migrations.health().get().getQuests());
+        BqMigrationManifest manifest = new BqMigrationPlanner().plan(fixture());
+        BqMigrationDatabaseService service = new BqMigrationDatabaseService(new JdbcQuestTransaction(manager),
+            new JdbcQuestDefinitionRepository(manager), new JdbcQuestChapterRepository(manager), migrations);
+        QuestContentMigrationBatch applied = service.apply(manifest, 1000L);
+        com.jsirgalaxybase.quest.core.QuestRuntimeHealthSummary health = migrations.health().get();
+        assertEquals(1L, health.getQuests());
+        assertEquals(1L, health.getTasks());
+        assertEquals(1L, health.getChapters());
+        assertTrue(health.getCatalogRevision() > 0);
+        assertEquals(0L, health.getFailedRewards());
+        assertEquals(0L, health.getPendingConsumption());
+        service.rollback(applied.getBatchId());
+        assertEquals(0L, migrations.health().get().getQuests());
+        assertEquals(0L, migrations.health().get().getChapters());
+        assertTrue(migrations.health().get().getCatalogRevision() > health.getCatalogRevision());
+    }
+
+    @Test public void completeGtnhBookPublishesAsPersonalContentAndRollsBackFromEmptyDatabase() throws Exception {
+        String source = System.getenv("BQ_TEST_DEFAULT_QUESTS");
+        Assume.assumeTrue("BQ_TEST_DEFAULT_QUESTS is required for the complete read-only quest-book test",
+            source != null && !source.trim().isEmpty());
+        BqMigrationManifest manifest = new BqMigrationPlanner().plan(Paths.get(source));
+        assertTrue(manifest.toText(), manifest.isApplicable());
+        assertEquals(3744, manifest.getQuests().size());
+        assertEquals(47, manifest.getChapters().size());
+        BqBehaviorInventory.from(manifest).requireRuntimeReady();
+        BqCompatibilityReport compatibility = BqCompatibilityReport.create(manifest);
+        assertEquals(11068, compatibility.getElementCompatibility().size());
+        for (BqCompatibilityStatus status : compatibility.getElementCompatibility().values()) {
+            assertEquals(BqCompatibilityStatus.SUPPORTED, status);
+        }
+        for (BqImportedQuest imported : manifest.getQuests()) {
+            assertEquals(com.jsirgalaxybase.quest.core.QuestParticipantScope.PLAYER,
+                imported.getDefinition().getBehavior().getParticipantScope());
+            for (com.jsirgalaxybase.quest.core.TaskDefinition task : imported.getDefinition().getTasks()) {
+                assertEquals("false", task.getParameters().get("bq.partyShare"));
+            }
+        }
+
+        JdbcQuestConnectionManager manager = new JdbcQuestConnectionManager(scoped);
+        BqMigrationDatabaseService service = new BqMigrationDatabaseService(new JdbcQuestTransaction(manager),
+            new JdbcQuestDefinitionRepository(manager), new JdbcQuestChapterRepository(manager),
+            new JdbcQuestContentMigrationRepository(manager));
+        BqMigrationDryRun dryRun = service.dryRun(manifest);
+        assertTrue(dryRun.isApplicable());
+        assertEquals(3791, dryRun.count(QuestContentMigrationItem.Action.CREATED));
+        assertEquals(0, countPublished("galaxy_quest_definition"));
+        QuestContentMigrationBatch applied = service.apply(manifest, 1000L);
+        assertEquals(QuestContentMigrationBatch.Status.APPLIED, applied.getStatus());
+        assertEquals(3744, countPublished("galaxy_quest_definition"));
+        assertEquals(47, countPublished("galaxy_quest_chapter_definition"));
+        com.jsirgalaxybase.quest.core.QuestRuntimeHealthSummary health =
+            new JdbcQuestContentMigrationRepository(manager).health().get();
+        assertEquals(3744L, health.getQuests());
+        assertEquals(5620L, health.getTasks());
+        assertEquals(5448L, health.getRewards());
+        assertEquals(47L, health.getChapters());
+        assertEquals(applied.getBatchId(), service.apply(manifest, 2000L).getBatchId());
+        assertEquals(1, count("galaxy_quest_content_migration_batch"));
+        service.rollback(applied.getBatchId());
+        assertEquals(0, countPublished("galaxy_quest_definition"));
+        assertEquals(0, countPublished("galaxy_quest_chapter_definition"));
+    }
     @Test public void failedApplyRollsBackEveryMigrationWrite() throws Exception {BqMigrationManifest manifest=new BqMigrationPlanner().plan(fixture());JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(scoped);JdbcQuestTransaction transaction=new JdbcQuestTransaction(manager);JdbcQuestDefinitionRepository definitions=new JdbcQuestDefinitionRepository(manager);BqMigrationDatabaseService service=new BqMigrationDatabaseService(transaction,definitions,new JdbcQuestChapterRepository(manager),new JdbcQuestContentMigrationRepository(manager));transaction.inTransaction(()->{definitions.createDraft(manifest.getQuests().get(0).getDefinition());return null;});try{service.apply(manifest,1L);fail("expected version conflict");}catch(com.jsirgalaxybase.quest.core.QuestDefinitionConflictException expected){}assertEquals(0,count("galaxy_quest_content_migration_batch"));assertEquals(1,count("galaxy_quest_definition"));assertEquals(0,count("galaxy_quest_chapter_definition"));}
     @Test public void changedContentCreatesControlledVersionAndProtectsEarlierRollback() throws Exception {Path firstSource=fixture();BqMigrationManifest first=new BqMigrationPlanner().plan(firstSource);JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(scoped);BqMigrationDatabaseService service=new BqMigrationDatabaseService(new JdbcQuestTransaction(manager),new JdbcQuestDefinitionRepository(manager),new JdbcQuestChapterRepository(manager),new JdbcQuestContentMigrationRepository(manager));service.apply(first,1L);Path quest=firstSource.resolve("Quests/line/q.json");String changed=new String(Files.readAllBytes(quest),StandardCharsets.UTF_8).replace("\"Q\"","\"Q2\"");Files.write(quest,changed.getBytes(StandardCharsets.UTF_8));BqMigrationManifest second=new BqMigrationPlanner().plan(firstSource);QuestContentMigrationBatch applied=service.apply(second,2L);QuestContentMigrationItem questItem=null;for(QuestContentMigrationItem item:applied.getItems())if(item.getKind()==QuestContentMigrationItem.Kind.QUEST)questItem=item;assertNotNull(questItem);assertEquals(2,questItem.getVersion());assertEquals(QuestContentMigrationItem.Action.VERSIONED,questItem.getAction());try{service.rollback(first.getBatchId());fail("later version must protect earlier batch");}catch(IllegalStateException expected){assertTrue(expected.getMessage().contains("later quest version"));}service.rollback(second.getBatchId());assertEquals("Q",new JdbcQuestDefinitionRepository(manager).findPublished(questItem.getId()).get().getDefinition().getName());service.rollback(first.getBatchId());assertEquals(0,countPublished("galaxy_quest_definition"));}
     @Test public void blockedPreviewIsVisibleButCannotApplyOrRollback() throws Exception {Path source=fixture();Path quest=source.resolve("Quests/line/q.json");String invalid=new String(Files.readAllBytes(quest),StandardCharsets.UTF_8).replace("bq_standard:checkbox","addon:unknown");Files.write(quest,invalid.getBytes(StandardCharsets.UTF_8));BqMigrationManifest manifest=new BqMigrationPlanner().plan(source);assertFalse(manifest.isApplicable());JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(scoped);BqMigrationDatabaseService service=new BqMigrationDatabaseService(new JdbcQuestTransaction(manager),new JdbcQuestDefinitionRepository(manager),new JdbcQuestChapterRepository(manager),new JdbcQuestContentMigrationRepository(manager));QuestContentMigrationBatch staged=service.stage(manifest);assertEquals(QuestContentMigrationBatch.Status.BLOCKED,staged.getStatus());assertTrue(staged.getErrorCount()>0);assertEquals(0,countPublished("galaxy_quest_definition"));try{service.apply(manifest,1L);fail("blocked manifest must not apply");}catch(IllegalArgumentException expected){}try{service.rollback(staged.getBatchId());fail("blocked preview must not roll back");}catch(IllegalStateException expected){}}
@@ -104,7 +233,7 @@ public class BqMigrationDatabaseIntegrationTest {
     }
 
     @Test
-    public void importedRepeatableLocationFlowsThroughPartyProgressAndJdbcClaimCycles() throws Exception {
+    public void importedRepeatableLocationKeepsPersonalProgressAcrossJdbcClaimCycles() throws Exception {
         BqMigrationManifest manifest = new BqMigrationPlanner().plan(locationRepeatFixture());
         assertTrue(manifest.toText(), manifest.isApplicable());
 
@@ -147,39 +276,39 @@ public class BqMigrationDatabaseIntegrationTest {
         GameplayFact firstLocation = locationFact("location-import-cycle-0", owner, 1000L);
         FactProcessingResult firstCycle = runtime.apply(firstLocation, planner, 1000L);
         assertEquals(FactProcessingStatus.ACCEPTED, firstCycle.getStatus());
-        assertEquals("the imported BQ location task fans out to each Party member's PLAYER row", 2,
+        assertEquals("Base-only imported location progress belongs only to the observing player", 1,
             firstCycle.getEvaluations().size());
         assertFalse("replaying the exact imported location fact must preserve its original idempotency key",
             transaction.inTransaction(() -> progress.recordFactIfAbsent(firstLocation)));
-        for (UUID player : Arrays.asList(owner, member)) {
-            assertEquals(QuestStatus.COMPLETED, progress.findProgress(ParticipantId.player(player), questId, 1)
-                .get().getStatus());
-            assertTrue(transaction.inTransaction(() -> progress.hasClaimableRewardEntitlement(
-                ParticipantId.player(player), questId, 1, 0)));
-        }
+        assertEquals(QuestStatus.COMPLETED, progress.findProgress(ParticipantId.player(owner), questId, 1)
+            .get().getStatus());
+        assertFalse(progress.findProgress(ParticipantId.player(member), questId, 1).isPresent());
+        assertTrue(transaction.inTransaction(() -> progress.hasClaimableRewardEntitlement(
+            ParticipantId.player(owner), questId, 1, 0)));
 
-        assertEquals(FactProcessingStatus.IGNORED,
+        assertEquals("a fresh observation is recorded but cannot advance while cycle zero is claimable",
+            FactProcessingStatus.ACCEPTED,
             runtime.apply(locationFact("location-before-claim", owner, 1100L), planner, 1100L).getStatus());
+        assertEquals(0, progress.findProgress(ParticipantId.player(owner), questId, 1).get().getCycle());
         JdbcRewardClaimRepository claims = new JdbcRewardClaimRepository(manager);
-        for (UUID player : Arrays.asList(owner, member)) {
-            assertEquals(RewardClaimStatus.CLAIMED, transaction.inTransaction(() -> claims.claim(
-                questId, 1, 0, player, 2000L)));
-        }
-        assertEquals(FactProcessingStatus.IGNORED,
+        assertEquals(RewardClaimStatus.CLAIMED, transaction.inTransaction(() -> claims.claim(
+            questId, 1, 0, owner, 2000L)));
+        assertEquals("a fresh observation is recorded but cannot advance before the repeat cooldown",
+            FactProcessingStatus.ACCEPTED,
             runtime.apply(locationFact("location-before-cooldown", owner, 2099L), planner, 2099L).getStatus());
+        assertEquals(0, progress.findProgress(ParticipantId.player(owner), questId, 1).get().getCycle());
 
         FactProcessingResult nextCycle = runtime.apply(locationFact("location-after-cooldown", owner, 2100L),
             planner, 2100L);
         assertEquals(FactProcessingStatus.ACCEPTED, nextCycle.getStatus());
-        assertEquals(2, nextCycle.getEvaluations().size());
-        for (UUID player : Arrays.asList(owner, member)) {
-            com.jsirgalaxybase.quest.core.QuestProgressSnapshot saved = progress.findProgress(
-                ParticipantId.player(player), questId, 1).get();
-            assertEquals(1, saved.getCycle());
-            assertEquals(QuestStatus.COMPLETED, saved.getStatus());
-            assertTrue(transaction.inTransaction(() -> progress.hasClaimableRewardEntitlement(
-                ParticipantId.player(player), questId, 1, 1)));
-        }
+        assertEquals(1, nextCycle.getEvaluations().size());
+        com.jsirgalaxybase.quest.core.QuestProgressSnapshot saved = progress.findProgress(
+            ParticipantId.player(owner), questId, 1).get();
+        assertEquals(1, saved.getCycle());
+        assertEquals(QuestStatus.COMPLETED, saved.getStatus());
+        assertTrue(transaction.inTransaction(() -> progress.hasClaimableRewardEntitlement(
+            ParticipantId.player(owner), questId, 1, 1)));
+        assertFalse(progress.findProgress(ParticipantId.player(member), questId, 1).isPresent());
     }
 
     @Test

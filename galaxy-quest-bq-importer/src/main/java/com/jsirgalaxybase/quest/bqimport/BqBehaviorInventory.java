@@ -25,11 +25,13 @@ public final class BqBehaviorInventory {
     private final int locationTaskCount;
     private final Map<String, Map<String, Integer>> locationProfiles;
     private final int distinctLocationStructures;
+    private final List<String> manifestBlockers;
 
     private BqBehaviorInventory(String sourceHash, Map<String, TypeUsage> tasks,
         Map<String, TypeUsage> rewards, Map<String, QuestProfile> questProfiles,
         Map<String, Integer> questCompletionProfiles, int locationTaskCount,
-        Map<String, Map<String, Integer>> locationProfiles, int distinctLocationStructures) {
+        Map<String, Map<String, Integer>> locationProfiles, int distinctLocationStructures,
+        List<String> manifestBlockers) {
         this.sourceHash = sourceHash;
         this.tasks = Collections.unmodifiableMap(tasks);
         this.rewards = Collections.unmodifiableMap(rewards);
@@ -38,6 +40,7 @@ public final class BqBehaviorInventory {
         this.locationTaskCount = locationTaskCount;
         this.locationProfiles = immutableNestedMap(locationProfiles);
         this.distinctLocationStructures = distinctLocationStructures;
+        this.manifestBlockers = Collections.unmodifiableList(new ArrayList<String>(manifestBlockers));
     }
 
     public static BqBehaviorInventory from(BqMigrationManifest manifest) {
@@ -82,8 +85,12 @@ public final class BqBehaviorInventory {
                 usage(rewards, spec.getTypeId()).add(spec.getOptions());
             }
         }
+        List<String> manifestBlockers = new ArrayList<String>();
+        for (BqMigrationIssue issue : manifest.getIssues()) if (issue.getSeverity() == BqMigrationIssue.Severity.ERROR) {
+            manifestBlockers.add(issue.getCode() + " " + issue.getSubject());
+        }
         return new BqBehaviorInventory(manifest.getSourceHash(), tasks, rewards, questProfiles, questCompletionProfiles,
-            locationTaskCount, locationProfiles, locationStructures.size());
+            locationTaskCount, locationProfiles, locationStructures.size(), manifestBlockers);
     }
 
     public String getSourceHash() { return sourceHash; }
@@ -98,15 +105,20 @@ public final class BqBehaviorInventory {
     /** Content parsing is not permission to publish unverified task or reward behavior. */
     public void requireRuntimeReady() {
         List<String> blocked = new ArrayList<String>();
-        for (String type : tasks.keySet()) blocked.add("TASK " + type);
-        for (String type : rewards.keySet()) blocked.add("REWARD " + type);
-        if (!blocked.isEmpty()) throw new IllegalStateException("M.2 behavior is not verified: " + blocked);
+        for (String blocker : manifestBlockers) blocked.add("MANIFEST " + blocker);
+        for (String type : tasks.keySet()) if (BqRuntimeCapabilityRegistry.taskStatus(type)
+            != BqCompatibilityStatus.SUPPORTED) blocked.add("TASK " + type + "="
+                + BqRuntimeCapabilityRegistry.taskStatus(type));
+        for (String type : rewards.keySet()) if (BqRuntimeCapabilityRegistry.rewardStatus(type)
+            != BqCompatibilityStatus.SUPPORTED) blocked.add("REWARD " + type + "="
+                + BqRuntimeCapabilityRegistry.rewardStatus(type));
+        if (!blocked.isEmpty()) throw new IllegalStateException("BQ runtime is not ready: " + blocked);
     }
 
     public String toText() {
         StringBuilder out = new StringBuilder("sourceHash=").append(sourceHash).append('\n');
-        append(out, "TASK", tasks, BqStandardCodec.supportedTaskTypes());
-        append(out, "REWARD", rewards, BqStandardCodec.supportedRewardTypes());
+        append(out, "TASK", tasks, true);
+        append(out, "REWARD", rewards, false);
         for (Map.Entry<String, QuestProfile> profile : questProfiles.entrySet()) {
             QuestProfile usage = profile.getValue();
             out.append("QUEST_PROFILE|").append(profile.getKey()).append("|quests=")
@@ -289,8 +301,7 @@ public final class BqBehaviorInventory {
         return created;
     }
 
-    private static void append(StringBuilder out, String kind, Map<String, TypeUsage> usages,
-        java.util.Set<String> recognized) {
+    private static void append(StringBuilder out, String kind, Map<String, TypeUsage> usages, boolean task) {
         List<Map.Entry<String, TypeUsage>> ordered = new ArrayList<Map.Entry<String, TypeUsage>>(usages.entrySet());
         Collections.sort(ordered, new Comparator<Map.Entry<String, TypeUsage>>() {
             @Override public int compare(Map.Entry<String, TypeUsage> left, Map.Entry<String, TypeUsage> right) {
@@ -301,7 +312,8 @@ public final class BqBehaviorInventory {
         for (Map.Entry<String, TypeUsage> entry : ordered) {
             TypeUsage usage = entry.getValue();
             out.append(kind).append('|').append(entry.getKey()).append('|').append(usage.count)
-                .append('|').append(recognized.contains(entry.getKey()) ? "BLOCKED" : "UNKNOWN")
+                .append('|').append(task ? BqRuntimeCapabilityRegistry.taskStatus(entry.getKey())
+                    : BqRuntimeCapabilityRegistry.rewardStatus(entry.getKey()))
                 .append("|optionKeys=").append(usage.optionKeys)
                 .append("|behaviorFlags=").append(usage.behaviorFlags)
                 .append("|behaviorProfiles=").append(usage.behaviorProfiles);

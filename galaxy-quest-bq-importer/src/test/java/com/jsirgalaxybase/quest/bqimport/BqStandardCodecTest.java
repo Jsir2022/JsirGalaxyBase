@@ -44,6 +44,7 @@ public class BqStandardCodecTest {
         assertEquals(64, spec.getItems().get(0).getCount());
         assertTrue(spec.getItems().get(0).getTagJson().contains("grade:8"));
         Map<String, String> parameters = codec.taskParameters(spec, new Gson().toJson(task));
+        assertEquals("false", parameters.get("bq.partyShare"));
         assertEquals("pure", com.jsirgalaxybase.quest.core.PortableNbt.decode(
             parameters.get("item.0.nbtPortable")).getFields().get("grade").getScalar());
     }

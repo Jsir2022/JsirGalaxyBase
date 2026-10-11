@@ -18,6 +18,30 @@ public final class JdbcQuestContentMigrationRepository implements QuestContentMi
         this.connections = connections;
     }
 
+    @Override
+    public Optional<com.jsirgalaxybase.quest.core.QuestRuntimeHealthSummary> health() {
+        return connections.withConnection(connection -> {
+            // One statement uses one PostgreSQL snapshot, so catalog counts and revision agree.
+            String sql = "WITH current_quests AS (SELECT DISTINCT ON (quest_id) content_json "
+                + "FROM galaxy_quest_definition WHERE lifecycle='PUBLISHED' "
+                + "ORDER BY quest_id,definition_version DESC) "
+                + "SELECT COUNT(*),COALESCE(SUM(jsonb_array_length(content_json->'tasks')),0),"
+                + "COALESCE(SUM(jsonb_array_length(content_json->'rewards')),0),"
+                + "(SELECT COUNT(DISTINCT chapter_id) FROM galaxy_quest_chapter_definition WHERE lifecycle='PUBLISHED'),"
+                + "(SELECT revision FROM galaxy_quest_definition_catalog_revision WHERE singleton),"
+                + "(SELECT COUNT(*) FROM galaxy_quest_reward_entitlement WHERE delivery_status='FAILED'),"
+                + "(SELECT COUNT(*) FROM galaxy_quest_consumption_submission WHERE submission_status IN ('PREPARED','APPLIED')) "
+                + "FROM current_quests";
+            try (PreparedStatement statement = connection.prepareStatement(sql);
+                ResultSet row = statement.executeQuery()) {
+                if (!row.next()) throw new java.sql.SQLException("health aggregate returned no row");
+                return Optional.of(new com.jsirgalaxybase.quest.core.QuestRuntimeHealthSummary(
+                    row.getLong(1), row.getLong(2), row.getLong(3), row.getLong(4),
+                    row.getLong(5), row.getLong(6), row.getLong(7)));
+            }
+        });
+    }
+
     public Optional<QuestContentMigrationBatch> find(final String batchId) {
         return connections.withConnection(connection -> {
             try (PreparedStatement statement = connection.prepareStatement(
@@ -42,6 +66,17 @@ public final class JdbcQuestContentMigrationRepository implements QuestContentMi
                 statement.execute();
             }
             return null;
+        });
+    }
+
+    public boolean isLatestApplied(final String batchId) {
+        requireTransaction();
+        return connections.withConnection(connection -> {
+            try (PreparedStatement statement=connection.prepareStatement(
+                "SELECT batch_id FROM galaxy_quest_content_migration_batch WHERE status='APPLIED' "
+                    + "ORDER BY applied_at DESC,batch_id DESC LIMIT 1");ResultSet row=statement.executeQuery()) {
+                return row.next() && batchId.equals(row.getString(1));
+            }
         });
     }
 
@@ -76,7 +111,7 @@ public final class JdbcQuestContentMigrationRepository implements QuestContentMi
         connections.withConnection(connection -> {
             try (PreparedStatement statement = connection.prepareStatement(
                 "INSERT INTO galaxy_quest_content_migration_batch(batch_id,source_hash,status,manifest_text,"
-                    + "previous_chapter_order,error_count,warning_count) VALUES (?,?,?,?,?,?,?)")) {
+                    + "previous_chapter_order,error_count,warning_count,applied_at) VALUES (?,?,?,?,?,?,?,clock_timestamp())")) {
                 bindBatch(statement, batch);
                 statement.executeUpdate();
             }
@@ -91,7 +126,7 @@ public final class JdbcQuestContentMigrationRepository implements QuestContentMi
         connections.withConnection(connection -> {
             try (PreparedStatement statement = connection.prepareStatement(
                 "UPDATE galaxy_quest_content_migration_batch SET status='APPLIED',manifest_text=?,"
-                    + "previous_chapter_order=?,error_count=?,warning_count=?,applied_at=CURRENT_TIMESTAMP "
+                    + "previous_chapter_order=?,error_count=?,warning_count=?,applied_at=clock_timestamp() "
                     + "WHERE batch_id=? AND status='PREVIEW'")) {
                 statement.setString(1, batch.getManifestText()); statement.setString(2, batch.getPreviousChapterOrder());
                 statement.setInt(3, batch.getErrorCount()); statement.setInt(4, batch.getWarningCount());

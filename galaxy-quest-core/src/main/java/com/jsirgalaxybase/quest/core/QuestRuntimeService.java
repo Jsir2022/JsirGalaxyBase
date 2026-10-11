@@ -349,6 +349,7 @@ public final class QuestRuntimeService {
             if (("bq_standard:retrieval".equals(task.getTypeId())
                 || "bq_standard:optional_retrieval".equals(task.getTypeId()))
                 && "galaxy:inventory_observed".equals(task.getParameters().get("factType"))
+                && BqImportedTaskScope.sharesParty(task)
                 && !QuestBooleanParameter.parse(task.getParameters().get("consume"), false)) return true;
         }
         return false;

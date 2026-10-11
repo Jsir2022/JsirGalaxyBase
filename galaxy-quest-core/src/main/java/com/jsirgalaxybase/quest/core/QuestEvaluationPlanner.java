@@ -242,6 +242,7 @@ public final class QuestEvaluationPlanner implements QuestEvaluationRequestProvi
                 if (task.getKey().equals(targetTaskKey) && "bq_standard:crafting".equals(task.getTypeId())
                     && QuestBooleanParameter.parse(task.getParameters().get("allowCraftedFromStatistics"), false)) {
                     return !BqPartyCraftingStatisticsScope.isAutomaticTaskSnapshot(fact)
+                        || !BqImportedTaskScope.sharesParty(task)
                         || BqPartyCraftingStatisticsScope.matchesAutomaticPartyActivity(definition, fact);
                 }
             }
@@ -294,7 +295,7 @@ public final class QuestEvaluationPlanner implements QuestEvaluationRequestProvi
         for (TaskDefinition task : definition.getTasks()) {
             if (!factType.equals(task.getParameters().get("factType"))) continue;
             boolean importedPartyInventoryRetrieval = "galaxy:inventory_observed".equals(factType)
-                && task.getParameters().containsKey("bq.raw")
+                && BqImportedTaskScope.isImported(task) && BqImportedTaskScope.sharesParty(task)
                 && ("bq_standard:retrieval".equals(task.getTypeId())
                     || "bq_standard:optional_retrieval".equals(task.getTypeId()))
                 && !QuestBooleanParameter.parse(task.getParameters().get("consume"), false);

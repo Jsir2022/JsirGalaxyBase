@@ -106,7 +106,7 @@ public final class QuestObservationPlan {
                 if ("bq_standard:crafting".equals(task.getTypeId())
                     && QuestBooleanParameter.parse(task.getParameters().get("allowCraftedFromStatistics"), false)) {
                     craftingStatisticTasks.add(task);
-                    if (task.getParameters().containsKey("bq.raw")) {
+                    if (BqImportedTaskScope.isImported(task)) {
                         automaticCraftingStatisticsTargets.add(new CraftingStatisticsDetectionTarget(
                             stored.getDefinition().getId(), stored.getDefinition().getVersion(), task.getKey()));
                     }
@@ -124,14 +124,15 @@ public final class QuestObservationPlan {
                     inventory = true;
                     if (("bq_standard:retrieval".equals(task.getTypeId())
                         || "bq_standard:optional_retrieval".equals(task.getTypeId()))
-                        && task.getParameters().containsKey("bq.raw")
+                        && BqImportedTaskScope.isImported(task) && BqImportedTaskScope.sharesParty(task)
                         && !consume) {
                         bqPartyInventory = true;
                     }
                 } else if ("galaxy:fluid_inventory_observed".equals(factType) && !consume) {
                     fluid = true;
                     if ("bq_standard:fluid".equals(task.getTypeId())
-                        && task.getParameters().containsKey("bq.raw")) bqPartyInventory = true;
+                        && BqImportedTaskScope.isImported(task)
+                        && BqImportedTaskScope.sharesParty(task)) bqPartyInventory = true;
                 }
                 else if ("galaxy:location_observed".equals(factType)) location = true;
                 else if ("galaxy:nearby_entities_observed".equals(factType)) {
@@ -194,7 +195,9 @@ public final class QuestObservationPlan {
         Map<String, QuestCraftingStatisticObservation> result = new LinkedHashMap<String,
             QuestCraftingStatisticObservation>();
         for (TaskDefinition task : craftingStatisticTasks) {
-            if (importedBq != null && task.getParameters().containsKey("bq.raw") != importedBq.booleanValue()) {
+            boolean partySharedBq = BqImportedTaskScope.isImported(task)
+                && BqImportedTaskScope.sharesParty(task);
+            if (importedBq != null && partySharedBq != importedBq.booleanValue()) {
                 continue;
             }
             if (!CRAFTING_STATISTIC_MATCHER.matchesCraftingStatisticsTrigger(task, output)) continue;

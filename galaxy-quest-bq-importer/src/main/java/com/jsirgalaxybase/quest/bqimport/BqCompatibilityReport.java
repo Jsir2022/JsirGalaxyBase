@@ -66,16 +66,14 @@ public final class BqCompatibilityReport {
         for(BqImportedQuest quest:manifest.getQuests()){
             String id=quest.getDefinition().getId().toString();
             for(TaskDefinition task:quest.getDefinition().getTasks()){
-                BqCompatibilityStatus status=!BqStandardCodec.supportedTaskTypes().contains(task.getTypeId())
-                    ?BqCompatibilityStatus.UNKNOWN:blocked.contains(id+"/"+task.getKey())
-                    ?BqCompatibilityStatus.BLOCKED:BqCompatibilityStatus.ADAPTED;
+                BqCompatibilityStatus status=blocked.contains(id+"/"+task.getKey())
+                    ?BqCompatibilityStatus.BLOCKED:BqRuntimeCapabilityRegistry.taskStatus(task.getTypeId());
                 elements.put("TASK|"+id+"|"+task.getKey()+"|"+task.getTypeId(),status);
                 tasks.put(task.getTypeId(),worst(tasks.get(task.getTypeId()),status));
             }
             for(RewardDefinition reward:quest.getDefinition().getRewards()){
-                BqCompatibilityStatus status=!BqStandardCodec.supportedRewardTypes().contains(reward.getTypeId())
-                    ?BqCompatibilityStatus.UNKNOWN:blocked.contains(id+"/"+reward.getKey())
-                    ?BqCompatibilityStatus.BLOCKED:BqCompatibilityStatus.ADAPTED;
+                BqCompatibilityStatus status=blocked.contains(id+"/"+reward.getKey())
+                    ?BqCompatibilityStatus.BLOCKED:BqRuntimeCapabilityRegistry.rewardStatus(reward.getTypeId());
                 elements.put("REWARD|"+id+"|"+reward.getKey()+"|"+reward.getTypeId(),status);
                 rewards.put(reward.getTypeId(),worst(rewards.get(reward.getTypeId()),status));
             }

@@ -18,6 +18,7 @@ import com.google.gson.JsonObject;
 import com.jsirgalaxybase.quest.core.QuestDefinition;
 import com.jsirgalaxybase.quest.core.QuestBehavior;
 import com.jsirgalaxybase.quest.core.QuestLogic;
+import com.jsirgalaxybase.quest.core.QuestParticipantScope;
 import com.jsirgalaxybase.quest.core.QuestVisibility;
 import com.jsirgalaxybase.quest.core.RepeatPolicy;
 import com.jsirgalaxybase.quest.core.RewardDefinition;
@@ -78,6 +79,7 @@ public final class BqQuestDefinitionImporter {
             .globalShare(BqTypedJson.bool(properties, "globalShare", false))
             .updateSound(BqTypedJson.string(properties, "snd_update", ""))
             .completeSound(BqTypedJson.string(properties, "snd_complete", ""))
+            .participantScope(QuestParticipantScope.PLAYER)
             .build();
         QuestDefinition definition = new QuestDefinition(id, 1, name, description, prerequisiteLogic, taskLogic,
             prerequisites, tasks, rewards, repeat, behavior);

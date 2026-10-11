@@ -83,6 +83,9 @@ final class BqStandardCodec {
     Map<String, String> taskParameters(BqStandardTaskSpec spec, String rawJson) {
         Map<String, String> result = new LinkedHashMap<String, String>(spec.getOptions());
         result.put("bq.raw", rawJson);
+        // Base-only fresh servers deliberately use personal progress for imported GTNH content. The explicit
+        // marker prevents legacy BQ party compatibility helpers from aggregating or fanning out these facts.
+        result.put("bq.partyShare", "false");
         String type = spec.getTypeId();
         if ("bq_standard:hunt".equals(type) || "bq_standard:meeting".equals(type)) {
             String subject = result.remove("target");

@@ -13,7 +13,7 @@ import java.util.UUID;
 import org.junit.Test;
 
 public class BqBehaviorInventoryTest {
-    @Test public void countsRealTypeAndParameterShapesWithoutClaimingRuntimeCompatibility() throws Exception {
+    @Test public void countsRealTypeAndParameterShapesAndGatesOnlyUnverifiedRuntimeTypes() throws Exception {
         Path root = Files.createTempDirectory("bq-behavior-inventory");
         Path quests = Files.createDirectories(root.resolve("Quests/line"));
         Files.createDirectories(root.resolve("QuestLines"));
@@ -31,31 +31,47 @@ public class BqBehaviorInventoryTest {
         assertEquals(Integer.valueOf(1), inventory.getRewards().get("bq_standard:xp")
             .getBehaviorFlags().get("ignoreDisabled").get("true"));
         assertTrue(inventory.toText().contains("behaviorFlags={ignoreDisabled={true=1}}"));
-        assertTrue(inventory.toText().contains("TASK|bq_standard:checkbox|2|BLOCKED"));
+        assertTrue(inventory.toText().contains("TASK|bq_standard:checkbox|2|SUPPORTED"));
         assertTrue(inventory.toText().contains("REWARD|addon:reward|1|UNKNOWN"));
         assertEquals(inventory.toText(), BqBehaviorInventory.from(new BqMigrationPlanner().plan(root)).toText());
         try {
             inventory.requireRuntimeReady();
             org.junit.Assert.fail("unverified behavior must block publishing");
         } catch (IllegalStateException expected) {
-            assertTrue(expected.getMessage().contains("TASK bq_standard:checkbox"));
-            assertTrue(expected.getMessage().contains("REWARD addon:reward"));
+            assertTrue(!expected.getMessage().contains("TASK bq_standard:checkbox"));
+            assertTrue(expected.getMessage().contains("REWARD addon:reward=UNKNOWN"));
         }
     }
 
-    @Test public void applyRejectsUnverifiedBehaviorBeforeDatabaseConfiguration() throws Exception {
+    @Test public void applyRejectsRecognizedButUnverifiedBehaviorBeforeDatabaseConfiguration() throws Exception {
         Path root = Files.createTempDirectory("bq-behavior-apply-gate");
         Path quests = Files.createDirectories(root.resolve("Quests/line"));
         Files.createDirectories(root.resolve("QuestLines"));
         Files.write(root.resolve("QuestLinesOrder.txt"), new byte[0]);
-        write(quests.resolve("quest.json"), 1, "bq_standard:checkbox", "bq_standard:item");
-        assertTrue(new BqMigrationPlanner().plan(root).isApplicable());
+        write(quests.resolve("quest.json"), 1, "bq_standard:xp", "bq_standard:item");
         try {
             BqMigrationMain.main(new String[] { "apply", root.toString() });
             org.junit.Assert.fail("unverified behavior must block the CLI apply command");
         } catch (IllegalStateException expected) {
-            assertTrue(expected.getMessage().contains("M.2 behavior is not verified"));
+            assertTrue(expected.getMessage().contains("TASK bq_standard:xp=ADAPTED"));
         }
+    }
+
+    @Test public void currentGtnhRuntimeTypesPassTheExecutablePublicationGate() throws Exception {
+        Path root = Files.createTempDirectory("bq-runtime-ready");
+        Path quests = Files.createDirectories(root.resolve("Quests/line"));
+        Files.createDirectories(root.resolve("QuestLines"));
+        Files.write(root.resolve("QuestLinesOrder.txt"), new byte[0]);
+        write(quests.resolve("quest.json"), 1, "bq_standard:checkbox", "bq_standard:item");
+
+        BqBehaviorInventory inventory = BqBehaviorInventory.from(new BqMigrationPlanner().plan(root));
+        inventory.requireRuntimeReady();
+        assertEquals(BqCompatibilityStatus.SUPPORTED,
+            BqRuntimeCapabilityRegistry.taskStatus("bq_standard:checkbox"));
+        assertEquals(BqCompatibilityStatus.SUPPORTED,
+            BqRuntimeCapabilityRegistry.rewardStatus("bq_standard:item"));
+        assertTrue(BqRuntimeCapabilityRegistry.taskEvidence().containsKey("bq_standard:retrieval"));
+        assertTrue(BqRuntimeCapabilityRegistry.rewardEvidence().containsKey("bq_standard:choice"));
     }
 
     @Test public void countsOreDictionaryAndNbtMatchingIntersectionsWithoutPrintingItemData() throws Exception {

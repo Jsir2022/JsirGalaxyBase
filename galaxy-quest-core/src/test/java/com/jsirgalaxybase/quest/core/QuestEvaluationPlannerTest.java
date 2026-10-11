@@ -211,6 +211,58 @@ public class QuestEvaluationPlannerTest {
     }
 
     @Test
+    public void baseOnlyImportedHuntStaysPersonalEvenWhenPlayerHasParty() {
+        UUID hunter = UUID.randomUUID();
+        UUID partyMember = UUID.randomUUID();
+        ParticipantMembership party = new ParticipantMembership(ParticipantId.party(UUID.randomUUID()),
+            new LinkedHashSet<UUID>(Arrays.asList(hunter, partyMember)));
+        TaskDefinition task = new TaskDefinition("hunt", "bq_standard:hunt", false,
+            map("target", "1", "factType", "galaxy:entity_killed", "subject", "Zombie", "subtypes", "true",
+                "bq.raw", "{}", BqImportedTaskScope.PARTY_SHARE, "false"));
+        QuestDefinition hunt = new QuestDefinition(UUID.randomUUID(), 1, "Personal hunt", "", QuestLogic.AND,
+            QuestLogic.AND, Collections.<UUID>emptySet(), Collections.singletonList(task),
+            Collections.<RewardDefinition>emptyList(), RepeatPolicy.never());
+        ParticipantMembershipResolver resolver = ignored -> Arrays.asList(ParticipantMembership.player(hunter), party);
+        QuestEvaluationPlanner planner = new QuestEvaluationPlanner(() -> Collections.singletonList(stored(hunt)),
+            participant -> Collections.<UUID>emptySet(), resolver, new BqHuntPartyAssignmentPolicy(),
+            (definition, fact, membership) -> false);
+
+        List<QuestEvaluationRequest> requests = planner.requestsFor(new GameplayFact("s2", "personal-hunt",
+            hunter, "galaxy:entity_killed", 10L, map("subject", "Zombie", "amount", "1")));
+
+        assertEquals(1, requests.size());
+        assertEquals(ParticipantId.player(hunter), requests.get(0).getMembership().getParticipantId());
+        assertEquals(ParticipantId.player(hunter), requests.get(0).getFactMembership().getParticipantId());
+    }
+
+    @Test
+    public void baseOnlyImportedRetrievalUsesPersonalSnapshotEvenWhenPlayerHasParty() {
+        UUID player = UUID.randomUUID();
+        ParticipantMembership party = new ParticipantMembership(ParticipantId.party(UUID.randomUUID()),
+            new LinkedHashSet<UUID>(Arrays.asList(player, UUID.randomUUID())));
+        Map<String, String> parameters = map("factType", "galaxy:inventory_observed", "consume", "false",
+            "progressMode", "item-vector", "item.count", "1", "item.0.registryName", "minecraft:iron_ingot",
+            "item.0.amount", "2", "bq.raw", "{}", BqImportedTaskScope.PARTY_SHARE, "false");
+        QuestDefinition quest = new QuestDefinition(UUID.randomUUID(), 1, "Personal retrieval", "", QuestLogic.AND,
+            QuestLogic.AND, Collections.<UUID>emptySet(), Collections.singletonList(new TaskDefinition("retrieve",
+                "bq_standard:retrieval", false, parameters)), Collections.<RewardDefinition>emptyList(),
+            RepeatPolicy.never());
+        ParticipantMembershipResolver resolver = ignored -> Arrays.asList(ParticipantMembership.player(player), party);
+        QuestEvaluationPlanner planner = new QuestEvaluationPlanner(() -> Collections.singletonList(stored(quest)),
+            participant -> Collections.<UUID>emptySet(), resolver, new BqHuntPartyAssignmentPolicy(),
+            (definition, fact, membership) -> false);
+
+        List<QuestEvaluationRequest> requests = planner.requestsFor(new GameplayFact("s2", "personal-inventory",
+            player, "galaxy:inventory_observed", 10L, map("inventory.count", "0")));
+
+        assertEquals(1, requests.size());
+        assertEquals(ParticipantId.player(player), requests.get(0).getMembership().getParticipantId());
+        assertEquals(ParticipantId.player(player), requests.get(0).getFactMembership().getParticipantId());
+        assertFalse(QuestObservationPlan.fromPublished(Collections.singletonList(stored(quest)))
+            .observesBqPartyInventory());
+    }
+
+    @Test
     public void bqHuntPartyFanoutDoesNotChangeAggregateScopeOrNonHuntTasks() {
         UUID hunter = UUID.randomUUID();
         UUID member = UUID.randomUUID();

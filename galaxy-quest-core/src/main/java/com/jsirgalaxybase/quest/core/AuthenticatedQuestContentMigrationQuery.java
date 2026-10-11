@@ -4,4 +4,8 @@ public final class AuthenticatedQuestContentMigrationQuery {
     private final QuestContentMigrationQuery query;private final QuestEditorAuthorization authorization;
     public AuthenticatedQuestContentMigrationQuery(QuestContentMigrationQuery query,QuestEditorAuthorization authorization){if(query==null||authorization==null)throw new IllegalArgumentException("dependencies are required");this.query=query;this.authorization=authorization;}
     public List<QuestContentMigrationSummary> listRecent(QuestEditorActor actor,int limit){if(actor==null||!authorization.canManageDefinitions(actor))return Collections.emptyList();return query.listRecent(Math.max(1,Math.min(20,limit)));}
+    public java.util.Optional<QuestRuntimeHealthSummary> health(QuestEditorActor actor) {
+        if (actor == null || !authorization.canManageDefinitions(actor)) return java.util.Optional.empty();
+        return query.health();
+    }
 }

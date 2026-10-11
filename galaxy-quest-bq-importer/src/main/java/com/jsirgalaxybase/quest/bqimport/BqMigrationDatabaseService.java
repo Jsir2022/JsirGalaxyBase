@@ -34,6 +34,7 @@ public final class BqMigrationDatabaseService {
     });}
     public QuestContentMigrationBatch apply(final BqMigrationManifest manifest,final long now){
         if(!manifest.isApplicable())throw new IllegalArgumentException("blocked migration manifest");
+        BqBehaviorInventory.from(manifest).requireRuntimeReady();
         Optional<QuestContentMigrationBatch> prior=migrations.find(manifest.getBatchId());
         if(prior.isPresent()&&prior.get().getStatus()==QuestContentMigrationBatch.Status.APPLIED)return prior.get();
         if(prior.isPresent()&&prior.get().getStatus()!=QuestContentMigrationBatch.Status.PREVIEW)throw new IllegalStateException("migration batch is not applicable: "+prior.get().getStatus());
@@ -54,7 +55,8 @@ public final class BqMigrationDatabaseService {
             QuestContentMigrationBatch batch=batch(manifest,QuestContentMigrationBatch.Status.APPLIED,join(previous),applied);if(concurrent.isPresent())migrations.promoteApplied(batch);else migrations.insert(batch);return batch;
         });
     }
-    public void rollback(final String batchId){transaction.inTransaction(()->{QuestContentMigrationBatch batch=migrations.find(batchId).orElseThrow(()->new IllegalArgumentException("unknown migration batch"));if(batch.getStatus()==QuestContentMigrationBatch.Status.ROLLED_BACK)return null;if(batch.getStatus()!=QuestContentMigrationBatch.Status.APPLIED)throw new IllegalStateException("only applied migration batches can be rolled back");
+    public void rollback(final String batchId){transaction.inTransaction(()->{migrations.lock();QuestContentMigrationBatch batch=migrations.find(batchId).orElseThrow(()->new IllegalArgumentException("unknown migration batch"));if(batch.getStatus()==QuestContentMigrationBatch.Status.ROLLED_BACK)return null;if(batch.getStatus()!=QuestContentMigrationBatch.Status.APPLIED)throw new IllegalStateException("only applied migration batches can be rolled back");
+        if(!migrations.isLatestApplied(batchId))throw new IllegalStateException("only the latest applied migration batch can be rolled back; later quest version or catalog batch may depend on it");
         for(QuestContentMigrationItem item:batch.getItems())if(item.getAction()!=QuestContentMigrationItem.Action.UNCHANGED){if(item.getKind()==QuestContentMigrationItem.Kind.QUEST){StoredQuestDefinition latest=definitions.findPublished(item.getId()).orElseThrow(()->new IllegalStateException("published quest missing"));if(latest.getDefinition().getVersion()!=item.getVersion())throw new IllegalStateException("later quest version depends on migration");}else{StoredQuestChapter latest=chapters.findPublished(item.getId()).orElseThrow(()->new IllegalStateException("published chapter missing"));if(latest.getDefinition().getVersion()!=item.getVersion())throw new IllegalStateException("later chapter version depends on migration");}}
         java.util.Set<UUID> createdQuests=new java.util.HashSet<UUID>(),createdChapters=new java.util.HashSet<UUID>();for(QuestContentMigrationItem item:batch.getItems())if(item.getAction()==QuestContentMigrationItem.Action.CREATED){if(item.getKind()==QuestContentMigrationItem.Kind.QUEST)createdQuests.add(item.getId());else createdChapters.add(item.getId());}
         for(StoredQuestDefinition later:definitions.findAllPublished())if(!createdQuests.contains(later.getDefinition().getId()))for(UUID prerequisite:later.getDefinition().getPrerequisites())if(createdQuests.contains(prerequisite))throw new IllegalStateException("later quest depends on migration: "+later.getDefinition().getId());
