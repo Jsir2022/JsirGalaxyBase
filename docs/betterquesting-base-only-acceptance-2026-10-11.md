@@ -11,6 +11,7 @@
 | 最新批次回滚、后续版本/依赖保护、失败事务清理 | `unchangedLaterBatchStillPreventsEarlierRollback`、`changedContentCreatesControlledVersionAndProtectsEarlierRollback`、`failedApplyRollsBackEveryMigrationWrite` | Importer 全量 73 项中已执行通过 |
 | 新玩家检测、前置、领取和奖励幂等 | Importer 运行集成、Core Runtime/Detect/Choice/Reward 测试、`QuestPostgresIntegrationTest`、根库存奖励集成 | 代表性自动闭环通过；证据分层见下文，不等于逐任务实机验收 |
 | 管理员健康查询经服务端授权，玩家不得读取 | `AuthenticatedQuestContentMigrationQueryTest`、`TerminalServiceTest`、`TerminalQuestCenterCodecTest` | 授权、网络往返与不可用状态通过 |
+| Base 启动组合实际接入 9 类 Task / 4 类 Reward | `QuestModuleTest`、`BqRuntimeCapabilityRegistryTest`、Quest gameplay/reward 桥测试 | QuestModuleTest 6 项通过；完整自动测试构建复验通过 |
 | 终端章节/详情/Choice/错误及管理健康三档布局 | `QuestRuntimeHealthVisualTest`、统一正式终端画廊 | 252 份结构门禁通过，健康摘要 PNG 已检查 |
 | 根全量测试、assemble、自包含、运行 JAR 排除导入/BQ 类 | 根 Gradle 验收与 JAR 内容核对 | 1,113 项、1,061 执行、52 非 Quest 跳过，0 failure/error；构建与排除核验通过 |
 | 分阶段本地提交、真实数量/跳过原因/制品哈希 | Git 与 Worklog | 代码提交 `adfb691` / `664436e` / `6181ece`，最终文档单独提交；制品见下文 |
@@ -50,5 +51,9 @@ Command/Scoreboard 奖励有既有处理器单测，但不在固定任务书的�
 - SHA-256：`0b8266264ced24ea90757bed584b6c8ce19d991996adcba64fb673184d602645`。`dirty` 来自构建时尚未提交的文档；代码对应 `6181ece`。
 - `verifyUi2SelfContained` 通过，另直接检查 ZIP 项无 BetterQuesting 运行包、Importer/CLI、Gson 和 Java2D Demo 类。
 - CodeGraph 已同步且 up-to-date；运行清单 impact 与 affected 指向兼容报告、发布服务和六个 Importer 测试类。此前 Runtime/Planner/投影/终端服务影响链见 Worklog。
+
+- N.6 验收：全模块报告共 1,114 项、1,062 执行、52 非 Quest 条件跳过、0 failure/error；`QuestModuleTest` 6 项全部执行。完整命令 `:galaxy-quest-core:test :galaxy-quest-postgres:test :galaxy-quest-bq-importer:test :ui2-core:test :ui2-lab:test :ui2-terminal:test :ui2-demo:test test assemble verifyUi2SelfContained :ui2-demo:renderGolden :ui2-demo:verifyTerminalVisuals` 成功，57 tasks、15 executed、42 up-to-date；252 终端快照通过。
+- N.6 JAR：`.gradle/codex-r2-confirmed-build/root/libs/jsirgalaxybase-18d3301-main+18d3301be4-dirty.jar`，SHA-256 `e939581b58bd58ec9c1a3275e65d7b37b835c829cc0c92c2c2b9ebfadf624943`；反编译前 class entry 确认存在新 handler factory，ZIP 排除扫描通过。`dirty` 表示当时 N.6 源码和阶段文档尚未提交。
+- N.6 CodeGraph sync 2 个文件、impact `QuestModule` 142 符号；随后 sync 1 个测试改动，handler factory impact 5 符号。affected 候选较宽，直接测试范围收敛至 `QuestModuleTest` 和已存在的 BQ Item delivery 测试；报告合计测试通过。
 
 下一门槛只保留 Base-only 新服人工运行及单独授权的启用准备；本次未推送、未部署、未执行生产 DDL、未改变服务器开关。

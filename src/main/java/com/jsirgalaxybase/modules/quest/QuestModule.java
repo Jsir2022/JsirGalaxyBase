@@ -536,6 +536,20 @@ public class QuestModule extends ModModule {
     }
     protected QuestRewardDeliveryController createRewardDeliveryController(JdbcQuestConnectionManager manager,
         String sourceServer, String[] commandAllowlist) {
+        com.jsirgalaxybase.quest.core.RewardDeliveryWorker worker =
+            new com.jsirgalaxybase.quest.core.RewardDeliveryWorker(
+                new JdbcRewardDeliveryRepository(manager), new JdbcQuestTransaction(manager),
+                new com.jsirgalaxybase.quest.core.RewardDeliveryRouter(
+                    createRewardDeliveryHandlers(manager, commandAllowlist)),
+                new QuestClock(){@Override public long currentTimeMillis(){return System.currentTimeMillis();}},
+                30000L, 5000L, 10);
+        String workerId = "quest-reward:" + (sourceServer == null || sourceServer.trim().isEmpty()
+            ? "unknown" : sourceServer.trim());
+        return new QuestRewardDeliveryController(worker, workerId);
+    }
+
+    protected List<com.jsirgalaxybase.quest.core.RewardDeliveryHandler> createRewardDeliveryHandlers(
+        JdbcQuestConnectionManager manager, String[] commandAllowlist) {
         QuestPlayerResolver players = new OnlineServerQuestPlayerResolver();
         WorldSaveQuestPlayerDataFlusher flusher = new WorldSaveQuestPlayerDataFlusher();
         List<com.jsirgalaxybase.quest.core.RewardDeliveryHandler> handlers =
@@ -558,15 +572,7 @@ public class QuestModule extends ModModule {
                 net.minecraft.entity.player.EntityPlayerMP player = players.findOnline(participant.getId());
                 return player == null ? "" : player.getCommandSenderName();
             }));
-        com.jsirgalaxybase.quest.core.RewardDeliveryWorker worker =
-            new com.jsirgalaxybase.quest.core.RewardDeliveryWorker(
-                new JdbcRewardDeliveryRepository(manager), new JdbcQuestTransaction(manager),
-                new com.jsirgalaxybase.quest.core.RewardDeliveryRouter(handlers),
-                new QuestClock(){@Override public long currentTimeMillis(){return System.currentTimeMillis();}},
-                30000L, 5000L, 10);
-        String workerId = "quest-reward:" + (sourceServer == null || sourceServer.trim().isEmpty()
-            ? "unknown" : sourceServer.trim());
-        return new QuestRewardDeliveryController(worker, workerId);
+        return handlers;
     }
     public boolean isReadRuntimeActive(){return questCenterQuery!=null;}
     public String getUnavailableReason(){return unavailableReason;}

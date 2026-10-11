@@ -4,10 +4,13 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertEquals;
 
 import java.io.File;
 import java.lang.reflect.Constructor;
 import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 import org.junit.After;
 import org.junit.Test;
@@ -63,7 +66,7 @@ public class QuestModuleTest {
         assertSame(quest.query,quest.getQuestCenterQuery());assertTrue(quest.getUnavailableReason().isEmpty());
         assertNotNull(quest.getQuestRuntimeService());
         assertNotNull(quest.getQuestTypeRegistry());
-        assertTrue(quest.getQuestTypeRegistry().getEvaluators().snapshot().containsKey("bq_standard:crafting"));
+        assertTrue(quest.getQuestTypeRegistry().getEvaluators().snapshot().keySet().containsAll(bqTaskTypes()));
         assertNotNull(quest.getQuestTypeRegistry().getEditorTypes().require(
             "bq_standard:retrieval", com.jsirgalaxybase.quest.core.QuestElementKind.TASK));
         assertNotNull(quest.getDraftManagementService());assertNotNull(quest.getDefinitionManagementQuery());
@@ -71,6 +74,34 @@ public class QuestModuleTest {
         assertNotNull(quest.getChapterAlignmentService());
         assertNotNull(quest.getParticipantAdministrationService());
         assertNotNull(quest.getRewardDeliveryController());
+        assertTrue(quest.gameplayEventsRegisteredForTest);
+    }
+
+    @Test
+    public void baseCompositionRootRegistersEveryImportedTaskEvaluatorAndRewardHandler() throws Exception {
+        TestQuestModule quest = new TestQuestModule();
+        com.jsirgalaxybase.quest.postgres.JdbcQuestConnectionManager manager =
+            new com.jsirgalaxybase.quest.postgres.JdbcQuestConnectionManager(new NoConnectionDataSource());
+
+        Set<String> rewardTypes = new LinkedHashSet<String>();
+        for (com.jsirgalaxybase.quest.core.RewardDeliveryHandler handler :
+            quest.createHandlersForTest(manager)) rewardTypes.add(handler.getTypeId());
+
+        assertEquals("the Base worker must build one unambiguous route for every configured reward handler",
+            new LinkedHashSet<String>(java.util.Arrays.asList("bq_standard:choice", "bq_standard:command",
+                "bq_standard:item", "bq_standard:questcompletion", "bq_standard:scoreboard", "bq_standard:xp")),
+            rewardTypes);
+        new com.jsirgalaxybase.quest.core.RewardDeliveryRouter(quest.createHandlersForTest(manager));
+        assertTrue("all imported rewards must have a concrete Base delivery handler",
+            rewardTypes.containsAll(new LinkedHashSet<String>(java.util.Arrays.asList(
+                "bq_standard:item", "bq_standard:choice", "bq_standard:questcompletion", "bq_standard:xp"))));
+    }
+
+    private static Set<String> bqTaskTypes() {
+        return new LinkedHashSet<String>(java.util.Arrays.asList(
+            "bq_standard:block_break", "bq_standard:checkbox", "bq_standard:crafting", "bq_standard:fluid",
+            "bq_standard:hunt", "bq_standard:location", "bq_standard:meeting",
+            "bq_standard:optional_retrieval", "bq_standard:retrieval"));
     }
 
     @Test
@@ -126,6 +157,11 @@ public class QuestModuleTest {
         private boolean runtimeNoRewards;
         private boolean suppressionSchemaValid=true;
         private boolean suppressionSchemaValidated;
+        private boolean gameplayEventsRegisteredForTest;
+        private java.util.List<com.jsirgalaxybase.quest.core.RewardDeliveryHandler> createHandlersForTest(
+            com.jsirgalaxybase.quest.postgres.JdbcQuestConnectionManager manager) {
+            return createRewardDeliveryHandlers(manager, new String[0]);
+        }
         @Override protected boolean isDedicatedServer(){return true;}
         @Override protected QuestCenterQuery createAndValidateQuery(JdbcConnectionManager shared){createCalled=true;return query;}
         @Override protected void validateRewardSuppressionSchema(JdbcConnectionManager shared){
@@ -140,7 +176,7 @@ public class QuestModuleTest {
             runtimeNoRewards=noRewards;return super.createQuestRuntimeService(manager,noRewards);
         }
         @Override protected void registerTrackingSync(QuestCenterQuery query){}
-        @Override protected void registerGameplayEvents(QuestGameplayEventHandler handler){}
+        @Override protected void registerGameplayEvents(QuestGameplayEventHandler handler){gameplayEventsRegisteredForTest=true;}
         @Override protected void registerConsumptionRecovery(QuestConsumptionRecoveryHandler handler){}
         @Override protected void registerRewardDelivery(QuestRewardDeliveryController controller){}
         @Override protected void unregisterRewardDelivery(QuestRewardDeliveryController controller){}

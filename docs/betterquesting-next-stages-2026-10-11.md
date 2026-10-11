@@ -27,6 +27,7 @@
 | N.3 全新玩家运行闭环 | 九类 Task、四类 Reward、前置/秘密/重复/simultaneous、Quest Detect、Choice、重启/重试/重复消息和严格一次奖励 | 代表性自动闭环与逐项证据核对完成；见验收文档，实机未验证 |
 | N.4 终端与管理员健康页 | 玩家章节/详情/进度/Detect/领取/Choice；管理员只读来源、批次、类型、警告、失败与恢复队列摘要 | 自动验收完成，`664436e`；三档视觉覆盖 |
 | N.5 自动收口 | 隔离 PostgreSQL、UI2 三档视觉、根测试、assemble、自包含、JAR 内容、diff、CodeGraph affected；分阶段本地提交 | 自动验收完成：1,113 项、1,061 执行、52 非 Quest 跳过、0 failure/error；252 视觉通过，最终制品和证据见验收文档 |
+| N.6 Base 运行组合接线验收 | 核对 9 类 Task 求值器和 4 类 Reward 在 Base `QuestModule` 启动组合中的实际接线，并覆盖事件入口注册、Reward Router 唯一映射和导入内容到运行器的代表性闭环 | 自动验收完成：`QuestModuleTest` 6 项通过；完整任务/终端回归、252 视觉、自包含与制品检查通过，详见验收文档 |
 
 ## N.1 运行能力清单
 
@@ -46,4 +47,15 @@
 
 ## 后续唯一入口
 
-本工作包完成后，下一阶段是 **Base-only 新服人工运行验收与灰度启用准备**：在全新玩家、全新数据库、无 BQ Mod 环境检查真实 Forge 事件、物品/流体、奖励落地、重启和终端交互。它不是旧进度迁移，也不是双算影子。任何生产 DDL、部署或开关变化仍需单独授权。
+N.6 自动门禁完成后，下一阶段是 **Base-only 新服人工运行验收与灰度启用准备**：在全新玩家、全新数据库、无 BQ Mod 环境检查真实 Forge 事件、物品/流体、奖励落地、重启和终端交互。它不是旧进度迁移，也不是双算影子。任何生产 DDL、部署或开关变化仍需单独授权。
+
+## N.6：Base 运行组合接线验收
+
+目标是证明“有 evaluator/handler 单测”同时也意味着 Base 启动时真的把实现装进运行链，而不是仅验证孤立类。覆盖范围：
+
+- `QuestModule` 建立的真实 `QuestRuntimeTypeRegistry` 包含全部 9 类导入任务；Minecraft gameplay 事件处理器在 Quest runtime 请求启用时注册。
+- `QuestModule` 构造的奖励 handler 清单包含 GTNH 实际 4 类 Reward，`RewardDeliveryRouter` 可无重复地建立唯一映射；其余配置 handler 的存在单独记录，不自动开放导入门禁。
+- 用代表性导入定义贯穿 importer → PLAYER 定义 → JDBC 运行时 → Base reward delivery；现有 importer/Postgres/root 测试可复用，避免新造第二套框架。
+- 逐项复核事实入口到评估器覆盖；无对应真实 Forge 事件的类型只能明确标出具体适配点，不能用 evaluator 单测伪装平台闭环。
+
+完成证据后更新本文件、[能力矩阵](betterquesting-capability-absorption-matrix-2026-09-13.md)、[验收记录](betterquesting-base-only-acceptance-2026-10-11.md)和 Worklog。

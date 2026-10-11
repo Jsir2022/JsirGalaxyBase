@@ -1,5 +1,18 @@
 # JsirGalaxyBase Work Log
 
+### 2026-10-12 - BQ N.6 Base 运行组合接线自动验收完成
+
+- `QuestModule` 现在通过独立 `createRewardDeliveryHandlers` 生成列表，controller 和测试共用同一生产工厂。`QuestModuleTest` 验证真实启动类型注册包含九类导入 Task、Quest runtime 启用时注册 gameplay 处理器，并对实际组装的六个 Reward handler 建立唯一 `RewardDeliveryRouter`，覆盖 GTNH 的 item/choice/questcompletion/xp 四种。
+- N.6 全量命令成功：Core/Postgres/Importer/UI2 Core/Lab/Terminal/Demo 与 root test、assemble、自包含、PNG 和终端视觉共 1,114 项报告，1,062 执行、52 非 Quest 条件跳过、0 failure/error；其中 `QuestModuleTest` 6/6 通过。任务模块测试报告有 up-to-date 项，因此新代码新增的启动组合回归为本轮实际执行的 6 项；之前 1,113 项基线覆盖由 N.5 记录。
+- 正式终端视觉 252 份通过；新 JAR `.gradle/codex-r2-confirmed-build/root/libs/jsirgalaxybase-18d3301-main+18d3301be4-dirty.jar` SHA-256 `e939581b58bd58ec9c1a3275e65d7b37b835c829cc0c92c2c2b9ebfadf624943`，class entry 含新 factory，BQ/Importer/Gson/Demo ZIP 排除扫描通过。`git diff --check` 通过。
+- CodeGraph `impact QuestModule` 142 symbols，handler factory 5 symbols；`affected` 全仓返回 74 候选，按直接改动执行 QuestModuleTest，且完整 Gradle 命令回归覆盖其余现有报告。没有真实 Forge 启动或游戏交互，本阶段只关闭 Base 代码组合接线门槛。
+
+### 2026-10-12 - BQ N.6 Base 运行组合接线验收启动
+
+- 用户要求继续推进整体 BQ 替代并设置长期目标。前一工作包 N.1–N.5 自动阶段完成，整体尚不能称已上线替代：真实 GTNH/Forge 服务端运行与玩家验收仍是后续门槛。已建立 N.6 活动目标，方向是把真实 `QuestModule` 组合根纳入自动验收。
+- CodeGraph status 起始 up-to-date；`impact QuestModule` 指向 142 个符号。抽出 `createRewardDeliveryHandlers`，由既有 controller 与测试共享同一组 handler。扩展 `QuestModuleTest` 检查真实 evaluator registry 覆盖 9 类任务、运行启用时注册 gameplay 事件；另检查实际 6 个 reward handler 的唯一 Router 映射，并确认固定 4 类 GTNH 奖励均有处理器。
+- Docker Gradle 定向 `:test --tests com.jsirgalaxybase.modules.quest.QuestModuleTest` 6 项通过、0 skipped/failure/error；CodeGraph sync 2 文件后受影响入口选中该测试和 BQ Item delivery 测试，diff check 通过。更广跨层测试、自包含和视觉回归尚待执行。
+
 ### 2026-10-11 - Base-only 两天工作包自动验收收口
 
 - 形成本地阶段提交：`adfb691`（个人导入/门禁/回滚）、`664436e`（健康摘要/协议/管理员布局）、`6181ece`（真实求值器注册表联动）。没有推送或部署。
