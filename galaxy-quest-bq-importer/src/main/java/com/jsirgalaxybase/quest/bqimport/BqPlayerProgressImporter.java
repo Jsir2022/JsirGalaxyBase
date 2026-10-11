@@ -1,7 +1,6 @@
 package com.jsirgalaxybase.quest.bqimport;
 
 import java.io.IOException;
-import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,11 +18,14 @@ public final class BqPlayerProgressImporter {
     private final Gson gson = new Gson();
 
     public BqImportedPlayerProgress read(Path source) throws IOException {
+        return readSnapshot(source, Files.readAllBytes(source));
+    }
+
+    /** Parse exactly the bytes whose digest is retained by an offline preview. */
+    BqImportedPlayerProgress readSnapshot(Path source, byte[] snapshot) {
         UUID playerId = playerId(source);
-        JsonObject root;
-        try (Reader reader = Files.newBufferedReader(source, StandardCharsets.UTF_8)) {
-            root = gson.fromJson(reader, JsonObject.class);
-        }
+        JsonObject root = gson.fromJson(new String(snapshot, StandardCharsets.UTF_8), JsonObject.class);
+        if (root == null) throw new IllegalArgumentException("empty progress document");
         List<BqImportedQuestProgress> result = new ArrayList<BqImportedQuestProgress>();
         for (JsonObject quest : BqTypedJson.indexedObjects(root, "questProgress")) {
             UUID questId = BqQuestDefinitionImporter.uuid(quest, "questIDHigh", "questIDLow");

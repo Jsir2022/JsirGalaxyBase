@@ -57,6 +57,13 @@ tasks.register<JavaExec>("progressConflictPreview") {
     mainClass.set("com.jsirgalaxybase.quest.bqimport.BqProgressConflictPreviewMain")
 }
 
+tasks.register<JavaExec>("progressMigrationPreview") {
+    group = "verification"
+    description = "Produces a private, read-only multi-source progress migration report (pass --args)"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("com.jsirgalaxybase.quest.bqimport.BqProgressMigrationPreviewMain")
+}
+
 tasks.test {
     useJUnit()
 }

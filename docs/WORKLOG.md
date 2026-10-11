@@ -1,5 +1,13 @@
 # JsirGalaxyBase Work Log
 
+### 2026-10-11 - M.3 离线预览文件级验收收口
+
+- 新增实际 CLI 合成文件回归 5 项：命名来源参数换序仍生成相同报告、SHA-256 对应读取字节、输入未被修改、重复/非法来源拒绝、坏文件不输出部分报告及已捕获字节独立于后续文件内容。首次运行 2 项失败：哈希摘要跟随参数顺序（真实实现缺陷）及 Gson 的 JsonNull 异常类型与测试预期不符；分别修复排序和精确异常断言后全部通过。
+- 解析器新增 package-private `readSnapshot`，CLI 解析捕获并散列的同一份字节，不再第二次读取用于解析；解析后检查变化仍保留。此为每文件快照，不承诺目录原子性，输入必须是固定副本。新增 Gradle `progressMigrationPreview` JavaExec 入口与参数说明；report 含合成/真实 UUID 时按私有材料管理。
+- CodeGraph 起始 status up-to-date；Main/Importer impact、sync、affected 选择 importer/parser/CLI 回归，本轮执行整个 Importer 模块。临时 PostgreSQL 16 为 `jgb-m3-preview-pg`，512 MiB tmpfs，仅 loopback 55436，专用 `jgb_m3_preview_test`，未读取 Compose 或生产凭据。最终 65 tests / 65 executed / 0 skipped / 0 failure/error；此前 8 项隔离集成此次全部执行。结束时自建 schema 残留 0，临时容器停止并自动销毁；不涉及生产玩家进度/DDL。
+- Docker 最终 `:galaxy-quest-bq-importer:test :assemble :verifyUi2SelfContained` 成功，32 tasks 全执行。未重跑根全量 `test` 或视觉任务：改动仅离线导入模块及其 Gradle 入口，运行 JAR 自包含检查保持通过。`git diff --check` 成功，预提交产物 `.gradle/codex-isolated-build-r234/_root/libs/jsirgalaxybase-b809a06-main+b809a065bf-dirty.jar` SHA-256 `d8edd5ec0c894989ccffdd7bedb20ffd4664454e4e1803b7d1b6697535052470`；基于 `b809a06` dirty 元数据，不是正式部署制品。
+- 当前目标的离线报告、来源证据、合成文件、阻断与跨玩家隔离工作包已完成。M.3 完整写入器/回滚、Choice 历史选择及重复周期来源决策仍未完成；不因本批验收宣称 BQ 替代完成。不部署、不推送、不更改 Quest/BQ 生产开关。
+
 ### 2026-10-11 - M.3 多来源离线预览首批
 
 - 新增 `BqProgressMigrationPreview` 与只读 CLI，复用 manifest、解析器、mapper、conflict analyzer。稳定排序输出定义 hash/version、玩家/Quest、来源、完成/领取/时间、映射向量和两两关系；不选源、不合并、不写库、不发奖励，`applyAllowed=false`。repeat/Choice 明确阻断，详细边界见独立 M.3 工作包。
