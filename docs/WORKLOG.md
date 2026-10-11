@@ -1,5 +1,13 @@
 # JsirGalaxyBase Work Log
 
+### 2026-10-11 - M.3 多来源离线预览首批
+
+- 新增 `BqProgressMigrationPreview` 与只读 CLI，复用 manifest、解析器、mapper、conflict analyzer。稳定排序输出定义 hash/version、玩家/Quest、来源、完成/领取/时间、映射向量和两两关系；不选源、不合并、不写库、不发奖励，`applyAllowed=false`。repeat/Choice 明确阻断，详细边界见独立 M.3 工作包。
+- mapper 对重复 Task 和负数/null 向量明确失败，避免静默覆盖/归一化掩盖错误。新增 8 项纯离线回归覆盖顺序、关系、缺定义、玩家隔离、repeat/Choice、非法向量、完成/领取；没有调用生产文件或数据库。
+- CodeGraph status、mapper impact、sync、preview impact、affected 定位两个 mapper/preview 测试类；本轮运行整个 importer。Docker 最终 60 tests / 52 executed / 8 skipped / 0 failure/error，8 项 PostgreSQL 集成因未配置隔离 URL assumption-skip，不使用旧轮隔离结果代替本轮验证。未重跑根全量 test。
+- `assemble verifyUi2SelfContained` 29 tasks 全执行成功，`git diff --check` 成功。首次合并调用因当前版本依赖 JAR 尚未生成失败，先构建模块 JAR 后重跑成功，不是代码编译失败。运行 JAR 为 `.gradle/codex-isolated-build-r234/_root/libs/jsirgalaxybase-af72c08-main+af72c08959-dirty.jar`，SHA-256 `1be07bb06db9af265c68bf7cf5beca375ab83271d67f27b6e7bc191c3f7cb92f`；该哈希是预提交工作树产物，非最终提交版本 JAR。
+- CLI 源文件变化/哈希/目录端到端专门测试尚未补齐；重复周期决策、Choice 历史选择、写入批次与回滚仍未完成。本轮没有部署、推送、生产 DDL、Quest 开关或 BQ 停用。
+
 ### 2026-10-11 - R.2.35 Checkbox 周期修复与 M.2 有限自动收口
 
 - 用户授权自设目标并继续完成 M.2 自动收口；目标已存于独立文档 `betterquesting-m2-automatic-closeout-2026-10-11.md`。以真实内容的 9 类 Task / 4 类 Reward 为范围，明确区分代码缺口、范围限制、内容警告与运行验证。没有为零使用类型或观察站扩展玩法。

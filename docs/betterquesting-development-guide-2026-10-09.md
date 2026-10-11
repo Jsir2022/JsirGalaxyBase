@@ -1,8 +1,9 @@
 # BQ 替代开发导航与变更边界
 
 更新：2026-10-11。用途：下一轮开发先读本页，不从历史 Worklog 的“下一步”自行推断目标。
-当前状态以能力矩阵顶部唯一阶段表为准，工作入口为
-[M.2 自动收口目标](betterquesting-m2-automatic-closeout-2026-10-11.md)。
+当前状态以能力矩阵顶部唯一阶段表为准，当前工作入口为
+[M.3 离线预览工作包](betterquesting-m3-offline-preview-2026-10-11.md)；
+[M.2 自动收口目标](betterquesting-m2-automatic-closeout-2026-10-11.md)保留为已完成的有限自动基线。
 R.2.19 事件归属与 Detect 发布并发均已由 R.2.34 解决，不再列为待决。
 
 R.2.35：已复现重复 Checkbox 提前点击占用下一周期事实键的问题；入口现于

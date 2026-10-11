@@ -14,7 +14,16 @@ public final class BqProgressMapper {
             throw new BqProgressShapeException("quest progress ID does not match definition");
         }
         Map<String, BqImportedTaskProgress> source = new LinkedHashMap<String, BqImportedTaskProgress>();
-        for (BqImportedTaskProgress task : imported.getTasks()) source.put(task.getKey(), task);
+        for (BqImportedTaskProgress task : imported.getTasks()) {
+            if (source.put(task.getKey(), task) != null) {
+                throw new BqProgressShapeException("duplicate task progress: " + task.getKey());
+            }
+            for (Long value : task.getValues()) {
+                if (value == null || value < 0L) {
+                    throw new BqProgressShapeException("invalid negative or null progress: " + task.getKey());
+                }
+            }
+        }
 
         Map<String, TaskProgress> result = new LinkedHashMap<String, TaskProgress>();
         for (TaskDefinition task : definition.getTasks()) {
