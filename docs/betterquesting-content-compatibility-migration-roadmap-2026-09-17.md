@@ -25,8 +25,9 @@
 - Base Quest Core、PostgreSQL 运行时、Minecraft 检测器和 UI2 任务中心；
 - PLAYER/PARTY/TEAM/PUBLIC 跨服主体和逐成员奖励归属。
 
-当前 importer 只读取并报告，不写 PostgreSQL，不生成可执行迁移批次，也不进入运行 JAR。Quest 生产开关默认
-关闭，BetterQuesting 仍是现网任务系统。
+定义读取与 dry-run 只读且不写 PostgreSQL；M.1 已新增显式 preview、原子提交和回滚的数据库迁移工具，不能再称没有可执行迁移批次。Importer 不进入运行 JAR。生产 DDL/切换尚未执行，不据开发代码判断现网已替代。
+
+2026-10-09 当前实施入口为 [开发导航](betterquesting-development-guide-2026-10-09.md)，阶段状态以能力矩阵为准；下文“当前基线”包含历史阶段背景，不代表 M.2 已通过。
 
 ## 支持的 BQ 输入形态
 
@@ -84,6 +85,7 @@ Minecraft 事实入口或交付处理器的类型不得标为 `SUPPORTED`。
 
 - 同时读取 S1、S2、Lobby 等来源的只读副本，以玩家 UUID 和任务 UUID 对账。
 - 完成、领取、Choice、时间戳、向量进度和重复周期分别定义合并规则，禁止整文件覆盖。
+- BQ repeat reset 会将 timestamp 清零并重置 Task 向量，源格式没有单调周期号；在没有可靠周期身份时，不得用最新时间戳、最大向量或固定服务器优先级推断当前周期。冲突隔离/来源选择规则须先确定。
 - 已领取状态优先防止重复发奖；无法证明安全的冲突进入人工审计队列。
 - 旧 BQ Party 进度必须显式映射为 PLAYER/PARTY/TEAM/PUBLIC，不把队伍 UUID 当玩家 UUID。
 - 生成玩家级 dry-run、冲突原因、批次审计、幂等重跑与整批回滚证据。

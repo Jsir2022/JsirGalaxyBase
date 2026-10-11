@@ -4,6 +4,11 @@
 
 ## 当前最建议先看的内容
 
+- [BQ 替代开发导航与变更边界](betterquesting-development-guide-2026-10-09.md)
+- [BQ M.2 自动验收收口目标与有限缺口](betterquesting-m2-automatic-closeout-2026-10-11.md)
+  - 当前开发入口：固定需求与 R.1/R.2.1–R.2.33 窄范围证据；Crafting 来源服 max/sum、PARTY 在线资格、多任务 Quest 级消耗 Detect 顺序与恢复均有自动回归；R.2.33 根定向 6 项测试、assemble 和自包含门禁通过，但真实 Forge/GTNH 时序与全量测试仍待验证。S2 磁盘 `fullySyncQuests=false` 已只读核实但进程加载值未验证；R.2.19 Party 延迟事实归属及 Detect 批次版本发布并发仍待用户决策；源服恢复与奖励崩溃边界仍待验证
+- [BQ 需求复盘](betterquesting-requirements-reassessment-2026-10-09.md)
+  - 保持 Base 自包含、数据库权威与终端入口，明确成熟算法剪裁与当前不改范围
 - [BQ 替代进度与代码质量收口（2026-10-02）](betterquesting-progress-quality-review-2026-10-02.md)
   - 当前 M.2 状态、五项运行/测试风险、背包主链优先级和本轮验证受阻边界
 - `betterquesting-capability-absorption-matrix-2026-09-13.md`

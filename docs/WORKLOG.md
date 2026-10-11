@@ -1,5 +1,589 @@
 # JsirGalaxyBase Work Log
 
+### 2026-10-11 - R.2.35 Checkbox 周期修复与 M.2 有限自动收口
+
+- 用户授权自设目标并继续完成 M.2 自动收口；目标已存于独立文档 `betterquesting-m2-automatic-closeout-2026-10-11.md`。以真实内容的 9 类 Task / 4 类 Reward 为范围，明确区分代码缺口、范围限制、内容警告与运行验证。没有为零使用类型或观察站扩展玩法。
+- 发现并复现 Checkbox 重复周期错误：入口按完成时间计算下一周期事实键，Runtime 却可能因待领奖/待消费或 claim-time cooldown 保持旧周期，提前点击会写入未来周期键。三个 Core 回归初次全部失败。修复后仅在 Runtime acceptance 事务内按已有 reward/consumption fence、领取 anchor 和当前周期授权，拒绝不落事实；初始读取只生成候选键，避免在事务外调用 JDBC 必须事务化的查询。服务端 identity/task/version 和既有 scope 不变。
+- 新隔离集成覆盖 typed BQ JSON 导入、重复 Checkbox 完成、待领奖时拒绝、领取后 99/100 ms 边界、重建 JDBC/服务对象且切换来源服、第二周期完成、旧实例重复点击和其他玩家隔离。实例切换不等于真实 Forge 多服运行。物品奖励审计保留世界掉落与最终 marker 非原子限制，并纠正 handler 的过度“Crash-safe”注释；没有修改奖励策略。
+- CodeGraph 起始 up-to-date（旧 engine 提示）；confirm callers/callees/impact 和 item reward deliver impact 定位 Core、Importer 集成与终端调用。改后首次 sync 4 files/193 nodes，最终 sync 1 file/19 nodes；confirm impact 14 symbols，affected 51 个候选，使用全工程覆盖。
+- 全量 Docker Gradle `test assemble verifyUi2SelfContained :ui2-demo:renderGolden` 成功，56 tasks 全执行。最终 XML 227 suites / 1,086 tests / 1,034 executed / 52 assumption-skip / 0 failure / 0 error；Core 295、Quest PostgreSQL 61、Importer 52 全部实际执行，0 skipped。52 项跳过为 48 项其它业务 PostgreSQL 未配置、4 项 Warehouse 专用 `JGB_BANKING_IT_*` 缺失。已有预览 Noto TTC 只读挂载用于 Java2D，不打入 Mod。
+- 初次 Core Docker 运行因 root 容器 Git ownership 提示使用 NO-GIT-TAG 版本覆盖，但测试成功；正式全量运行使用仅对容器进程生效的 `GIT_CONFIG_*` safe.directory，未改宿主 Git 配置。构建目录复用忽略的 `.gradle/codex-isolated-build-r234`，测试任务强制执行，未使用旧 XML 冒充重跑。直接 javac/JUnit 复现 7 tests 中 3 failure，修复后 7/7；正式验收以 Docker Gradle 结果为准。
+- 临时 PostgreSQL 16 为 `jgb-m2-closeout-pg`，512 MiB tmpfs、无宿主数据卷、仅 loopback 55436，专用 `jgb_m2_closeout_test`；未加载 Compose `.env`，测试结束自建 schema 残留为 0。全量预提交 JAR SHA-256 `b0d9137dc178793707a61b51d984244615dfafef7094f05f36ef9b5f42a2881c`，仅是当时工作树验收快照，后续版本元数据改变会生成新哈希。
+- 累计变更按 Quest Core/Postgres/Importer、Minecraft Quest、终端动作、UI2 Quest 和四个 SQL 迁移明确路径审计并暂存；未使用 `git add -A`。代码检查点提交 `d74844cb26a773c676fabe5f68def0ca3a6007a7`，105 files / 8,456 additions / 415 deletions；含此前可靠性/兼容累计实现及本次修复。文档单独提交；本次没有推送授权目标，不自行推送。
+- 权威能力矩阵只保留一张当前阶段表，早期矛盾“待确认”放入历史折叠区；开发导航明确 R.2.19/版本并发已经解决。独立收口文档记录有限清单与 M.3 前置：重复 Quest 来源冲突选择、无生产写入的 dry-run、manifest/领取映射与审计回滚。M.2 实机仍 BLOCKED，M.3 写入器、M.4 诊断、M.5 实时影子与 M.6 切换仍未完成。
+- 未访问生产玩家进度/数据库，未执行生产 DDL、部署、Quest/BQ 开关切换或操作 S1/S2。当前目标止于有限自动收口和本地稳定检查点，不扩大为 BQ 已替代。
+- 代码提交后的最终构建：依赖 jars 13 tasks 全执行、`:assemble :verifyUi2SelfContained` 29 tasks 全执行成功。JAR `.gradle/codex-isolated-build-r234/_root/libs/jsirgalaxybase-d74844c-main+d74844cb26-dirty.jar`，SHA-256 `965cb0bb595c6b066147f102db81b6faaea6d7e78fee121673003d4bda430fc1`；dirty 仅为构建时未提交的文档。内容复核保留 BetterQuesting MIT 来源文件并包含 Core/Postgres，无 importer/BQ 运行类/Gson 导入 CLI/Noto 字体。临时 PG 已销毁，55436 已释放，init 脚本删除；ignored 构建报告/JAR 保留供审阅。文档单独提交后工作树检查为空。
+
+### 2026-10-11 - R.2.34 事件时 Crafting 归属与 Detect 版本并发收口
+
+- 用户确认：Crafting 事实按事件发生时的 Quest 资格和完整 Party roster 归属；权威快照无法取得时 fail-closed。Detect 进行中允许管理员发布新版；旧批次保留旧版定义、Task 顺序、周期及奖励完成，旧进度不被新版覆盖。新版删除旧目标后如需人工补偿，由管理员处理。
+- 实现：生产 `QuestGameplayEventHandler` 通过 `QuestEvaluationPlanner.requestsFor(fact)` 同步捕获事件时请求，`QuestFactSink`/Runtime sink 及 FIFO 重试队列传递同一不可变请求；捕获失败记录错误并拒绝事实。队列上限为 1,024 条和估算 8 MiB，单次最多重试 32 条、20 tick 周期；正常关服清空，进程崩溃丢失尚未被 PostgreSQL 接收的内存事实，不提供 durable queue / exactly-once。快照字节估算覆盖定义名/描述、任务/奖励及其参数和成员请求，新增大定义快照超内存上限拒绝回归。
+- Detect 版本恢复：旧活动批次按 participant+Quest 查询及唯一约束，允许新版发布但不允许同主体/Quest 并发批次；批次授权、消费确认事实、进度结算均读取其固定历史 PUBLISHED 版本。新增 `20261011_001_pin_consumption_detect_batch_across_versions.sql`，迁移先拒绝存在多活动批次的数据，不自动合并。Quest 集成回归覆盖 v1 批次启动、发布 v2、入口重新采用 v1、旧版任务/奖励继续完成及迁移幂等；迁移只在临时测试数据库执行。
+- CodeGraph：起始 `status` 检出 4 个待同步文件；首轮 `sync` 更新 4 files / 291 nodes。核心影响为 `QuestEvaluationPlanner` 111、`OrderedQuestFactRetryQueue` 74 个符号；首轮 `affected` 给出 51 个候选测试文件。补充 sink fail-closed 防降级后第二次 `sync` 更新 2 files / 58 nodes；最终 `impact` 为 `QuestGameplayEventHandler` 84、`AuthenticatedQuestConsumptionDetectService` 38、`JdbcConsumptionDetectBatchRepository` 33 个影响符号，最终 `affected` 扩展到 81 个候选。选择 Quest Core、PostgreSQL 与根全套门禁实际覆盖。
+- 自动验收：`:galaxy-quest-core:test` 292 tests，0 skipped/failure/error；`:galaxy-quest-postgres:test` 在隔离 PG16 上 61 tests，0 skipped/failure/error。根 `test assemble verifyUi2SelfContained` 最终成功；全工程报告共 1,082 tests，1,030 executed、52 assumption-skip、0 failure/error。48 项来自未配置其它业务模块自己的隔离 PostgreSQL 环境；4 项来自未提供 Warehouse `JGB_BANKING_IT_*` 专用配置。开发容器只读挂载宿主 Noto TTC 为 Java2D 预览字体，未进入源代码或 JAR。首次离线网络构建在 GTNH convention 插件 DNS 处停止；全量视觉任务首次因缺预览字体失败；按已记录的代理/只读字体方式重跑通过。独立 buildDir 中第一次组装前缺少 UI2 project jars，先生成依赖 jars 后最终构建成功。另一次根测试复跑时临时 PG 已清理，导致 16 个根 JDBC 用例连接失败；重新创建隔离库后再次全量运行，最终结果为上述 0 failure/error。
+- PostgreSQL 使用临时 PostgreSQL 16 容器，数据目录 512 MiB tmpfs、仅 `127.0.0.1:55432`、无宿主数据卷，容器已销毁。没有访问生产数据库/玩家进度，没有执行生产 DDL、部署、启用 Quest、停用 BQ 或触碰 S1/S2。
+- 最终 runtime JAR：`.gradle/codex-isolated-build-r234/_root/libs/jsirgalaxybase-6e80f68-main+6e80f68c22-dirty.jar`；SHA-256 `c9bfea25b27c930376a1fe49b716f1857cd0341066a77a8f81a89c10f0061cfe`。仅构建产物，未部署。`git diff --check` 通过。
+- M.2 仍为 `BLOCKED`：真实 Forge/GTNH 事件时序、线上数据库恢复和物品/玩家存档崩溃窗口未覆盖；进程崩溃可丢未持久化 Crafting 事实是已知的产品边界。
+
+### 2026-10-11 - R.2.33 PlayerTick 周期边界隔离回归
+
+- 将 `QuestGameplayEventHandler` 的 20/60/100 tick 间隔检查抽为 `PeriodicTickCadence.isDue`，保留现有调度语义；Crafting 统计自动复评仍在 60 tick 周期，不改变 Quest Detect、Party 或来源服合并规则。
+- CodeGraph 起始 `status` up-to-date；`callees QuestGameplayEventHandler.onPlayerTick` 确认三个间隔调用。首次 `sync` 更新 4 个 Java 文件，最后一次同步两处 helper/test 修改为 2 files / 13 nodes；`impact PeriodicTickCadence.isDue` 定位事件处理器及新测试。`affected` 对事件处理器/helper/测试返回 46 个宽候选，直接逻辑门槛为 `PeriodicTickCadenceTest`。
+- 根 Gradle 定向任务首次使用一次性 `galaxy-dev:local` 容器、`--network none`、现有项目/Gradle 缓存挂载与隔离 buildDir；构建在 `build.gradle.kts` 应用 GTNH convention 插件时因离线 DNS 无法解析 `raw.githubusercontent.com` 退出，未进入源码编译或根测试。只读检查确认本机 7892 代理仍监听，未改动该网络服务；随后用 Docker `run --network host` 和 HTTP(S) 代理、同一离线缓存重跑两个定向测试类，成功通过 `compileJava`、`compileTestJava`、`:test`。两个 XML suite 分别 4、2 项，合计 6 tests、0 skipped/failure/error；33 actionable tasks / 33 executed。Compose `run` 不接受 `--network` 参数，故最终使用直接 Docker `run`。
+- 曾尝试用 Mockito 构造 `EntityPlayerMP` 以直接派发 `PlayerTickEvent`，但根测试 classpath 未声明 Mockito，编译失败。没有为单个夹具新增测试依赖；撤回该夹具，保留无依赖的 cadence 谓词测试和既有自动 Crafting 分发回归。此边界明确记录为真实 Forge 事件派发未覆盖。
+- 随后在同一隔离 buildDir 执行 `:assemble verifyUi2SelfContained`，成功：29 actionable tasks，7 executed、22 up-to-date。runtime JAR `.gradle/codex-r2-crafting-cadence-build/root/libs/jsirgalaxybase-6e80f68-main+6e80f68c22-dirty.jar`，SHA-256 `795d471321ef287b6b838fdab2751c0f724c1ad233b06fa00c801295464698ae`；仅为构建产物，未部署。
+- 另用 JDK 17 `javac -source 8 -target 8` 单独编译 helper 与测试，使用缓存 JUnit 4.13.2/hamcrest 实际运行 2 项：`OK (2 tests)`，0 failure/error；有 bootstrap classpath 警告。最终 `git diff --check` 通过。真实 Forge PlayerTick 派发和全量测试未完成；`assemble` 与自包含门禁已按上项通过。
+- 未访问生产数据库/玩家进度，未执行 DDL、部署、启用 Quest、停用 BQ 或操作 S1/S2。全量 `test` 未运行；R.2.19 Party 延迟事实归属、Detect 活动批次遇新定义发布策略、真实 Forge/GTNH tick 时序仍待处理；M.2 与 BQ 替代保持 `BLOCKED`。
+
+### 2026-10-11 - R.2.32 PARTY Crafting 在线门控与全 roster fan-out 组合回归
+
+- CodeGraph 起始索引 up-to-date。`impact BqPartyActiveQuestQuery.hasActiveMember`、`impact BqHuntPartyAssignmentPolicy.select` 各显示 8 个影响符号；`affected galaxy-quest-core/src/test/java/com/jsirgalaxybase/quest/core/BqPartyActiveQuestQueryTest.java` 选择该 Core 测试文件。新增后 `codegraph sync` 更新该测试文件 57 nodes。
+- 新增 `oneOnlineEligiblePartyMemberActivatesCraftingAndFansOutToTheEntireRoster`：在线但未解锁的产物触发者与一名在线已解锁成员共同组成 PARTY，第三名成员离线且未解锁；匹配事件向三名成员各自产生 PLAYER 进度请求。将唯一满足资格的成员设为离线后，同一事件不再路由。该用例锁定本服在线资格并集与资格通过后的全 roster 事件 fan-out 分工。
+- Docker `galaxy-dev:local`、离线执行 `:galaxy-quest-core:test --tests com.jsirgalaxybase.quest.core.BqPartyActiveQuestQueryTest`：9 项、0 skipped/failure/error，`BUILD SUCCESSFUL`。宿主 UID 首次运行在共享 Gradle 配置缓存 keystore 权限处退出，未进入测试；以隔离 buildDir 的 root 容器重跑成功。Git dubious-ownership 输出由既有版本覆盖继续处理，没有改 Git 全局配置。
+- 更新能力矩阵、M.2 行为矩阵和本开发导航记录。只改 Core 测试与文档；没有生产 Java、PostgreSQL、DDL、Forge 构建、自包含门禁、部署或 Quest/BQ 开关变化。该回归不覆盖延迟队列中 Party 变化、事件时资格快照、真实 Forge 回调或跨服运行；R.2.19 和 M.2 保持 `BLOCKED`。未读取生产数据库/玩家进度。
+
+### 2026-10-11 - R.2.31 Crafting 统计按来源服逐需求门控
+
+- 按用户已确认的 Crafting 来源服 `max(event, absolute)` 后求和合同，核对固定 BQ `TaskCrafting.onItemInternal/detect` 与 Base 的 `ItemVectorTaskEvaluator`。BQ 对每个需求分别检查该来源当前进度是否 `< target`，只为未达标分量读 `objectCraftStats`；Base 原先没有这层门槛，事件已经让本服需求达标时，紧随其后的绝对统计仍会把该分量抬至历史总量。
+- 最小修复按当前来源贡献的 event/absolute max 做逐需求门控；别的需求与别的来源仍独立观察。新增 `craftingStatisticsOnlyRefreshRequirementsBelowTargetOnThatSource`，验证同源事件达标分量不再被统计抬高、另一来源仍贡献个人计数、未达标第二分量仍可保留超目标绝对值。未改变用户选定的个人/Party/跨服归并合同。
+- CodeGraph 起始 `status` up-to-date；`explore` 检查 `TaskCrafting` 源码、`ItemVectorTaskEvaluator.evaluate`、`TaskProgress.SourceContribution`；`impact ItemVectorTaskEvaluator.evaluate` 覆盖 14 个符号；`affected` 返回 56 个宽候选，直接测试收敛到 Core `BqCompatibleTaskEvaluatorsTest`。`sync` 更新 2 个 Java 文件。
+- 验收：Crafting evaluator 专项类 45 项通过；Core 全套强制重跑 62 suites / 290 tests，0 skipped/failure/error。使用 JDK 17 与已缓存 Gradle 离线运行。首次 Docker 断网尝试在 GTNH convention 插件解析阶段因 raw.githubusercontent.com DNS 失败，未进入测试；该次不计测试失败。最终 `git diff --check` 通过。未跑 PostgreSQL、根 Forge 测试、assemble、自包含门禁；未读取生产玩家进度/数据库、执行 DDL、部署或切换 Quest/BQ；M.2 仍 `BLOCKED`。
+
+### 2026-10-11 - BQ Detect 与跨服 Crafting 归并合同复核
+
+- 用户明确确认：消耗型物品/流体任务使用单一 Quest 级 Detect，按定义顺序提交未完成任务；非消耗任务继续自动观察。Crafting 同一玩家跨服按每个来源服的事件累计与绝对统计快照取最大值，再对来源服求和；不同 Party 成员仍保持个人进度。该答复确认既有合同，没有扩大到消费/数据库全有或全无。
+- CodeGraph `status/sync` 确认索引最新；`explore` 跟踪 `AuthenticatedQuestConsumptionDetectService`、`ConsumptionRequestAuthorizer.planQuestDetect`、`QuestCenterVisualDocument`、`QuestGameplayEventHandler`、`AuthenticatedCraftingStatisticsDetectionService` 与 `TaskProgress`。UI2 已显示单一“检测全部消耗目标”入口，旧单任务提交入口未被页面调用；统计来源 ID 由各服 `bankingSourceServerId` 进入生产 detector/fact factory。现有回归 `importedQuestDetectProcessesMultipleConsumingRetrievalTasksInOrderAndResumesAfterInterruption` 与 `automaticBqCraftingStatisticsKeepPersonalCountersAndSumPerServerMaxima` 分别覆盖顺序/恢复及 s2=5、lobby=2 后求和为 7、来源内取最大值与成员个人隔离。
+- 本轮未更改生产代码，因为已确认的两个合同已有对应实现和回归；待决的定义版本发布与活动批次并发、Crafting 事实延迟时 Party 归属仍未被本次答复覆盖。未访问生产玩家进度/数据库，未执行 DDL、部署、Quest/BQ 开关或服务器操作。M.2 仍 `BLOCKED`。
+
+### 2026-10-11 - R.2.30 多消耗 Retrieval Quest Detect 顺序与恢复闭环
+
+- 依据用户已确认的 Quest 级 Detect 合同，先用 CodeGraph `explore/impact` 检查 `BqQuestDefinitionImporter.read`、`AuthenticatedQuestConsumptionDetectService.detect`、`MinecraftPlayerConsumptionPort.planItems`、JDBC 批次与 Runtime；改前影响链包括 Quest Detect 单测、Quest 终端调用点、既有单任务 Fluid 恢复集成。`affected` 将本次测试选择收敛到根 `BqPartyInventorySnapshotFactSinkPostgresTest`。新增后 `codegraph sync` 更新该测试文件 221 nodes，`affected` 仍仅选该集成类。
+- 新增 `importedQuestDetectProcessesMultipleConsumingRetrievalTasksInOrderAndResumesAfterInterruption`：导入 typed BQ JSON 的 OR Quest（两个不同 Item 的 consuming Retrieval），在首项已扣除并提交进度后、第二项物品操作前注入故障。验证活动批次游标停留第二项，OR Quest 不提前结算；恢复复用第二项幂等键、不重复扣第一项，最终两项完成后 Quest 才结算。
+- 隔离回归先跑新增方法 1 项，再强制重跑完整根 JDBC 集成类 16 项，0 skipped/failure/error。测试用 PostgreSQL 16，只在 internal Docker 网络可达，数据目录为 512 MiB tmpfs、无宿主卷/端口映射；结束前确认测试 schema 数为 0，之后删除临时容器与网络。Minecraft 测试初始化向只读 `logs/latest.log` 写日志时输出权限诊断，但 JUnit 结果仍全通过。`git diff --check` 后续收口时复核。
+- 本批只新增测试与文档，无生产 Java、数据库合同或迁移变化。未运行全量测试、`assemble`、自包含门禁或 Forge/GTNH 实机；未访问生产玩家进度/数据库、执行生产 DDL、部署、Quest/BQ 开关或操作 S1/S2。之前已存在的非消耗 Retrieval importer→PARTY snapshot→Runtime/JDBC 与 `groupDetect` 隔离集成不再列为缺失门槛。PlayerData/World 崩溃边界、R.2.19 Party 延迟事实归属、Detect 活跃批次遇到新定义发布的版本策略仍未收口；M.2 保持 `BLOCKED`。
+
+### 2026-10-11 - R.2.29 重复周期物品奖励延迟恢复隔离
+
+- CodeGraph 起始 `status` 为 up-to-date；`explore` 核对 `MinecraftItemRewardDeliveryHandler.deliver/deliverOverflow`、`QuestRewardMarker.key`、`RewardEntitlement` 与 Worker 确认链。改动前 `impact` 覆盖投递 handler 和周期权益键，`affected` 收敛到根 `MinecraftRewardDeliveryTest`；改动后 `sync` 更新 1 个测试文件/127 节点，`impact` 将新增回归纳入影响集，`affected` 仍只选该根测试文件。
+- 新增 `delayedPreviousCycleItemRewardRecoveryDoesNotReuseNextCycleMarker`：用真实 `RepeatPolicy`/`RewardEntitlement` 生成相邻周期权益；在旧周期部分写入背包后模拟溢出掉落失败，执行压缩玩家 NBT 往返，再先完成新周期权益、后恢复旧周期。断言周期 marker/部分进度互相隔离，140 个奖励物品总量无重复或丢失。此测试验证 marker 键与 NBT 恢复，不模拟真实 Forge 世界保存或跨服在线租约。
+- Docker `galaxy-dev:local`、`--network none`、隔离构建输出下运行根 `:test` 的 `MinecraftRewardDeliveryTest` 与 `BqItemRewardImportDeliveryTest`：29 + 5 = 34 项，0 skipped/failure/error。`prepareUi2QzLicense` 因联网 DNS 不可用按既有离线流程跳过。第一次测试失败是测试夹具把奖励物品本身用作背包填充物并误计数量；改用独立 filler 项后通过。此前一次把 `--tests` 施加到所有子项目，非根 UI 子项目因无匹配类失败，未进入目标测试；均非生产代码故障。
+- 本批只有测试和文档变化；没有改奖励算法、数据库合同或迁移。未运行全量测试、`assemble`、自包含门禁或 Forge/GTNH；未访问生产玩家进度/数据库、执行 DDL、部署或切换 Quest/BQ。World drop 已生成而玩家标记尚未落盘的崩溃窗口、真实跨服玩家存档/租约仍未验证；M.2 保持 `BLOCKED`。
+
+### 2026-10-11 - R.2.28 未知 optional 命名任务导入 fail-closed
+
+- CodeGraph 起始索引 up-to-date；`explore`/`impact` 覆盖 `BqStandardCodec.task/supportedTaskTypes`、`BqQuestDefinitionImporter.read`、`QuestEngine.evaluate` 及未知类型兼容报告，`affected` 给出 20 个宽候选，直接验证收敛到 Importer 模块。旧逻辑回归先失败：`addon:optional_special` 因 `type.contains("optional")` 被静默视为可选任务。
+- 修复为 `BqStandardCodec.isOptionalTaskType` 精确识别 `bq_standard:optional_retrieval`。新断言确认未知命名 Task 的 `optional=false`、即使没有观察进度也不会让 Quest 变为 COMPLETED（状态保持 AVAILABLE），兼容报告仍标为 UNKNOWN。已知 Optional Retrieval 原有 importer→库存快照→QuestEngine 用例继续覆盖真实 optional 语义。
+- Docker `galaxy-dev:local`，`--network none`，使用仓库已有 Gradle cache 且构建输出隔离到 `.gradle/codex-r2-confirmed-build`，重跑 `:galaxy-quest-bq-importer:test`：51 项总计，44 执行、7 assumption-skip、0 failure/error；7 项均因未设置隔离 `QUEST_TEST_POSTGRES_URL`，未触及数据库。前两次离线容器尝试分别因 wrapper 缓存路径不匹配、settings 插件依赖元数据不齐而未进入测试；改用仓库已有完整缓存后测试完成。
+- 仅修改 importer 语义与测试及进度文档；未执行 PostgreSQL、根 Forge 构建、`assemble`、自包含检查，未访问生产玩家进度/数据库，未做 DDL、部署或 Quest/BQ 开关操作。R.2.19 Party 事件归属与 Detect 版本发布并发待决，M.2 仍 BLOCKED。
+
+### 2026-10-11 - R.2.27 Optional Retrieval typed import 到完成语义回归
+
+- 固定 BQ `TaskOptionalRetrieval.ignored(UUID)` 返回 true，且继承非消耗 `TaskRetrieval` 的库存观察行为。CodeGraph 起始 `status` up-to-date；`explore` 核对 `BqQuestDefinitionImporter.read`、`TaskDefinition.isOptional`、`InventorySnapshotTaskEvaluator.evaluate` 与 `QuestEngine.evaluate`；`impact` 覆盖 importer/QuestEngine，`affected` 将验证范围收敛到 importer 与 Core 对应测试。
+- 新增跨模块回归：从合成 typed BQ JSON 导入必需 Checkbox + `optional_retrieval`，由库存快照 evaluator 推进可选任务至部分进度，再由 Core QuestEngine 确认必需任务完成即完成 Quest，且 optional Task 保持未完成。未修改生产代码；补齐的是 importer 类型映射和 Core 忽略规则此前未在一个场景串联的测试边界。
+- `galaxy-dev:local` / `--network none` / 隔离输出强制执行 `:galaxy-quest-bq-importer:test --tests com.jsirgalaxybase.quest.bqimport.BqQuestDefinitionImporterTest --rerun-tasks`：5 项，0 skipped/failure/error，`BUILD SUCCESSFUL`。本用例不访问数据库；未跑 PostgreSQL、Forge 根测试、assemble 或 self-contained。`git diff --check` 通过。
+- 不将窄自动回归宣称为 Optional Retrieval 或 M.2 行为等价；Forge/GTNH 背包事件、在线 Party 快照与实机运行仍未验收。无生产玩家进度/数据库访问、DDL、部署、Quest/BQ 开关或 S1/S2 操作。
+
+### 2026-10-11 - BQ Observation Station 非消耗任务边界复核
+
+- 固定源码 `TileObservationStation.updateEntity` 每 20 tick 在服务端检查站点 owner 是否在线，只扫描六邻方块中的 `IInventory`、`IFluidTank` 和 `IFluidHandler`；随后用 owner 的 `ParticipantInfo.ALL_UUIDS` 遍历共享 Quest。
+- 对照 `TaskRetrieval.retrieveItems`、`TaskFluid.retrieveItems` 与 `TaskFluid.retrieveFluids`，这些路径都在任务为 consuming 或 owner 已完成时立即返回。由此确认 Observation Station 是非消耗库存/流体存在检测入口，不是 Quest 级消耗 Detect 的另一入口，也不会从邻接容器扣除物品或流体。
+- CodeGraph `status` up-to-date；`explore` 覆盖 Base 的 `MinecraftQuestFactFactory`、`BqPartyInventorySnapshotFactSink`、`QuestGameplayEventHandler` 与 `QuestObservationPlan` 调用链。BQ Reference 源码不在 CodeGraph 索引中，因此对其精确方法做只读源码核对。文档已同步更新能力矩阵、M.2 行为矩阵和开发导航。
+- 当前 Base 仍没有 Observation Station 世界入口；DefaultQuests 不包含方块放置/使用证据，不能推断 S2 玩家依赖该机制。按此前“背包主线、辅助入口延期”的范围决定，本轮没有增加方块、扫描或进度代码；该差异继续明确记录为 BLOCKED。未访问生产玩家进度/数据库、执行 DDL、部署或改变 Quest/BQ 开关。
+
+### 2026-10-11 - Crafting 来源归并与 PARTY 资格当前树强制复验
+
+- 按 `jsirgalaxybase` 规程先检查 CodeGraph：索引 up-to-date。`explore` 覆盖 `AuthenticatedCraftingStatisticsDetectionService`、`BqPartyCraftingStatisticsScope`、`TaskProgress`、`QuestEvaluationPlanner`；`impact` 分别确认统计服务、PARTY 授权与来源进度归并的调用范围。`affected` 给出 94 个宽候选，直接相关回归在 Core 统计服务、Crafting evaluator、Party 活跃资格、观察计划、TaskProgress 与 QuestEngine 测试。
+- 在 `galaxy-dev:local` 的 `--network none` 容器中，使用 `.gradle/codex-r2-confirmed-contracts-20261011.init.gradle` 把构建产物隔离到忽略目录，强制重跑 `:galaxy-quest-core:test --rerun-tasks`：62 个测试套件、289 项，0 skipped/failure/error。该批复验来源服各取 `max(event, absolute)` 后求和、不同玩家统计隔离、PARTY 在线资格与自动统计观察计划；没有重跑 Forge 根事件/事务集成或 PostgreSQL 集成。
+- 当前用户确认的 Quest 级 Detect 与来源服计数规则符合已有实现和上述 Core 回归；本轮没有改动业务代码或数据库合同。源码审查另确认两项仍待收口：Crafting 重试时 Party 归属选择尚待用户确认；活动 Detect 批次按当前定义版本查找，若管理员发布新版本，旧批次可能失去恢复/结算入口，发布并发策略尚未确定。M.2 维持 `BLOCKED`。
+- `git diff --check` 通过。未访问生产进度/数据库、未执行 DDL、部署、Quest/BQ 开关或操作任何服务器；本轮没有运行 `assemble`、自包含门禁、Importer、Forge 或 PostgreSQL 测试。
+
+### 2026-10-11 - GT 机器产物的库存型任务路径复核
+
+- 按用户刚确认的语义，GT 机器产物不伪造成 craft/smelt/anvil 事件；若设计为物品/流体存在任务，应由玩家背包或已明确接入的玩家容器快照观察。CodeGraph `status` 为 up-to-date；`impact InventorySnapshotTaskEvaluator.evaluate` 覆盖 14 个符号，`affected` 返回 80 个宽候选。直接核对 `QuestObservationPlan` 对非消耗 BQ Retrieval 开启库存周期观察、`QuestGameplayEventHandler` 每 20 tick 采集玩家 `EntityPlayer.inventory`，而 Crafting 事件/统计走独立事实通道。
+- 在无网络 `galaxy-dev:local` 容器内，将 Core 模块源码复制到临时目录（不复制受权限保护的旧 build 产物），运行 `BqCompatibleTaskEvaluatorsTest` 与 `QuestObservationPlanTest`：2 suite / 53 项通过，0 skipped/failure/error。覆盖绝对库存快照、非消耗 Retrieval、消耗任务拒绝自动快照、Crafting 统计目标与库存观察计划。此前整模块复制因旧 root-owned 测试结果不可读而退出，未触碰或改写该产物。
+- 未发现与该项用户合同冲突的 Core 行为，因此没有再加重复实现；本次不是 Forge/GTNH 容器实测，当前 Minecraft adapter 只接入玩家背包，其他容器必须显式增加安全适配器。R.2.19 的延迟事实 Party 归属已单独再次请求用户选择；M.2 仍 BLOCKED。未访问数据库/玩家进度、执行 DDL、部署或更改 Quest/BQ 开关。
+
+### 2026-10-11 - BQ Importer 隔离 PostgreSQL 集成全量补验
+
+- 由于此前 Importer 50 项中 7 项因未配置隔离 PostgreSQL URL 按设计 assumption-skip，本轮补齐环境而不改测试护栏。CodeGraph 索引保持 up-to-date；`impact BqMigrationDatabaseService.apply` 覆盖 8 个符号，`affected` 收敛到 `BqBehaviorInventoryTest` 与 `BqMigrationDatabaseIntegrationTest`，后者含 6 个 apply/dry-run/rollback/JDBC 端到端用例。本轮未改 Java。
+- `:galaxy-quest-bq-importer:test` 在临时 PostgreSQL 16 上实际运行：13 suites / 50 tests，0 skipped/failure/error。数据库只对一次性 Docker internal network 可见，无 host port、无宿主数据卷；`quest_importer_test` 名称和显式 `QUEST_TEST_POSTGRES_ISOLATED=true` 均通过测试端隔离校验。执行后查询 `bq_migration_it_%` schema 数为 0，Importer teardown 已删除测试 schema。
+- 临时容器使用 512 MiB tmpfs；执行后已销毁容器、internal network 与数据库数据。未连接生产 Compose 网络或 `galaxy-base`，未访问玩家进度、执行生产 DDL、部署、启用 Quest/停用 BQ，也未操作 S1/S2。该结果只补全 Importer 自动集成证据，不解除 R.2.19、Detect 版本发布边界或 M.2 的 BLOCKED 状态。
+
+### 2026-10-11 - R.2 Retrieval 源码行为交叉审计
+
+- CodeGraph `status` 为 up-to-date；`explore TaskRetrieval/InventorySnapshotTaskEvaluator/BqPartyInventorySnapshotFactSink`、`explore TaskProgress.replaceIncomplete/groupDetect`、`impact InventorySnapshotTaskEvaluator.evaluate` 与 `affected` 核对 Base 当前评估链。上游 `Reference/BetterQuesting` 未纳入 CodeGraph 符号索引，因此直接读取仓库内现有 BQ 源码副本 `TaskRetrieval` 与 `TaskOptionalRetrieval`。BQ 非消耗 `detect` 遍历在线 `ACTIVE_PLAYERS`，`groupDetect` 决定重算全部或仅未完成分量；`Detector.run` 按需求顺序将单栈数量拆给各需求；`onInventoryChange` 对所有非消耗 Retrieval 自动检测；Optional Retrieval 的 `ignored()` 恒为 true。
+- Base `InventorySnapshotTaskEvaluator` 使用服务端库存观察，不把快照转换为增量；普通模式保留达到目标的分量，groupDetect 重算不完整任务中的需求。已存在的 Core 回归覆盖非消耗回落、groupDetect 聚合、NBT/Meta/OreDictionary 规则、重复需求单栈分配、首见槽位争用和 optional 不阻断 Quest；真实 Party 快照则由 fencing session/有效 lease 聚合到每位成员自己的 PLAYER 进度。消耗型 Retrieval 走本轮已确认的 Quest 级持久 Detect 批次。`impact` 命中 14 个符号，`affected` 返回 80 个宽候选，直接相关用例位于 `BqCompatibleTaskEvaluatorsTest`、根 PARTY/JDBC 与消费适配回归。
+- 本轮没有发现需要根据已审阅 S2 参数画像立即修复的新的 evaluator 差异，未改代码、未重跑上述 Retrieval 测试。既有 `TaskObservationStation` 六邻块 `IInventory/IFluidTank/IFluidHandler` 能力未移植，静态任务定义不能证明玩家是否实际使用；`fullySyncQuests` 实际配置未知且未读取。根 Forge 测试此前因插件拉取无进展未启动；生产数据库、玩家进度、DDL、部署和 Quest/BQ 开关均未触及，Retrieval 与 M.2 仍 BLOCKED。
+
+### 2026-10-11 - Crafting 跨服与 Quest Detect 合同确认续记
+
+- 用户明确再次确认：消耗型库存任务采用单一 Quest 级 Detect，按发布定义顺序处理未完成任务；同一玩家 Crafting 统计按每个来源服分别取 `max(该服事件累计, 该服绝对统计快照)` 后求和；不同 Party 成员进度仍独立为 PLAYER。CodeGraph 本轮核对 `QuestGameplayEventHandler`、`QuestObservationPlan`、统计检测服务、`QuestEvaluationPlanner`、`BqPartyActiveQuestQuery` 与 `TaskProgress.observeFromSource`；既有实现符合这两项确认，未重复改运行合同。
+- 影响范围：`impact` 统计自动检测、Party 活跃资格与来源进度归并；`affected` 返回 94 个宽候选，按直接调用链选择 Core evaluator/统计/Party/观察计划/来源进度覆盖。隔离 Docker 强制重跑 Core：289 项，0 skipped/failure/error。Importer 当前已验收 50 项、43 执行、7 项因缺少隔离 `QUEST_TEST_POSTGRES_URL` assumption-skip、0 failure/error；其输出身份脱敏修复已有回归。
+- 根 Forge 定向 `QuestCraftingStatisticsDispatchTest` 本轮没有完成：一次离线尝试先因 GTNH settings convention plugin 未缓存而在配置阶段退出；通过本地 7892 代理的临时容器重试超过两分钟无输出后，仅中断了本次启动的 Gradle 进程（exit 130）。两次均未进入测试用例，不计为测试失败或通过。Qz LGPL 许可证 SHA-256 与构建声明一致，下载任务被排除；无网络/服务配置更改。
+- 仅修订开发导航与 M.2 行为文档中的过期描述，使历史记录保留“当时状态”而不再覆盖后续决策。R.2.19 事件事实排队期间 Party 变化的归属仍是另一项未决合同，尚未获用户答复；未改变代码或 schema。未访问生产数据库/玩家进度、未执行 DDL、部署、Quest/BQ 开关或服务操作；M.2 仍 BLOCKED。文档修改后执行 `git diff --check`。
+
+### 2026-10-11 - Crafting PARTY 统计与来源账本当前树复核
+
+- CodeGraph `status` 为 up-to-date；`explore` 核对 `QuestGameplayEventHandler.onPlayerTick/submitCraftingStatistics`、`QuestObservationPlan.fromPublished`、`AuthenticatedCraftingStatisticsDetectionService.detectAutomatically`、`MinecraftCraftingStatisticReader.craftedCount`、`QuestEvaluationPlanner.requestsFor`、`BqPartyActiveQuestQuery.hasActiveMember`、`TaskProgress.observeFromSource` 与 JDBC JSONB 持久化链。每 60 tick 的检测由本服在线玩家各自触发，读取其 vanilla `objectCraftStats`；合成事件则按当前 Party 在线 roster 为每位目标玩家分别采样。Planner 只对来源服 Party 中存在有效在线成员的匹配事实建立请求；进度主体仍为各自 PLAYER，不合并 Party 成员统计。来源服统计通过每来源 event/absolute max、来源间 sum 存入 `source_progress_json`。
+- `impact` 覆盖自动检测、Party 活跃资格和来源合并；`affected` 给出 94 个宽候选，直接测试范围收敛到 Core 的 Crafting evaluator、统计服务、Party active query、ObservationPlan 与 TaskProgress 测试。Docker `galaxy-dev:local`、`--network none`、隔离输出目录强制重跑 `:galaxy-quest-core:test --rerun-tasks`：289 项，0 skipped/failure/error。PostgreSQL 与 Forge 根事件测试本轮未重跑；不将历史 JDBC/根测试结果记成本轮结果。
+- R.2.19 仍取决于用户对延迟事实跨 Party 变更时的归属选择；已发出单独确认，未改事实/Planner 合同。`git diff --check` 在本轮文档修改后通过。无 DefaultQuests 新读取、玩家进度/数据库访问、生产 DDL、部署、Quest/BQ 开关或 S1/S2 操作；M.2 仍 BLOCKED。
+
+### 2026-10-11 - 修复 BQ 行为盘点 CLI 的逐任务身份泄漏
+
+- CodeGraph `impact BqInventoryMain` 确认影响局限于盘点入口；修改后 `sync` 更新 2 个 Java 文件，`affected` 收敛到 `BqBehaviorInventoryTest` 与新增 `BqInventoryMainTest`。首次回归暴露除 manifest 逐条清单外，`BqBehaviorInventory` 还会输出最多三个 `sampleQuestIds`；已删除该身份收集/输出，并将盘点 CLI 的 manifest 细节改成 Quest/章节总数及按严重级别和问题代码的聚合计数。普通导入规划所需的详细 manifest 合同未改。
+- Docker `galaxy-dev:local`、`--network none`、离线运行 `:galaxy-quest-bq-importer:test`：50 项，43 执行、7 assumption-skip、0 failure/error；7 项均因未设置隔离用 `QUEST_TEST_POSTGRES_URL` 而跳过数据库集成。新增真实 CLI 输出回归验证不含 Quest 名称、UUID 或逐 Quest 行，同时保留匿名类型计数。此次不读取 S2 定义，故没有分享或转存任何任务内容。
+- 不改变 M.2/替代状态：Crafting 来源服 max/sum 与 Quest 级消耗 Detect 仍按用户确认的合同；R.2.19 的 Party 延迟事实归属仍未确认。未跑 Core/Postgres/root build、未执行 DDL、部署、启用 Quest/停用 BQ、访问玩家进度或操作 S1/S2。
+
+### 2026-10-11 - R.2.26 simultaneous Quest Detect 转换边界
+
+- CodeGraph 起始 `status` 为 up-to-date；此前已检查 `QuestEngine.evaluate`、`QuestRuntimeService.reconcileAfterConsumptionDetectBatch` 与 `AuthenticatedQuestConsumptionDetectService.detect` 的调用/影响链，本次修正限于 Core 进度归约与批次末结算。`QuestEngine` 只在本轮观察到 incomplete→complete 转换且 Quest 逻辑仍不满足时重置 `SIMULTANEOUS`；批次结算使用批次选中的 Task keys 还原此前已持久化的转换信号。新增 Core 回归覆盖“旧完成任务不触发重置”以及“延迟 Quest Detect 结算能识别新完成任务”。
+- Docker `galaxy-dev:local`、离线且隔离至 `.gradle/codex-r2-confirmed-build` 执行 `:galaxy-quest-core:test`：289 项、0 skipped/failure/error。CodeGraph 覆盖的影响范围为 Core Engine、Runtime、认证 Detect 服务和对应测试；本轮未重跑 PostgreSQL 集成、根 `assemble` 或自包含门禁，不能把之前 Worklog 的构建结果算作本轮验收。只读 S2 定义用匿名聚合统计得到 3,744 个 Quest、0 个启用 `simultaneous`，该通用 Core 语义因此没有当前 S2 实例可做内容对照。
+- 调查行为频率时运行了一次 `behaviorInventory`，发现 stdout 泄漏逐 Quest 名称和 UUID；原始输出未转存，频率结论改由只输出总数的统计取得。该 CLI 的脱敏缺陷已在紧随本条的 2026-10-11 Worklog 记录中修复并由 importer 回归验证。本轮无生产玩家进度/数据库读取、生产 DDL、部署、Quest/BQ 开关变化或 S1/S2 服务操作；R.2.19 的延迟 Crafting Party 归属仍待用户选择，M.2 与 BQ 替代继续 BLOCKED。
+
+### 2026-10-11 - M.2 Quest Detect 与 Crafting 来源账本当前树复验
+
+- CodeGraph `status` 为 up-to-date；`explore` 核对 `AuthenticatedQuestConsumptionDetectService`、`QuestEngine`、多来源 Crafting max/sum Core/JDBC 测试和批次游标集成测试。固定 BQ `TaskRetrieval.detect` / `QuestInstance.detect` 复核仍表明：Quest Detect 按定义顺序遍历未完成 Task；默认 `fullySyncQuests=false` 时 consuming Retrieval 读取发起者背包并写发起者进度，Party 非消耗快照另按 BQ 活跃成员路径处理。当前实际服务器配置值没有读取。
+- 以 `galaxy-dev:local` 在 `--network none` 容器强制执行 `:galaxy-quest-core:test`：286 项、0 跳过/失败/错误。随后在临时 PostgreSQL 16 上执行 `:galaxy-quest-core:test :galaxy-quest-postgres:test`：Core 286 + Postgres 60 = 346 项、0 跳过/失败/错误。Postgres 使用 `_test` 库名、显式隔离标记、512 MiB tmpfs、无数据卷/发布端口，仅连接内部 Docker 网络；复验过程未接入生产 Compose 网络。
+- 首次容器运行因共享 Gradle 缓存的配置缓存锁权限未进入 Gradle；未改缓存权限，改以容器 root 读取既有缓存并把 build 输出隔离至 `.gradle/codex-goal-check/build` 后通过。另一条测试启动脚本在 shell 解析阶段失败，未创建容器/网络或执行 Gradle。最终测试后已删除临时 PostgreSQL 容器/网络、init script 和本次生成的隔离 build 输出。
+- `codegraph affected` 为 Forge 根整合选中 `BqPartyInventorySnapshotFactSinkPostgresTest`；该类测试启动未进入测试阶段：GTNH `applyJST` 要求 Azul JDK 21，`galaxy-dev:local` 仅有 Temurin 25、宿主仅有 OpenJDK 17，离线模式下 Foojay 无法补齐工具链。未更改项目工具链或连接外网；临时 PG16 容器与网络随后清理。此项是环境阻断，不记作测试失败或通过。
+- 本次为当前树验证，无生产源码修改；未重跑 `assemble`/自包含门禁。未访问生产数据库/玩家进度，未执行生产 DDL、部署、Quest/BQ 开关或操作 S1/S2。Crafting 延迟事实遇玩家 Party 变化时按事件时或重试时归属仍待用户确认；M.2 与整体 BQ 替代继续 BLOCKED。
+
+### 2026-10-11 - PARTY groupDetect 当前 Party 库存重算隔离复验
+
+- 重新核对实际 Retrieval `groupDetect=true` 差异。CodeGraph `status` 为 up-to-date；`explore` 查看 `BqPartyInventorySnapshotFactSink`、`BqPartyInventorySnapshotScope`、`ItemVectorTaskEvaluator`、`TaskProgress` 与 Planner，`callers/impact BqPartyInventorySnapshotFactSink.accept` 显示生产聚合链及 `groupDetectPartyRetrievalReplacesProgressFromCurrentPartyInventory` JDBC 回归。当前实现已覆盖新 Party 快照替换旧的未完成分量；该行为此前已有实现，本轮未改业务代码。
+- Docker `galaxy-dev:local` 使用隔离 Gradle 输出 `.gradle/codex-r2-current-build` 重跑 `:galaxy-quest-core:test`：284 项、0 skipped/failure/error。初次写入旧结果目录遇 `results-generic.bin` 权限拒绝，未修改权限或覆盖旧文件。随后单独重跑根 PostgreSQL 用例 `groupDetectPartyRetrievalReplacesProgressFromCurrentPartyInventory`：1 项、0 skipped/failure/error；临时 PG16 仅用 512 MiB tmpfs、无宿主卷、无端口发布、internal Docker network，结束后已删除容器和网络。第一次根任务仅因离线许可证下载 `prepareUi2QzLicense` 失败而未进入测试；最终只排除该下载任务后成功，未更改许可证或 JAR 内容。
+- `git diff --check` 在本记录加入后执行。此次是对已实现行为的当前工作树复验，不升级 Retrieval/M.2 兼容状态；Forge/GTNH 库存与 Party 时序仍未验证，R.2.19 Crafting 延迟事实归属仍等待用户选择。没有访问生产进度/数据库、执行生产 DDL、部署、切换 Quest/BQ 或操作 S1/S2。
+
+### 2026-10-11 - R.2.22 Crafting 重复周期来源事件隔离
+
+- 固定 BQ `QuestInstance.resetUser(uuid, false)` 会逐 Task 调用 `resetUser(uuid)`，新重复周期不继承旧 Task 进度。Base `QuestEngine.evaluate` 在冷却到期时以空 cycle 基线重算观察。Core 回归验证旧周期 S2 event 完成后，新周期仅含 Lobby 1 个 event；隔离 JDBC 回归验证 cycle 1 upsert/reload 不会让旧 S2 `source_progress_json` 复活，之后新采到的 S2 绝对统计 3 会重新参与聚合（总值 4，S2 event=0、observed=3）。第二个 JDBC 往返用例验证 Lobby event=3/absolute=5 只贡献 5，S2 event=4/absolute=2 贡献 4，重读总值为 9，确认来源内 max、来源间 sum 且不双重计数。
+- CodeGraph `status` 起始 up-to-date；检查 `TaskProgress.empty/advanceFromSource/merge`、`QuestEngine.evaluate`、`QuestRuntimeService.execute`、`JdbcQuestRuntimeRepository.saveProgress`。`impact QuestEngine.evaluate` 覆盖 21 个符号、`impact JdbcQuestRuntimeRepository.saveProgress` 覆盖 17 个符号；宽候选经调用链收敛到 Core `QuestEngineTest` 与 PostgreSQL `QuestPostgresIntegrationTest`。最终 `sync` 更新 PostgreSQL 集成测试 1 文件/146 nodes；`affected` 返回该集成测试文件。
+- Docker `galaxy-dev:local` 离线运行完整 `:galaxy-quest-core:test`，XML 汇总 **283 项、0 skipped、0 failure、0 error**；隔离 PostgreSQL 定向集成 **2 项、0 skipped/failure/error**。第一次 JDBC 启动因临时 Gradle init 脚本已清理而在任务配置前退出，未执行测试；恢复隔离脚本后通过。PG16 临时容器 `jgb-r222-cycle-it-20261011` 使用 512 MiB tmpfs、无宿主数据卷、只发布到 `127.0.0.1:55521`；测试后已销毁并确认端口释放。`git diff --check` 通过。本轮仅修改测试与文档，没有改生产 Java/JDBC/schema；未跑根 `assemble`/自包含门禁，最近生产代码门禁沿用紧邻的 R.2.21。
+- 固定 BQ 绝对 `objectCraftStats` 属于玩家生命周期计数，不会由 `resetUser` 清零。回归证明它可在新周期重新观察，但不代表真实 Forge/GTNH 统计读取已验证。未访问生产数据、执行 DDL/部署、改变 Quest/BQ 开关或触碰 S1/S2；R.2.19 Party 重试归属和 M.2 整体继续 BLOCKED。
+
+### 2026-10-11 - R.2.21 Hunt 新事件计数上限
+
+- 固定 BQ `TaskHunt.onKilledByPlayer()` 对匹配击杀使用 `min(required, current + 1)`。CodeGraph `status` 起始为 up-to-date；检查 evaluator、Forge 击杀入口及固定参考实现的 `node/explore`、`impact` 与 `affected` 将本次影响收敛到 `SubjectCountTaskEvaluator` 和 `BqCompatibleTaskEvaluatorsTest`。
+- Base 通用 Hunt evaluator 原先按事实 amount 累加，允许批量事实使新进度超过目标。现将新观察限制到目标值；`TaskProgress.merge` 保留历史已持久化的超目标值，不会倒退。新增目标 2/amount 7 的封顶回归，并断言历史 5/2 不被改写。
+- Docker `galaxy-dev:local` 隔离运行 `:galaxy-quest-core:test`，实际 282 项、0 skipped/failure/error。离线构建复用 SHA-256 已核验的缓存 Qz 许可证，仅排除许可证下载任务；根 `:assemble :verifyUi2SelfContained` 成功，35 actionable tasks（23 executed、12 up-to-date），自包含检查实际执行。隔离运行 JAR SHA-256：`ecefbb0b0968a73f425050c768e0516d0b77e973721ccf076b2771d7e975ba42`。最终 `git diff --check` 通过。
+- 本次未新增 JDBC 用例、未运行 PostgreSQL、未访问生产数据、未执行 DDL/部署/Quest-BQ 开关，也未触碰 S1/S2。新事件计数差异已有纯 Core 自动回归；真实 Forge `LivingDeathEvent`、FakePlayer/取消事件、GTNH EntityList/NBT 与 PARTY 时序仍 BLOCKED。R.2.19 延迟事实的 Party 归属时点继续等待用户决策，Hunt/M.2 与 BQ 替代整体仍 BLOCKED。
+
+### 2026-10-11 - Crafting Party 事件归属证据复核
+
+- 按 `jsirgalaxybase` 项目工作规程先检查 CodeGraph；索引 up-to-date。`explore`/`impact` 核对 `TaskCrafting`、`ParticipantInfo`、`QuestGameplayEventHandler.submitCraftingStatistics`、`OrderedQuestFactRetryQueue`、`MinecraftQuestFactFactory.craftingStatisticObserved`、`QuestEvaluationPlanner.bqPartyActivityMembership`。固定 BQ 源码显示：产物事件用事件时 `ParticipantInfo.ALL_UUIDS` 扇出任务进度，统计复评才按当时在线成员分别读取个人统计。
+- Base 在事件处理期间固定在线目标 UUID，并同步生成不可变事实；失败时队列重试的是该事实本身。但事实没有包含事件时 Party ID，规划器会按事实交付时的成员关系解析 Party。由此可复现一个未封口的合同边界：数据库不可用期间目标玩家改变 Party，积压事实可能归到新 Party。用户刚确认的“来源服最大值后求和”不决定这一归属规则。
+- 已在 M.2 行为矩阵中追加源码证据，R.2.19 继续标记 BLOCKED。正在等待用户选择“冻结事件时 Party”或“按重试时 Party”，收到明确合同前不改进度归属算法；此次仅更新文档，没有修改运行代码，也未声称新增测试通过。本轮未访问生产进度/数据库、执行 DDL、部署、改变 Quest/BQ 开关或操作 S1/S2。
+
+### 2026-10-11 - Crafting 与 Quest Detect 用户合同复核
+
+- 用户确认 Quest 级单一消耗 Detect；非消耗库存任务仍自动观察。Crafting 统计按每名玩家、每来源服分别取 `max(事件累计, 本服绝对统计快照)` 后求和，Party 成员之间不合并。当前实现已有 Quest 批次协调器与 source-scoped TaskProgress；此轮只复核合同，没有再改运行代码或数据库。
+- CodeGraph 起始 `status` up-to-date；`explore` 检查 `AuthenticatedQuestConsumptionDetectService`、`JdbcConsumptionDetectBatchRepository`、`BqPartyCraftingStatisticsScope`、`TaskProgress` 与统计采样服务，`impact` 确认 Quest Detect 批次的 Core/JDBC/UI2 调用链，以及 Crafting PARTY scope、planner/runtime 和对应回归范围。
+- 首次定向 Core 测试未进入用例：历史 `build/test-results` 文件不可读。未改权限或清理旧文件；改为新的忽略构建输出 `.gradle/codex-r2-confirmed-build` 后，Docker `galaxy-dev` 隔离运行 `AuthenticatedQuestConsumptionDetectServiceTest`、`BqCompatibleTaskEvaluatorsTest`、`TaskProgressVectorTest` 共 52 项，0 skipped/failure/error。该批不含 JDBC 集成或全量构建；既有隔离 JDBC 证据见此前 R.2.6/R.2.17 Worklog 记录。
+- R.2.19 是独立未决合同：Crafting 事实在数据库故障入队后，Party 变更时究竟冻结事件时资格，还是按数据库接收/重试时成员关系计算。上述答案只确认来源计数合并和 Quest Detect，不据此推断该归属选择。未访问生产玩家进度/数据库、未执行 DDL/部署/Quest-BQ 开关或 S1/S2 操作。
+
+### 2026-10-11 - R.2.17 行为口径收口与隔离完整复验
+
+- 按用户确认收口两项行为：玩家页面只提供 Quest 级单一消耗 Detect；非消耗库存持续自动观察，Crafting 统计由匹配产物事件与 60 tick 自动复评，不再出现手动“检测合成”。旧 `QUEST_DETECT_CRAFTING` ID 保留解码兼容，但只返回自动复评说明，不修改进度；`QUEST_DETECT_CONSUMPTION` 才创建/恢复持久批次。Crafting 统计跨服按每来源分别取 `max(本服事件累计, 本服绝对统计快照)` 后求和，不合并不同玩家的个人进度。
+- CodeGraph `status` 起始为 up-to-date；检查 `QuestGameplayEventHandler.submitCraftingStatistics` callers/callees、`AuthenticatedQuestConsumptionDetectService` impact（26 符号）、`TerminalService.buildAuthenticatedQuestCenterSnapshot` callers（9）/impact（11 符号）及 `TerminalQuestCenterSnapshotMapper.detail` impact（4 符号）。`affected` 对组合根返回 141 个宽泛候选；按调用链覆盖 Core、Quest Postgres、Importer、UI2 Terminal 与根测试。
+- 当前全量 `test` XML：根项目 592 项，67 项条件跳过、525 项执行，0 failure/error；模块 Core 278、Postgres 58、Importer 49、UI2 Core 41、UI2 Lab 2、UI2 Terminal 28、UI2 Demo 5 均通过。Postgres/Importer 任务首次在无数据库环境运行时有 42/7 项 assumption-skip；随后在隔离库中 `--rerun-tasks` 全模块，相关 58/49 项全部实际执行。根 `BqPartyInventorySnapshotFactSinkPostgresTest` 在同一隔离库运行 15 项，0 skip/failure/error。`:assemble`、`verifyUi2SelfContained` 通过；`:ui2-demo:renderGolden` 首次缺只读预览字体未进入渲染，按既有流程只读挂载宿主 CJK 字体重跑通过。
+- 临时 PostgreSQL 16 使用 `quest_r217_test`、512 MiB tmpfs、无宿主数据卷，只绑定 `127.0.0.1:55497`；任务结束后容器已删除且端口释放。Gradle 通过一次性 host-network 容器访问已存在的本地 7892 代理；未改变代理/网络配置。未访问生产进度/数据库、未执行生产 DDL、部署、Quest/BQ 开关或 S1/S2 操作。最终 `git diff --check` 通过。
+- M.2 仍 `BLOCKED`：Quest Detect 仅涵盖 PLAYER consuming Retrieval/Optional Retrieval/Fluid 子集；真实 Forge/GTNH 背包与事件时序、切服/源服停机恢复、物品存档与 entitlement 的崩溃边界未通过实机验证。来源服 JSONB migration 仅隔离测试，生产 DDL 未执行。
+
+### 2026-10-11 - R.2.17 Quest 级消耗 Detect 批次协调
+
+- 用户确认两项合同：Quest 级单一 Detect，按任务定义顺序处理未完成消耗 Task，逐项持久化并可恢复，不承诺跨玩家库存/数据库全有或全无；同一玩家多服 Crafting 来源分别取 `max(本服事件累计, 本服绝对统计快照)` 后求和。M.2 Quest/Party 主体模型不变。
+- CodeGraph 起始 `status` 有待同步文件；先 `sync` 17 个相关文件，再对 `AuthenticatedQuestConsumptionDetectService`、`QuestRuntimeService.reconcileAfterConsumptionDetectBatch`、`ConsumptionRequestAuthorizer.planQuestDetect`、`JdbcConsumptionDetectBatchRepository` 执行 `impact`。影响链落到 Core 协调/Runtime/授权、Postgres 批次仓储、QuestModule 组合根、TerminalService 与 Quest UI2 动作。最终新增周期回归后 `sync` 再更新 4 个文件；`affected` 对源/测试/接线文件给出 141 个宽泛测试候选，按具体调用链选 Core、Quest Postgres、UI2 Terminal 和根 Quest 全量测试。
+- 新增服务器认证的 Quest 级协调器：读取已发布定义并创建稳定的 Task 顺序，活动批次持久化源服、玩家、参与主体、Quest 版本、周期、Task 列表与游标；每项使用 `batchId:index` 作为原幂等键，并复用现有单 Task 消费 Saga。批次中暂缓 OR/Quest 完成和奖励，全部 Task 到达终态后在同一 PostgreSQL 事务中删除批次并做最终 Quest 结算。源服绑定限制避免另一台服务器访问不存在的本地玩家库存；玩家切服时展示等待源服而不伪造恢复成功。
+- 新增/扩展回归覆盖两项消耗任务顺序、第二项故障后游标与稳定键恢复、OR Quest 不提前完成/发奖、跨源服不执行库存副作用、奖励未领取时重复 Quest 周期不提前开放，以及无 Task 事实持久化时按批次绑定的下一周期结算。修复授权计划原先忽略 claimable reward repeat anchor 的问题；最终结算允许仅在旧周期确已到期且绑定下一周期时从旧完成行启动该周期。UI2 只展示单一 Quest 动作。
+- 新增 `20261010_002_add_quest_consumption_detect_batch.sql` 与基线 schema；`JdbcQuestCenterQuery.validateSchema` 要求批次表存在以 fail closed。临时 PostgreSQL 16 集成实跑从空表重复应用 migration、schema validation、活动批次唯一约束和游标幂等推进。此迁移没有在生产库执行，部署仍需审批并应用迁移。
+- Docker Gradle 完整回归实际执行 Core 278、Quest Postgres 58、UI2 Terminal 28、根项目 591，共 955 项；52 项根层可选 PostgreSQL 集成因各自独立环境配置缺失而 assumption-skip，0 failure/error，实际执行 903 项。Quest Postgres 58 项在新建 `quest_detect_test` 隔离 PostgreSQL 16 容器中全部执行、0 跳过。`compileJava :assemble verifyUi2SelfContained` 成功（39 actionable tasks，12 executed、27 up-to-date）；其后新增 claim-cooldown Core 回归，单独重跑 Core 全套 278 项成功。首次构建完整集成时报告 277 个 Core 项；差异仅为后来补加的这 1 个测试。Java 8 source/target 和 JDBC deprecated API 只有编译警告。
+- 临时数据库仅用 512 MiB tmpfs、无宿主数据卷、loopback `127.0.0.1:55498`，测试后容器已停止自动删除并确认端口释放。没有访问生产玩家进度/数据库、执行生产 DDL、部署、启用 Quest、停用 BQ 或触碰 S1/S2；真实 Forge/GTNH 背包操作、源服停机切服和长期运行仍待验证。`:git diff --check` 与文档数字同步后复核。
+- 当前结论：R.2.17 自动门槛完成，但只覆盖授权的 PLAYER consuming Retrieval/Optional Retrieval/Fluid 子集，不是完整 BQ Quest Detect 兼容；M.2 与 BetterQuesting 替代继续 `BLOCKED`。开发导航、唯一能力矩阵、M.2 行为矩阵已标记该限制与生产迁移未执行状态。
+
+### 2026-10-10 - Crafting 来源计数迁移与 Quest Detect 时序复核
+
+- CodeGraph `status/sync` 纳入新增隔离 PostgreSQL 迁移回归；`explore` 核对 `QuestInstance.detect` 对照证据、`QuestRuntimeService.execute` 的即时完成/奖励路径、`JdbcQuestRuntimeRepository` 与来源进度迁移。`impact TaskProgress` 显示 202 个关联符号；`affected` 对新增测试选择其自身，执行范围另按 JDBC 完整测试模块与根 PARTY/JDBC 集成类覆盖。
+- 新增 `QuestTaskSourceProgressMigrationIntegrationTest`：在显式隔离 schema 中模拟旧版 `galaxy_quest_task_progress` 表，实际执行 `20261010_001_add_quest_task_source_progress.sql` 两次；验证老 `progress_values/target_values/complete` 原样保留、新 JSONB 默认为 `{}` 且 NOT NULL、行数不变。生产迁移仍未执行。
+- 复验 Core 273、Postgres 模块 56、根 PARTY/JDBC 集成 15，共 344 项实际执行，0 skipped/failure/error；`:assemble :verifyUi2SelfContained` 成功（29 actionable tasks，29 executed），`git diff --check` 通过。第一次完整 Postgres 复跑前测试容器已被清理，产生连接拒绝；重建全新 PostgreSQL 16 隔离容器后完整 56 项全部通过。最终临时库使用 512 MiB tmpfs、无宿主卷、只绑定 `127.0.0.1:55494`，现已移除且端口释放。
+- 固定 BQ `QuestInstance.detect` 的源码显示：定义顺序遍历所有未完成 Task，Task 更新自己的进度/完成标记，Quest 汇总状态只在整轮扫描后刷新。结合用户已选择 Quest 级 Detect，兼容目标应是批次末判定 Quest 完成/奖励；现有 Base 每条事实立即完成并冻结周期，因此服务端持久批次协调尚未实现。此轮未改 Quest 完成、奖励或消费策略，也未部署、访问生产玩家进度/数据库、执行生产 DDL、切换 Quest/BQ 开关或触碰 S1/S2。
+
+### 2026-10-10 - 未放置 Quest 导入与任务中心分组回归
+
+- CodeGraph `status/sync` 核对导入测试文件；`explore` 检查 `BqMigrationPlanner.plan`、`BqMigrationDatabaseService.apply`、`JdbcQuestCenterQuery.loadPageForPlayer` 与 `QuestCenterPaginator`。`impact` 确认迁移入口影响 importer PostgreSQL 集成类；`affected` 选中该测试类。
+- 扩展合成 BQ→隔离 PostgreSQL→玩家任务中心测试：未放置 Quest 定义必须发布且不出现在源章节 placement；分页器为其返回独立虚拟 `unplaced` / “Other quests” 汇总，默认章节仍只列出原有两个 placement。未推断 S2 的未放置内容都是隐藏辅助节点，也没有自动补坐标或改生产行为。
+- 首次回归发现测试原断言把虚拟汇总误计作源章节，故从预期 1 改为预期 2 并直接断言虚拟分组 ID/数量；最终 `BqMigrationDatabaseIntegrationTest` 7 项和 isolation URL guard 1 项共 8 项实际执行，0 skipped/failure/error。使用 PostgreSQL 16、512 MiB tmpfs、无宿主卷，仅绑定 `127.0.0.1:55493`；测试后容器删除且端口释放。
+- 既有 root-owned Gradle binary report 曾阻挡普通 UID 测试，原文件保留到独立 `/tmp` 备份目录后，普通 UID 按常规输出目录重跑成功。仅验证 importer/任务中心窄闭环；未跑全量 test、assemble、自包含门禁或实机行为。没有访问生产数据库/玩家进度、执行 DDL、部署、改 Quest/BQ 开关或触碰 S1/S2；最终 `git diff --check` 通过。
+
+### 2026-10-10 - BQ 全量导入结构警告影响复核
+
+- CodeGraph `status` 显示索引 up-to-date；`explore BqMigrationPlanner.validate/detectCycles`、`explore BqMigrationDatabaseService.apply/plan` 与 `node BqMigrationPlannerTest.java` 核对 warning 生成、迁移清单及两个既有回归。`supportedUnplacedQuestIsAWarningOnly` 明确允许单个未放置 Quest 进入 manifest；`plan(manifest)` 对全部 Quest 逐一生成迁移项，章节放置独立，因此全量解析的 64 个未放置 Quest 不会静默丢弃，但章节地图可见性仍未确认，不自动补坐标。
+- 固定 BQ 官方提交 [`EnumLogic.java`](https://github.com/GTNewHorizons/BetterQuesting/blob/524b365211b6b3a9672cab8ae45b4e07e726d49e/src/main/java/betterquesting/api/enums/EnumLogic.java) / [`QuestInstance.java`](https://github.com/GTNewHorizons/BetterQuesting/blob/524b365211b6b3a9672cab8ae45b4e07e726d49e/src/main/java/betterquesting/questing/QuestInstance.java) 确认 XOR 要求恰有一个前置完成，`isUnlockable` 对 XOR 接受 `completed <= 1`。现有 4 个 warning 检测到组外前置边，但未证明该入口可达；按警告保留，不把结构可疑误写成行为等价。
+- 本轮只读审计与开发导航/能力矩阵记录，没有改 Java、数据库、网络或 UI。一次性 `galaxy-dev:local` Docker 容器、无数据库环境变量运行 `:galaxy-quest-bq-importer:test --tests '*BqMigrationPlannerTest'`：8 项实际执行，0 skipped/failure/error，BUILD SUCCESSFUL（14 秒；2 个任务执行、6 个 up-to-date）。Gradle 输出容器用户与挂载仓库属主不一致的 Git `dubious ownership` 警告，但项目版本插件使用已有 `NO-GIT-TAG-SET` override，构建仍成功；未修改 Git 全局配置。此定向单测不重报此前全量静态解析或扩大为行为验收。未读取玩家进度/生产数据库、执行 DDL、部署、改变 Quest/BQ 开关或触碰 S1/S2。更新后 `git diff --check` 无 whitespace 报告（新建开发导航文件的 `--no-index` 检查因“文件不同”返回 1，输出为空）。
+
+### 2026-10-10 - R.2.6 Crafting 当前工作树定向复验
+
+- CodeGraph `status` 显示索引 up-to-date；`explore` 核对 `ItemVectorTaskEvaluator.evaluate`、`AuthenticatedCraftingStatisticsDetectionService.detectAutomatically`、`QuestGameplayEventHandler.submitCraftingStatistics` 与 Party membership 路由。`impact ItemVectorTaskEvaluator.evaluate` 命中 Crafting 专项 evaluator 回归；`impact QuestGameplayEventHandler.submitCraftingStatistics` 命中事件分发测试；`affected` 返回 75 个宽泛候选，按直接调用链选择 Core 6 类与根 3 类测试。
+- 一次性 `galaxy-dev:local` 容器、无数据库环境变量执行 Core 6 类 100 项（Crafting evaluator 41、统计服务 7、Party 成员 3、观察计划 9、Planner 23、Engine 17）及根 3 类 25 项（事件分发 4、事件故障边界 2、Minecraft 消费适配器 19），共 125 项实际执行，0 skipped/failure/error。编译任务均由现有构建缓存命中；两个 Gradle Test 任务均 `BUILD SUCCESSFUL`。
+- 这是针对当前工作树的定向复验，不重复 PostgreSQL 集成测试，也不证明 Forge 实际事件、`EntityPlayerMP.objectCraftStats`、Party 在线目录或跨服时序；未运行 `assemble` / 自包含门禁。本轮未改生产 Java、网络、数据库或玩家交互。未访问生产数据库/进度、未执行 DDL、部署、Quest/BQ 开关或触碰 S1/S2；`git diff --check` 通过。
+
+### 2026-10-10 - Crafting 多服统计与事件计数避免重复的源码核验
+
+- CodeGraph `status` 确认索引 up-to-date；`explore QuestGameplayEventHandler.submitCraftingStatistics`、`node OrderedQuestFactRetryQueue.submit/retry/QuestGameplayEventHandler.submitFact` 与 `explore QuestEvaluationPlanner.factMembershipFor/bqPartyActivityMembership` 核对事实创建、FIFO 重试和 Party 重新解析链。
+- 对照固定 BQ 官方提交 `524b365211b6b3a9672cab8ae45b4e07e726d49e` 的 [`TaskCrafting.java`](https://github.com/GTNewHorizons/BetterQuesting/blob/524b365211b6b3a9672cab8ae45b4e07e726d49e/src/main/java/bq_standard/tasks/TaskCrafting.java)：匹配 craft/smelt/anvil 事件先按产出数量增加 ALL_UUIDS 每位玩家的任务向量，再调用 `detect`，读取本服每位在线玩家的 `objectCraftStats` 并仅在统计更大时覆盖。故“每来源服务器累计”若被确认，应按每服 `max(本服事件累计, 本服最新统计快照)` 形成来源贡献后再求和；不能把多服绝对快照直接相加，亦不能在共享总向量中同时累加事件增量与绝对值。
+- 当前 `GameplayFact` 在首次 sink 尝试前已创建，队列保存原对象/幂等键；重试只重新调用 sink，但 Planner 按当前 `fact.playerId` 再查 Party。事实没有事件时 Party roster/在线资格。恢复事件时队伍语义需要另一项决定；不可用“修队列”或单存 Party ID 掩盖成员资格变化。
+- 仅补充开发导航与能力矩阵中的源码结论和待决口径，没有改 Java、数据库/网络合同或玩家交互；没有运行测试。官方固定提交作为可复核来源；未读取服务器玩家进度/数据库、未执行 DDL、部署、Quest/BQ 开关或触碰 S1/S2。`git diff --check` 通过。
+
+### 2026-10-10 - Quest 级消耗检测接入边界审计
+
+- CodeGraph `status` 确认索引 up-to-date；`explore AuthenticatedQuestConsumptionService.submit`、`ConsumptionSubmissionService.submit/process` 检查唯一消费入口、事务与恢复调用链。当前服务输入一个 Task key，生成独立随机提交键；每 Task 单独经过 `PREPARED → APPLIED → CONFIRMED/REJECTED`，真实库存扣除与数据库进度入账通过可恢复 Saga 衔接。
+- 因而复刻 BQ Quest 级 Detect 不能仅在客户端顺序调用多个现有提交：这既不是一个 server-authoritative Quest 操作，也没有跨 Task 的稳定批次身份；必须先定任务顺序、部分成功后的回报/重试、每 Task Saga 与批次身份的关系，以及手持单栈路径是否保留为 Task 级动作。真实玩家库存与 PostgreSQL 不具备跨系统原子提交，文档不宣称“批量全有或全无”。
+- 仅记录实现边界；没有改变 UI 或消费合同、数据库、网络消息，也没有运行测试。CodeGraph 为只读调用链分析；未访问生产玩家进度/数据库、未执行 DDL、部署或切换 Quest/BQ 开关。
+
+### 2026-10-10 - Crafting 事实重试与 PARTY 归属时点审计
+
+- CodeGraph `status` 确认索引 up-to-date；`explore` 检查 `QuestGameplayEventHandler.submitCraftingStatistics`、`OrderedQuestFactRetryQueue.retry`、`RuntimeQuestFactSink.accept` 与 `QuestEvaluationPlanner.factMembershipFor/bqPartyActivityMembership`，`impact` 确认事件分发影响 `QuestCraftingStatisticsDispatchTest`，Planner 路由影响 Party/Crafting 及消费授权测试。
+- 确认 R1-03 队列原样保存 immutable fact 和幂等键；事实首次尝试失败后会于稍后的 tick 再次进入 `RuntimeQuestFactSink`，Planner 此时重新解析 `fact.playerId` 当前所属的 Party。CodeGraph 对 `BqPartyTaskProgressScope.supports` 的源码显示，共享事件路由覆盖 Crafting、Hunt、Location、Meeting；这些普通事件事实均未记录发生时的 Party roster/在线资格。因此玩家若在积压期间换队，这几类旧事件可能按重试时的新成员关系判定。这是未覆盖的跨服时序风险，不等于已证实发生了数据损坏。
+- 仅记录审计结论，未改事实字段、Party/Quest 归属、重试合同或数据库。严格复现事件时的 BQ active Party 需要定义捕获时的 Party roster/在线资格如何固定，以及旧 Party 在成员离队后的延迟事件如何处理；不能只在重试时加一个 Party UUID 就宣称等价。待形成有界方案和回归后再实施。未访问生产数据库/玩家进度、未执行 DDL、部署或切换 Quest/BQ 开关。
+
+### 2026-10-10 - BQ 检测入口固定源码基线校正
+
+- 复核 `Reference/BetterQuesting` 的来源边界：该目录被 `.gitignore` 忽略且没有独立 `.git`，因此旧记录中的本地镜像 HEAD 不能在当前工作站从该目录验证，也不能证明文件对应固定提交。能力矩阵现以 GTNewHorizons/BetterQuesting 固定提交 `524b365211b6b3a9672cab8ae45b4e07e726d49e` 的官方永久链接作为可复现基线，本地副本只作为浏览便利。
+- 直接核对固定提交 `GuiQuest`、`QuestInstance`、`TaskRetrieval`：GUI 单个 Quest Detect 按钮发送 Quest ID；Quest 服务端按定义顺序对该 Quest 的全部未完成 Task 调用 `detect`；Retrieval 库存变化时仅在 `!consume || autoConsume` 条件成立时自动检测。该源码行为与产品交互合同是两件事：用户确认了非消耗库存持续自动检测、消耗任务显式提交，但 Base 是否要一次聚合提交该 Quest 多个消耗 Task，仍未明确；逐 Task 重叠需求、部分成功与恢复顺序尚不能擅自改变。
+- 更新能力矩阵的源代码基线和入口语义摘要，移除无法复核的本地镜像提交断言；未改代码、数据库/网络合同或行为测试。仅文档变更，`git diff --check` 通过；未连接数据库、读取玩家进度、部署或操作 Quest/BQ 开关。
+
+### 2026-10-10 - M.2 interact_entity 未注册实体过滤兼容
+
+- 对照固定 BQ `TaskInteractEntity.onInteract` 与 `EventHandler.onEntityInteract/onEntityAttack`：目标 ID 必须能由 `EntityList` 解析；交互实体没有注册资源 ID 时跳过；开启子类型匹配时才允许注册父类 ID 命中。Base 事实工厂原先在实体未注册时写入 Java 类名，并仍附加已注册父类别名，导致 Core evaluator 可能把 BQ 会忽略的实体计入。现将无注册名主体/别名编码为空，并在 evaluator 中拒绝空目标与空实际主体，再进行精确/子类型匹配；已注册实体与当前子类型、物品、NBT 规则不变。
+- CodeGraph 起始 `status` up-to-date；`explore` 检查 BQ 两个 Task/事件入口、Base `entityInteracted` 和 `InteractionTaskEvaluator`；`impact InteractionTaskEvaluator.evaluate` 检查 evaluator 及复合调用链，`affected` 给出 74 个宽泛候选后以直接测试链确定范围。修改后 `sync` 更新 3 文件、147 nodes；后验 `impact` 确认 5 个直接影响符号。Core 全套 270 项（其中 `BqCompatibleTaskEvaluatorsTest` 41 项）、根 `QuestGameplayEventHandlerFailureTest` 2 项均执行通过，0 skipped/failure/error；根 `compileJava`、`:assemble`、`verifyUi2SelfContained` 均通过（assemble 29 actionable tasks，5 executed、24 up-to-date）；最终 `git diff --check` 通过。
+- 这是离线主体匹配边界修复，不代表 S2 DefaultQuests 存在此类任务，也不证明 Forge 实体事件、EntityList 注册时序、真实实体 NBT、PARTY/JDBC 多服时序。未访问数据库/玩家进度、未执行 DDL、部署或改变 Quest/BQ 开关；interact 类与 M.2 继续 BLOCKED。
+
+### 2026-10-10 - M.2 interact_item 右键空气事件兼容修复
+
+- 对照固定 `Reference/BetterQuesting` 的 `EventHandler.onPlayerInteract`：BQ 不过滤 `PlayerInteractEvent.Action`，`isHit` 仅在 `LEFT_CLICK_BLOCK` 时为 true，所以右键空气会按普通交互提交给 `TaskInteractItem`。Base 原入口只接受左/右键方块，遗漏 `RIGHT_CLICK_AIR`。现补齐 1.7.10 Forge 的三种实际 Action（`LEFT_CLICK_BLOCK`、`RIGHT_CLICK_BLOCK`、`RIGHT_CLICK_AIR`）；取消事件、服务端玩家与 FakePlayer 检查不变，只有左键方块视为 hit。源码 API 没有 `LEFT_CLICK_AIR`，初次编译捕获后已按实际枚举修正。
+- CodeGraph 起始 `status` up-to-date；`explore` 检查 `QuestGameplayEventHandler.onPlayerInteract`、`MinecraftQuestFactFactory.itemInteracted`、`InteractionTaskEvaluator` 与 BQ 对应 Task/事件处理器；`impact` 覆盖事件入口和事实工厂，`sync` 更新 handler/test 两文件 115 nodes。`affected` 给出 45 个宽泛候选；依据直接调用链定向运行根 `QuestGameplayEventHandlerFailureTest` 2 项与 Core `BqCompatibleTaskEvaluatorsTest` 41 项，共 43 项，0 skipped/failure/error。`:assemble :verifyUi2SelfContained` 通过，29 actionable tasks（6 executed、23 up-to-date）；最终 `git diff --check` 通过。
+- 首次 Docker Gradle 网络隔离导致插件配置超时；一次性 host-network 构建容器补齐 `JAVA_TOOL_OPTIONS` 的 7892 HTTP/HTTPS proxy 后运行成功。未改系统代理、Compose、服务/防火墙；未连接数据库、访问玩家进度、部署或改 Quest/BQ 开关。此差异回归不证明 DefaultQuests 实际用量、完整交互任务等价或 Forge/GTNH 实机行为，`interact_item / interact_entity` 和 M.2 继续 BLOCKED。
+
+### 2026-10-10 - R.2.6 同一玩家多服 Crafting 绝对统计归并现状回归
+
+- 扩展既有 PostgreSQL 集成场景并重命名为 `automaticBqCraftingStatisticsUsePersonalMaximumAcrossServersWithoutSumming`。同一合成玩家从 `s2` 发布 5、从 `lobby` 发布 2，现有进度保持 5；`lobby` 后续发布 7，进度更新为 7；同一来源/计数重放返回 `DUPLICATE`。这只刻画当前 Runtime 的最大值归并，不是用户已确认的跨服规则。已确认的“不相加”仅针对不同 Party 成员；同一玩家的多服本地统计归并策略待用户确认。
+- CodeGraph 起始 `status` up-to-date；`explore` 检查 `QuestRuntimeService.applyIf`、`TaskProgress.merge`、`AuthenticatedCraftingStatisticsDetectionService.detectAutomatically` 和 `BqPartyActiveQuestQuery.isActiveFor/hasActiveMember`；`impact` 分别覆盖 Runtime/检测调用链与 TaskProgress 的 42 个下游相关符号。修改后 `sync` 更新集成测试文件 217 nodes；`affected` 收敛至 `BqPartyInventorySnapshotFactSinkPostgresTest`。
+- Docker Gradle 自动回归：Core 全套 270 项、根 PostgreSQL 集成类 15 项、Crafting 分发 4 项与事件失败 1 项，共 290 项实际执行，0 skipped/failure/error。`:assemble :verifyUi2SelfContained` 成功；最终 `git diff --check` 通过。临时 PostgreSQL 16 使用 tmpfs、无宿主数据卷，仅映射 `127.0.0.1:55493`；测试后容器已删除并确认端口释放。前两次测试容器网络配置失败发生在 Gradle 插件初始化、未进入测试；最终沿用本机 7892 代理的一次性 Gradle host-network，并未修改系统代理/网络。
+- 测试全部使用合成玩家、Quest、Party 与统计读取器；不覆盖真实 `EntityPlayerMP.objectCraftStats` 数据、跨服在线资格/时序或 Forge tick。未访问生产数据库/玩家进度，未执行生产 DDL/迁移、部署、Quest/BQ 开关或 S1/S2 操作；R.2.6 自动门槛完成，Crafting/M.2 真实兼容仍 BLOCKED。
+
+### 2026-10-10 - R.2.6 Crafting 自动检测链定向复验
+
+- 继续核对 Crafting 自动统计路径：`QuestObservationPlan` 只对已发布且启用 BQ statistics 的任务产生轮询目标；tick 每 60 玩家 tick 调用检测服务；统计求值按 Item ID/注册名推进，不重新匹配 metadata/NBT；Party 在线玩家的个人统计分别生成 PLAYER 事实，不合并计数。CodeGraph `explore` 检查 `detectAutomatically`、`QuestEvaluationPlanner.requestsFor`、`BqPartyCraftingStatisticsMembers.localOnlineMembers`、`BqPartyActiveQuestQuery.hasActiveMember` 与 `ItemVectorTaskEvaluator.evaluate/matches`；`impact detectAutomatically` 为 5 个直接关联符号，`impact fromPublished` 为 18 个关联符号。
+- Docker Gradle 离线重跑核心 `AuthenticatedCraftingStatisticsDetectionServiceTest` 7、`BqCompatibleTaskEvaluatorsTest` 41、`BqPartyCraftingStatisticsMembersTest` 3、`QuestObservationPlanTest` 9，共 60 项；根 `QuestCraftingStatisticsDispatchTest` 4 与 `QuestGameplayEventHandlerFailureTest` 1，共计 65 项，均 0 skipped/failure/error。两个 Gradle 命令均 `BUILD SUCCESSFUL`。
+- 本轮未改生产代码或改变 UI/服务端合同；该复验不替代既有隔离 PostgreSQL 15 项回归，也不证明真实 Forge tick、玩家统计文件或 GTNH 多服在线时序。BQ Quest 级 Detect 与 Base 当前逐 Task 消耗入口的粒度选择仍待用户答复；Crafting 和 M.2 继续 `BLOCKED`。未访问生产数据/数据库、未执行 DDL/部署/Quest 开关或服务操作。
+
+### 2026-10-10 - M.2 检测入口粒度源码复核（等待产品选择）
+
+- 固定 BQ 源码显示非消耗 Retrieval/Fluid 在 `EventHandler` 处理库存变化队列时调用 `onInventoryChange` 自动检测；`consume=false` 时会检测，不会扣库存。Quest 级 `QuestInstance.detect` 则按定义顺序遍历全部未完成 Task 并调用各自 `detect`，因此 consuming Retrieval/Fluid 可能在一次 Quest 动作中连续消费多个任务所需库存。Base 当前用 20 玩家 tick 周期快照自动观察非消耗库存，消耗型任务由玩家逐 Task 提交。
+- 补查固定 GUI 入口：`GuiQuest` 只提供单个 Quest 的 Detect/Submit 按钮，点击后 `NetQuestAction.requestDetect(Collections.singletonList(questID))` 发送 Quest ID；服务器再由 `QuestInstance.detect` 顺序遍历此 Quest 全部未完成 Task。按钮状态由 `quest.canSubmit(player)` 决定。一次 Quest 操作可触发多个 Task 的检测/消耗。
+- 用户已确认非消耗任务持续自动检测、消耗物品任务显式提交/检测；仍未明确 Base 的交互粒度是逐 Task、Quest 级聚合还是两者并存。聚合入口会改变消费范围，并涉及多 Task 顺序、重叠需求与跨任务消费恢复；在用户选择前不新增该动作或改现有逐 Task 交互。
+- CodeGraph 起始 `status` up-to-date；`explore` 检查 `QuestObservationPlan.fromPublished`、`AuthenticatedCraftingStatisticsDetectionService.detectAutomatically`、`QuestGameplayEventHandler.onPlayerTick`、玩家 Quest 文档与服务端路由；`impact QuestObservationPlan.fromPublished` 显示 18 个关联符号，`affected` 对候选文件列出 127 个宽泛测试候选，需按具体改动再收敛。本轮无生产代码变更，因此未执行构建或测试。
+- 本轮只读 `Reference/BetterQuesting` 固定源码，不访问服务器定义或玩家进度，不连接数据库、执行 DDL/部署、修改 Quest/BQ 开关或触碰 S1/S2；将行为粒度未决项写回开发导航与能力矩阵，M.2 仍 `BLOCKED`。
+
+### 2026-10-10 - R.2.16 完整导入 QuestCompletion 来源/目标定义
+
+- 扩展既有 QuestCompletion 隔离 PostgreSQL worker 回归：来源与目标 Quest 现在都由完整合成 BQ typed JSON 经 `BqQuestDefinitionImporter` 导入；来源含非消耗 Retrieval 与 QuestCompletion 奖励，目标含 Checkbox Task 与 Item 奖励。来源 Retrieval 经生产 `BqPartyInventorySnapshotFactSink`、JDBC Party membership 与 Planner/Runtime 完成，再显式 claim，由 JDBC `RewardDeliveryWorker` 投递 QuestCompletion 到已发布的导入目标；断言目标 PLAYER 进度完成、目标 entitlement 仅一条、后续 poll 不再租赁来源 entitlement。仅测试变化，无生产行为/数据库合同修改。
+- CodeGraph 起始 `status` up-to-date，`explore` 检查 importer、QuestCompletion handler/JDBC port 与 worker 测试；`impact BqQuestDefinitionImporter.read` 和目标测试方法、`affected` 都将回归收敛到 `BqPartyInventorySnapshotFactSinkPostgresTest`。修改后 `sync` 更新该测试文件 217 nodes，索引 up-to-date。
+- Docker Gradle 根 `:test --tests ...BqPartyInventorySnapshotFactSinkPostgresTest` 在隔离 PostgreSQL 16 Alpine 上执行 15 项，0 skipped/failure/error。测试库 `quest_r216_questcompletion_it`、512 MiB tmpfs、无宿主卷，只绑定 `127.0.0.1:55491`；测试后容器已停止自动删除，确认无容器及监听端口。测试 schema 由用例在隔离库内创建/删除；未执行生产 DDL或连接业务数据库。
+- R.2.16 消除了 R.2.14 中“只有奖励导入、来源/目标 Quest 手工构造”的自动覆盖缺口，但仍使用合成 Quest JSON、玩家与 Party，不是完整 DefaultQuests 批次或 Forge/GTNH 实机证据。`:assemble :verifyUi2SelfContained` 成功（29 actionable tasks，1 executed、28 up-to-date），最终 `git diff --check` 通过；未访问生产进度、部署、改 Quest/BQ 开关或触碰 S1/S2。
+
+### 2026-10-10 - R.2.15 导入 Item 最大数量到背包溢出交付回归
+
+- 只读复核授权的 S2 `DefaultQuests` 定义目录；匿名聚合来源哈希仍为 `9795d6c7fe71e72e91fed8cdc3dea632ab091ccf040e71707d2dd0d90cd355fc`，3,744 个 Quest、47 章、3,847 个章节放置及任务/奖励类型计数与既有基线一致。只读输入限定为 DefaultQuests，没有访问玩家进度、其他配置、数据库或服务器运行状态。
+- 对照固定 BQ `RewardItem.claimReward0` / `BigItemStack.getCombinedStacks`：数量按物品最大堆叠拆分，背包无法容纳的栈会掉落到世界。新增合成 BQ typed JSON 数量 8,192 → importer → Minecraft item delivery adapter 的回归：36 格背包收到 36×64，剩余 92×64 作为 overflow drops；总量仍为 8,192，marker 持久化，重放不再重复掉落或 flush。只增加测试，不改生产奖励策略。
+- CodeGraph 起始 `status` 为 up-to-date；`explore`/`node` 检查 importer、`rewardStacksForPlayerName`、Minecraft delivery handler、overflow 与 marker 回归；`impact` 覆盖 item reward 拆栈/投递链，`affected` 对新增测试选择 `BqItemRewardImportDeliveryTest`。同步后 1 个测试文件、63 个节点。
+- Docker Gradle 使用已缓存的隔离开发 Gradle Home 离线运行根限定测试：`BqItemRewardImportDeliveryTest` 4 项 + `MinecraftRewardDeliveryTest` 28 项，共 32 项实际执行，0 skipped/failure/error。初次误用未限定 `test` 导致子模块过滤器提示 No tests found（非测试失败），随后改用 `:test --tests ...` 成功。首次 Wrapper 尝试因默认 Gradle Home 无发行版而尝试网络下载，已中断；没有改动系统代理/网络。
+- `:assemble :verifyUi2SelfContained` 成功（29 actionable tasks，7 executed、22 up-to-date）；最终 `git diff --check` 通过。M.2 仍 `BLOCKED`：该替身测试没有创建真实 EntityPlayer/World，不覆盖世界掉落与玩家存档/PostgreSQL entitlement 之间的崩溃窗口或 GTNH 实机行为。未连接数据库、未执行生产 DDL/部署/开关，也未触碰 S1/S2 服务器。
+
+### 2026-10-10 - M.3 进度冲突诊断的 repeat 时间戳边界
+
+- 从只读 BQ 源码复核 `QuestInstance` 的 `completeUsers` / `userProgress` 与 `resetUser(uuid, false)`：重复重置会复位 claimed、把 timestamp 清零并重置 Task 向量，没有可单调比较的 cycle ordinal。当前 `BqPlayerProgressImporter` 和 `BqProgressMapper` 只用于离线解析/向量映射，未发现 PostgreSQL 进度写入、批次或回滚调用链；本轮没有读取任何生产玩家进度。
+- 修复 `BqProgressConflictAnalyzer` 的假等价：完成/领取标记和 Task 向量相同但 timestamp 不同时，改判 `DIVERGENT`；新增 `differentBqCompletionTimestampsAreNotClassifiedAsIdentical`。CodeGraph `sync` 更新分析器及回归测试（2 文件/35 节点）；`impact BqProgressConflictAnalyzer.dominates` 与 `affected` 指向冲突/影子分析测试。
+- Docker Gradle `:galaxy-quest-bq-importer:test` 总计 49 项：42 执行、7 条件跳过、0 失败/错误。7 条均为 `BqMigrationDatabaseIntegrationTest`，因未设置隔离 `QUEST_TEST_POSTGRES_URL` 而按设计跳过；本轮没有启动数据库或连接任何数据库。冲突分析及影子分析定向回归通过。`:assemble :verifyUi2SelfContained` 成功（29 actionable，1 executed/28 up-to-date）；最终 `git diff --check` 通过。
+- M.3 仍只有只读映射和离线差异基础。由于重复周期没有可靠身份，跨服冲突/来源选择规则尚未确定；这里记录的是保守审计与诊断修正，不是进度合并实现。建议无法证明同周期时隔离冲突，不自动按最大向量/最新时间戳/固定服优先级合并；等合同确认后再设计写入器。M.2 整体仍 BLOCKED；不执行生产 DDL、部署、Quest 开关或 S1/S2 操作。
+
+### 2026-10-10 - R.2.6 Crafting 统计自动复评与解锁收口
+
+- 固定 BQ 的被动 60 tick `QuestInstance.update()` 只检查 Quest 完成/同时任务状态，`TaskCrafting.detect()` 实际由 Quest 级手动 Detect 或同 Task 匹配产物事件触发。按用户明确选择，Base 保留匹配产物即时统计，并额外每 60 tick 自动复评已发布、启用 `allowCraftedFromStatistics` 且带 `bq.raw` 的 Task；这是有意的体验差异，不宣称是 BQ 原生 60 tick 检测。每份快照保持对应在线玩家个人绝对统计，不把 PARTY/跨服计数求和。
+- 额外修复锁定后解锁边界：Party 任务完成进度仍为 LOCKED 时不提前发奖；当玩家自身前置满足，使用独立 `craft-stat-auto-unlock` 稳定 fact key 重评已完成 Task，避免旧事实幂等键阻止 Quest 完成。每个目标异常捕获记录，单目标数据库失败不逃出 tick，下个既有周期重试。
+- CodeGraph `status/sync` 首次更新 12 个文件/749 nodes，最终更新 3 个文件/322 nodes；`impact` 覆盖 `QuestObservationPlan.fromPublished`、`AuthenticatedCraftingStatisticsDetectionService.detectAutomatically`、`QuestEvaluationPlanner.requestsFor`、`QuestRuntimeService.applyIf`、`BqPartyActiveQuestQuery.hasActiveMember`、`QuestGameplayEventHandler.onPlayerTick`；`affected` 收敛至 Core 自动统计/Party/Runtime/观察计划测试、根事件分发/故障测试与 PostgreSQL 集成类。
+- Docker `:galaxy-quest-core:test` 全套 270 项、根 `QuestCraftingStatisticsDispatchTest` 4 项与 `QuestGameplayEventHandlerFailureTest` 1 项、隔离 PostgreSQL `BqPartyInventorySnapshotFactSinkPostgresTest` 14 项，共 289 项实际执行，0 skipped/failure/error。PostgreSQL 16 临时 DB `quest_r26_auto_crafting_it` 容器使用 512 MiB tmpfs、无宿主卷，仅绑定 `127.0.0.1:55490`；测试后移除并确认监听释放。首次回归发现 LOCKED 解锁复评被普通锁定拒绝条件挡住，修复后通过；`--network none` 因 GTNH 插件解析需联网而失败，随后只对一次性 Gradle 容器使用本机 7892 代理，无系统网络改动。
+- 所有数据均为合成定义/玩家/统计读取器；没有访问生产玩家进度/数据库、执行生产 DDL、部署、启用 Quest、停用 BQ 或触碰 S1/S2。Forge tick、真实 `EntityPlayerMP.objectCraftStats`、在线目录与多服时序仍未验证，R.2.6 自动门槛完成但 Crafting/M.2 仍 `BLOCKED`。`:assemble :verifyUi2SelfContained` 成功（29 actionable tasks，6 executed、23 up-to-date）；`git diff --check` 通过。未部署。
+
+### 2026-10-10 - R.2.6 LOCKED Crafting 解锁后的 JDBC 结算回归
+
+- 固定 BQ 来源语义后，补齐此前只有 Core/runtime 单测覆盖的组合边界：合成 Party 中 owner 已满足前置、peer 的个人统计达到 Crafting 目标但 peer 仍 LOCKED；peer 自己完成前置后，必须用新的稳定事实键重新结算，不能由旧统计 fact key 去重挡住完成与奖励。新增 `lockedPartyCraftingStatisticsUnlockThroughPersonalStableFactInJdbc`，直接使用 `AuthenticatedCraftingStatisticsDetectionService`、数据库 Party roster、在线目录、`BqPartyActiveQuestQuery`、Planner/Runtime、PostgreSQL 进度与奖励权益仓储。验证锁定时不发奖、解锁后个人 Quest 完成且仅一条奖励权益、后续轮询为空。
+- CodeGraph `status` 显示索引 up-to-date；`impact detectAutomatically` 命中 QuestModule、玩家 tick handler 和两条 JDBC 检测用例，`impact QuestRuntimeService.applyIf` 命中统计服务；`affected` 对新增/变更集成文件选中 `BqPartyInventorySnapshotFactSinkPostgresTest`。
+- 隔离实跑：Core 全套 270 项；根 `QuestCraftingStatisticsDispatchTest` 4 项、`QuestGameplayEventHandlerFailureTest` 1 项及 PostgreSQL 集成类 15 项，共 290 项实际执行，0 skipped/failure/error。PostgreSQL 16 临时库 `quest_r261_locked_test` 使用 512 MiB tmpfs、无宿主卷，仅映射 `127.0.0.1:55490`；验收后容器已移除并确认监听释放。`:assemble :verifyUi2SelfContained` 成功（29 actionable tasks，1 executed、28 up-to-date）；`git diff --check` 通过。初次 PG 定向运行 15/15 成功；为最终总数复核，另在新建的同配置隔离库重跑根三个类。
+- 只有合成定义/玩家和统计读取器参与测试；不代表 Forge tick、真实 `EntityPlayerMP.objectCraftStats`、生产 Party 在线目录或跨服时序。未访问生产进度/数据库、执行生产 DDL、部署、启用 Quest/停用 BQ 或触碰 S1/S2；R.2.6 自动门槛完成，但 Crafting/M.2 等价仍 `BLOCKED`。
+
+### 2026-10-10 - R.2.14 QuestCompletion 导入奖励贯通来源领取与 JDBC Worker
+
+- 在已有“导入奖励→JDBC 目标完成”测试旁新增隔离 PostgreSQL 闭环：来源 Quest 由玩家库存事实完成，生成可领取的个人 QuestCompletion 奖励权益；显式 JDBC claim 后，`RewardDeliveryWorker`/`RewardDeliveryRouter` 处理经 BQ importer 导入的奖励，目标 PLAYER 任务完成并只创建一条目标奖励权益，Worker 后续轮询不再重复租赁。
+- 来源 Quest 本身是合成构造定义，只有其 QuestCompletion reward 来自 BQ typed JSON importer；目标 Quest 也是合成发布定义。该测试不代表 DefaultQuests 全量导入、玩家真实库存/存档或实际跨服 Worker 竞争行为，也不改变 claim/奖励合同。
+- CodeGraph `sync` 更新根 PostgreSQL 测试 1 文件/212 nodes；`impact importedBqQuestCompletionRewardFlowsFromSourceClaimThroughJdbcWorker` 与 `affected BqPartyInventorySnapshotFactSinkPostgresTest` 将影响范围锁在该集成类。
+- Docker Gradle `:test --tests ...BqPartyInventorySnapshotFactSinkPostgresTest` 在专用 PostgreSQL 16 Alpine 临时库执行，XML 为 13 项、0 skipped/failure/error；26 actionable tasks，2 executed、24 up-to-date。DB `quest_r214_questcompletion_it` 仅 loopback `127.0.0.1:55489`、512 MiB tmpfs、无宿主卷；完成后容器已停止自动删除，确认无同名容器和监听端口。一次性 Gradle 容器仅使用进程级本地 7892 代理。
+- 这补齐 imported QuestCompletion 从可领取来源权益到目标完成的 JDBC Worker 自动链；QuestCompletion 仍因实际 BQ 导入批次、真实 Forge/GTNH 玩家/跨服时序和目标重置等未验收而 BLOCKED。未访问生产进度/数据库、未执行 DDL/部署/Quest 开关，未触碰 S1/S2。`git diff --check` 待文档收尾后复核。
+
+### 2026-10-10 - R.2.13 BQ XP 导入定义贯通经验投递
+
+- 对 S2 默认定义实际存在的 2 个 `bq_standard:xp` 奖励补齐一段窄回归：合成 typed BQ JSON 经 `BqQuestDefinitionImporter` 得到 `RewardDefinition`，再交给生产 `MinecraftXpRewardDeliveryHandler` 的经验端口；分别验证 `isLevels=true` 映射为等级、false 映射为经验点、经验状态更新、持久标记、flush/sync 顺序和重复投递幂等。
+- 未改 XP 曲线或奖励策略。输入/玩家均为合成内容和 fake port；没有验证真实 `EntityPlayerMP`、GTNH 玩家存档、重启、多服租约或 S2 两条实际配置的具体值。
+- CodeGraph：起始 `status` up-to-date；`explore/node` 检查 importer 的 XP 字段映射、XP handler 和既有交付测试；改后 `sync` 更新 1 个测试文件/61 nodes。`impact MinecraftXpRewardDeliveryHandler.deliverToPlayer` 命中新导入回归和既有 XP 交付测试；`affected` 选择 `BqItemRewardImportDeliveryTest`。
+- Docker Gradle `:test --tests ...BqItemRewardImportDeliveryTest --tests ...MinecraftRewardDeliveryTest` 实际 31 项（3 + 28），0 skipped/failure/error；26 actionable tasks，8 executed、18 up-to-date。一次性容器只给构建进程设置本机 7892 代理，没有改系统网络/代理配置；本轮没有数据库容器或数据库连接。`git diff --check` 待文档收尾后复核。
+- XP 的 importer→Minecraft adapter 自动证据已补；奖励整体、M.2 与 BQ 替代仍 `BLOCKED`。未访问生产进度/数据库、未执行 DDL/部署/Quest 开关，未触碰 S1/S2。
+
+### 2026-10-10 - R.2.12 Choice 与 QuestCompletion 导入/JDBC 回归
+
+- Choice 的 PARTY 集成用例改为从合成 BQ JSON 经 importer 构建 Item/Choice 奖励定义，再走隔离 PostgreSQL 发布、认证的个人选择、领取和 JDBC worker/router；三位成员不同选择仍分别收到对应的 item/meta/NBT，重复领取/投递不重复发放。
+- 新增 QuestCompletion 导入链：BQ typed JSON 的紧凑 UUID 由 importer 解码，目标 Quest 发布到隔离 PostgreSQL 后，导入的奖励交给基于 `JdbcQuestCompletionRewardPort` 的 handler 两次；目标 PLAYER 进度只完成一次、完成时间稳定且只产生一条目标奖励权益。该用例没有从来源 Quest entitlement 经 claim/JDBC worker 发起，因此不宣称完整来源领取链。
+- CodeGraph 起始 `status` up-to-date；`explore/node` 检查 Choice importer、领取/worker、QuestCompletion handler/JDBC port；两轮 `sync` 更新 PARTY/JDBC 测试 1 文件/202 nodes 和 Choice/QuestCompletion 直连测试 1 文件/209 nodes；`impact`/`affected` 选择两个直接测试类。
+- Docker Gradle 两个选定测试类共 14 项（导入 adapter 2、隔离 PostgreSQL PARTY/JDBC 类 12），0 skipped/failure/error。临时 PostgreSQL 16 Alpine 使用 512 MiB tmpfs、无宿主数据卷，测试 URL 为 `quest_r212_questcompletion_it`，仅绑定 `127.0.0.1:55488`；测试后已停止移除并确认端口释放。缺失 import 的首次编译未进入测试，修复后上述结果为最终有效结果。
+- Choice 与 QuestCompletion 的导入/部分数据库适配证据得到补充；真实 Forge/GTNH、来源奖励完整 worker 链、物品/世界/存档崩溃边界及跨服运行仍未验证，M.2 与 BQ 替代继续 `BLOCKED`。没有访问生产数据、执行生产 DDL/部署/开关或触碰 S1/S2。
+
+### 2026-10-10 - R.2.11 Choice 导入定义贯通 JDBC 选择与奖励投递
+
+- 先新增轻量合成 BQ `bq_standard:choice` typed JSON→Importer→Minecraft adapter 回归，验证选项参数、被选项 materialization、metadata/NBT、玩家 UUID 替换和 marker 幂等。再把现有 PARTY/JDBC 集成用例的 Item/Choice 奖励定义改为从合成 BQ JSON 经 `BqQuestDefinitionImporter` 产生，而不再直接构造 `RewardDefinition`。
+- PARTY 集成仍通过既有隔离 PostgreSQL：发布导入的奖励定义，三名玩家分别认证选择不同 Choice，个人领取后由 JDBC worker/router 交给真实 Minecraft ItemStack adapter；验证只有各自选项被发放、导入的 metadata/NBT 经过 JDBC 保存后仍正确、marker 和重复领取/投递幂等。没有更改奖励行为、数据库 schema 或服务端合同。
+- CodeGraph `explore/node` 检查 importer→reward codec、`rewardStacks`、现有 PARTY/JDBC 选择/领取/交付调用链；改前 `impact` 确认 importer 与 handler 受影响测试；改后两次 `sync` 分别更新 Choice 直连测试 1 文件/41 nodes、PARTY 集成测试 1 文件/202 nodes。最终 `impact`/`affected` 将回归范围收敛到 `BqItemRewardImportDeliveryTest` 与 `BqPartyInventorySnapshotFactSinkPostgresTest`。
+- Docker Gradle 实际 13 项通过（直连 adapter 2 项、导入 Choice PARTY/JDBC 集成类 11 项），0 skipped/failure/error；`26 actionable tasks`，2 executed、24 up-to-date。临时 PostgreSQL 16 Alpine 使用 512 MiB tmpfs、无宿主数据卷，测试 URL 明确指向 `quest_r211_choice_it`，只绑定 `127.0.0.1:55487`；测试结束后已停止并自动删除，端口确认释放。首次容器运行因 Compose `run` 不支持 `--network` 参数退出，未启动 Gradle；首次 Gradle 尝试缺少代理而在插件配置阶段超时，随后仅给一次性构建进程传入已验证的本地 7892 代理后通过，没有修改全局网络或代理配置。`git diff --check` 待文档收尾后复核。
+- Choice 的 imported definition→隔离 PostgreSQL publish→认证个人选择→claim→JDBC worker→Minecraft adapter 现有自动闭环证据；仍是测试玩家替身，不证明真实 Forge/GTNH 背包存档、WorldSave/掉落崩溃窗口或在线跨服租约。奖励系统、M.2 与 BQ 替代继续 `BLOCKED`；未访问生产进度/数据库、未执行 DDL/部署/Quest 开关，也未触碰 S1/S2。
+
+### 2026-10-10 - R.2.6 UI 检测语义收敛与 S2 定义基线纠正
+
+- 用户已确认：非消耗 Retrieval/Fluid 持续观察玩家库存快照；消耗型任务才要求逐 Task 提交；匹配产物事件会自动复评 Crafting 统计，不应让玩家手动点“检测合成”。据此从共享 `QuestCenterVisualDocument` 移除 Crafting 检测按钮及其布局占位；Checkbox 手动确认、消耗任务提交均保留。客户端仍不可信，旧显式 Crafting 检测服务/网络动作留作兼容，不作为正常完成路径。
+- 重新只读统计授权的 S2 `DefaultQuests/Quests` 定义目录，不打印名称/UUID或任何进度数据：3,744 个 Quest JSON 定义文件包含 5,620 个 Task 实例。类型为 `block_break` 1、`checkbox` 203、`crafting` 133、`fluid` 15、`hunt` 104、`location` 33、`meeting` 1、`optional_retrieval` 1,267、`retrieval` 3,863。此前文档/工作记录中的“3,744 个任务”口径不准确，应理解为 Quest 定义文件数；唯一当前基线现明确同时给出 5,620 个 Task 实例数。此前基线摘要哈希和 47 章/3,847 放置数保留为既有记录，本次没有重算哈希。
+- CodeGraph：`status` 检出 Java 文件待同步；`explore`/`callers` 复核 `QuestCenterVisualDocument.detail`、检测 Action Bridge 与 `AuthenticatedCraftingStatisticsDetectionService`，源码侧 Crafting 自动复评与 Base 数据链另按 R.2.6 既有回归；改前 `impact` 确认 UI 详情文档为变更入口。同步后 index up-to-date，`impact`/`affected` 复核并将视觉回归收敛至 `QuestParticipantManagementVisualTest`。
+- 验收：Docker `:ui2-terminal:test` 共 27 项实际执行、0 skipped/failure/error；`:assemble` 成功（38 actionable tasks，13 executed、25 up-to-date）；`verifyUi2SelfContained` 成功（24 actionable tasks，1 executed、23 up-to-date）；`git diff --check` 在文档最终更新后复核。构建产物哈希 `3e975692dd37c7609a7ff6f844a38f52ced9433a3e32acf9ab2386e197888f30`，仅构建、未部署。
+- 本次不改服务端任务、网络/数据库合同或 M.2 Party 主体；未访问玩家进度/生产数据库、未执行生产 DDL/部署/Quest 开关，未触碰 S1/S2 服务器。
+
+### 2026-10-10 - R.2.11.1 Choice 非正数量语义与 S2 奖励画像
+
+- 按固定 BQ 源码复核 `RewardItem/BigItemStack` 与 `RewardChoice.claimReward0`：普通 Item 对非正 `Count` 会经 `getCombinedStacks()` 最少发放 1 个；Choice 对被选中的非正数量在调用拆栈前直接返回。Base 原处理器共用 Item 规则，存在 Choice 多发 1 个物品的窄兼容差异。
+- 对获授权的本地 S2 `DefaultQuests` 定义副本做匿名只读聚合：sourceHash `9795d6c7fe71e72e91fed8cdc3dea632ab091ccf040e71707d2dd0d90cd355fc`；Item 4,181、Choice 957、QuestCompletion 308、XP 2；无 Command、Scoreboard、未知奖励类型。Choice 共 3,062 个选项，数量全部为正，最小 1、最大 4,096。没有输出任务名/ID，也没有读取进度数据。
+- 修复 `MinecraftItemRewardDeliveryHandler`：非正 Choice 选项生成空奖励列表，Item 行为保持不变；现有交付流程将空结果作为无物品完成并持久化 entitlement marker。新增回归验证不发物品、marker 持久化与重复 delivery 不重复 flush。该异常值不在当前 S2 任务库中，修复针对 BQ 导入兼容边界，不改变现有任务内容。
+- CodeGraph：起始 `status` up-to-date；`explore` 覆盖 handler/claim/worker、固定 BQ RewardChoice/BigItemStack 和 importer 参数约束；`impact rewardStacksForPlayerName` 命中 handler、delivery API 与 `MinecraftRewardDeliveryTest`，最终 14 个相关符号；`affected` 给出 48 个测试候选，按直接调用收敛至该根测试类。第一次 `sync` 更新生产类+测试类 2 文件/184 nodes；补充负数量断言后第二次 `sync` 更新测试 1 文件/120 nodes，索引最后 up-to-date。
+- 最终命令：`GRADLE_USER_HOME=... ./gradlew :test --tests com.jsirgalaxybase.modules.quest.infrastructure.minecraft.MinecraftRewardDeliveryTest --offline --no-daemon --no-configuration-cache -PforceToolchainVersion=17` 成功；XML 实际 28 项，0 skipped/failure/error；Gradle 26 actionable tasks，2 executed、24 up-to-date，23 秒。首次完整 Forge/Minecraft 与根测试源集编译耗时 4m28，最终同一回归增量复跑通过。没有运行全量 test、`assemble` 或 `verifyUi2SelfContained`；没有访问数据库。
+- `git diff --check` 在文档更新后通过。未访问生产玩家进度/数据库，未执行生产 DDL、部署或 Quest/BQ 开关，未触碰 S1/S2 服务器。
+
+### 2026-10-10 - R.2.11 标准奖励源码与投递差异只读审计
+
+- 按 R.2.10 后续边界，继续核查固定 BQ 源码的 Item/Choice/XP/Scoreboard/Command/QuestCompletion/`noRewards` 行为及 Base handler。CodeGraph 起始 `status` 为 up-to-date；`explore` 检查各奖励 handler、Claim 与 Delivery Worker 调用链；`impact MinecraftItemRewardDeliveryHandler.deliver` 复核 overflow 相关测试影响范围。没有代码变化，因此未运行 Gradle、未报新增测试通过。
+- 对照发现 M.2 文档的 Item 奖励说明陈旧：当前 Base 并非整批拒绝，而是先保存成功入包部分和分项进度，再逐栈向世界掉落并最终写完成 marker。世界实体、玩家 NBT 与 PostgreSQL 租约无法原子提交，崩溃/异常边界仍可能重复掉落或无法证明已落盘。已修正该冲突描述，不改变奖励策略。
+- 补记 Scoreboard：BQ 按 `relative` 累加/覆盖并创建 objective；Base 先持久化 absolute target marker 后写分数，纯计算已有覆盖但未证明真实 Minecraft Scoreboard/WorldSave。补记 Command 的明确兼容差异：BQ 默认走 `CommandBlockLogic`，`viaPlayer` 走权限恒真的 `AdminExecute`，并调度到后续 START tick；Base 使用显式 root allowlist、默认拒绝，sender 分别为 Server/真实玩家且立即执行。现有 DefaultQuests 只读画像未发现 command reward，默认安全限制不影响当前内容；将来迁入含此类型的定义需逐命令审查。
+- 更新开发导航、能力矩阵、M.2 行为矩阵，状态仅记“源码审计完成”，不升级 Reward、M.2 或 BQ 替代状态。下步先从获授权定义副本统计实际 reward 类型/关键参数，再挑无待决策差异项做 Importer→隔离 JDBC→handler 闭环；不得擅改命令权限或满背包崩溃合同。未读生产玩家进度/数据库、未执行生产 DDL/部署或 Quest/BQ 开关操作，未触碰 S1/S2。
+- 本轮文档修改后执行 `git diff --check`；无代码改动、测试数量变化、JAR 构建或部署记录。
+
+### 2026-10-10 - R.2.10 Checkbox 确认语义与导入/JDBC 回归
+
+- 按用户刚确认的检测合同收敛任务边界：非消耗 Retrieval/Fluid 自动观察玩家背包/已接入容器快照，消耗型任务才显式提交；GT 机器产物按物品/流体存在检测，不伪造玩家 Crafting 事件；同一 Quest 的混合个人/Party Task 归属留到职业系统设计阶段。当前 Base 的 `QuestObservationPlan` 已符合非消耗项自动轮询、消耗项不启用快照，但采集入口现在只读取 `EntityPlayer.inventory`，不代表任意容器或 GT 机器已接入。
+- 对照固定源码 `TaskCheckbox.detect`、`NetTaskCheckbox`、`ParticipantInfo`：Checkbox 本身是手动确认任务，服务端从认证玩家解析身份；`fullySyncQuests=false` 仅写发送者，true 时写 Party UUID 列表。上游配置默认 false 并标 NYI；本轮未读取 S2 `questbook.cfg`，不推断服务器覆盖值。
+- 新增 `importedBqCheckboxIsAnAuthenticatedManualPlayerAction`：合成 Checkbox BQ JSON → importer/migration → 隔离 PostgreSQL 发布目录 → `AuthenticatedCheckboxConfirmationService` + JDBC `QuestEvaluationPlanner`/Runtime；验证只有点击者完成、其他玩家无进度、重复确认无二次完成，并且观察计划不将 Checkbox 误列为库存/流体轮询任务。没有修改生产逻辑、参与主体模型、Quest 网络合同或数据库结构。
+- CodeGraph 起始 `status` 索引干净；`explore`/`node` 查看认证确认、Quest Planner、观察计划调用链，`impact AuthenticatedCheckboxConfirmationService.confirm` 命中服务及调用/单测，`affected` 对 Core 返回 46 个宽候选、按真实变更的导入集成测试收敛 1 个用例；改后 `sync` 更新 1 文件/49 nodes，`impact` 与 `affected` 命中新集成方法/测试类。
+- 自动验证：`:galaxy-quest-core:test` 267 项与 `:galaxy-quest-bq-importer:test` 48 项，共 315 项实际执行，0 skipped/failure/error；`:assemble` 和 `verifyUi2SelfContained` 通过。临时 PostgreSQL 16 使用 `quest_r210_checkbox_it`、512 MiB tmpfs、无宿主卷，仅绑定 `127.0.0.1:55486`；删除容器并确认端口释放。首次测试的默认 root 容器遗留 root 所有权导致普通 UID 重跑 AccessDenied；仅恢复本轮生成的 importer `build/test-results` 与 `build/reports/tests` 目录所有权后，以 UID 1000 重跑通过。`git diff --check` 通过。没有生产进度/数据库读取、生产 DDL、部署、Quest/BQ 开关或 S1/S2 操作。
+- 自动 Checkbox 个人 JDBC 路径可复验；`fullySyncQuests` 服务器配置、真实终端/Forge 玩家动作、Party Checkbox 与跨服时序仍 BLOCKED。Checkbox/M.2/BQ 替代整体不升级为完成。下一项先按能力矩阵审计剩余实际奖励类型，奖励行为差异未经用户确认不得更改。
+
+### 2026-10-10 - R.2.9 Location 导入与重复领奖周期自动闭环
+
+- 在保留既有未提交工作树内容的基础上，只新增导入器隔离集成回归，没有改变 Location evaluator、Party 合同、数据库 schema 或玩家行为。测试从合成 BQ `bq_standard:location` JSON 经 `BqMigrationPlanner`/`BqMigrationDatabaseService` 写入并发布 PostgreSQL 定义，重读后验证 cooldown ticks→毫秒、`QuestObservationPlan.observesLocation()` 及 `factType/dimension/range/invert` 参数。
+- 以 `MinecraftQuestFactFactory.locationObserved` 实际输出形状（`dimension/x/y/z/biome`）构造合成事实；与数据库 Party roster、本服在线成员目录、`BqPartyActiveQuestQuery`、Planner、`BqHuntPartyAssignmentPolicy`、Runtime 和 JDBC 进度/权益完整串接。两名在线成员分别得到 PLAYER cycle 0 完成与可领取权益；原 event id 重放不能再次插入；未领取/领取前冷却不会重开；两人分别领取后使用 PostgreSQL `claimed_at` 锚定相对周期，冷却到期时两人各进入并完成 cycle 1。
+- CodeGraph 改前 `status` up-to-date；`impact LocationTaskEvaluator.evaluate` 指向 evaluator/Core 用例，`impact QuestEngine.evaluate` 覆盖 Runtime 与周期回归，`impact BqMigrationDatabaseService.apply` 指向导入 PostgreSQL 集成；新增测试完成后 `sync` 更新 1 文件/47 nodes，`impact` 命中新集成方法，`affected` 命中 `BqMigrationDatabaseIntegrationTest`。同时静态核实 `MinecraftQuestFactFactory.locationObserved` 字段和 `QuestGameplayEventHandler` 的 100 tick 位置调度；没有声称真实 Forge 对象已测试。
+- 实际验证：`:galaxy-quest-bq-importer:test` 47 项（含 6 个 importer PostgreSQL 集成方法）全执行、0 skipped/failure/error；`:galaxy-quest-core:test` 267 项全执行、0 skipped/failure/error；`QuestPostgresIntegrationTest.bqMeetingObservationUsesDatabasePartyMembershipForPersonalProgress` 1 项全执行、0 skipped/failure/error。共 315 项；`:compileJava :compileTestJava assemble verifyUi2SelfContained` 通过（44 actionable tasks，18 executed、26 up-to-date），最终 `git diff --check` 通过。临时 PostgreSQL 16 使用测试库 `quest_r29_location_test`、512 MiB tmpfs、无宿主卷，仅绑定 `127.0.0.1:55485`；完成后容器已删除并确认端口释放。首次 Gradle 插件解析遇网络超时；只读验证后仅对单次临时构建使用本机 7892 代理变量，没有改系统网络/代理服务。
+- R.2.9 的 Location/Meeting 自动门槛完成；真实 Forge/GTNH 玩家 tick、Entity/World 行为、BQ Party 活跃缓存以及多服投递/领取时序仍 BLOCKED。未读取生产玩家进度或数据库，未执行生产 DDL/部署，未启用 Quest 或停用 BQ，未操作 S1/S2。
+
+### 2026-10-10 - R.2.9 Meeting 合并半径逐 Task AABB 修正（Location 周期链继续中）
+
+- 固定源码对照 `Reference/BetterQuesting/.../TaskMeeting.java:detect/tickTask`：BQ 每 60 个玩家 tick，按单个 Meeting Task 使用 `player.boundingBox.expand(range, range, range)` 查询实体。Base 为避免重复查询会按已发布任务最大半径生成共享快照；此前 evaluator 只验证 `observedRadius >= task.range`，会让小半径 Task 错把大半径快照里的远处实体计入。
+- 最小修复：Minecraft 附近实体事实现在携带观察者和每个注册实体的 AABB 六个边界；Core `MeetingTaskEvaluator` 在共享观察半径大于当前 Task range 时，按 BQ 严格 AABB 相交规则再次筛选实体。几何缺失/非法时不计数；旧的精确半径快照因原采集查询已经等于任务查询范围，仍可按旧事实处理。未改 Party 身份、注册实体匹配、数量/NBT 或服务端任务合同。
+- Core 新增边界回归：远实体被小范围 Task 排除、实体中心略超圆形距离但 AABB 与任务查询盒相交时计入、仅接触面不计入、超范围快照缺失 geometry 时失败闭合。将既有隔离 PostgreSQL Meeting Party 用例扩成 range=4/range=8 两个 Task：最大半径快照先只完成 range=8、不发奖励；第二个实体盒与小范围 AABB 相交后两位 Party 成员各自 PLAYER 进度完成并各有唯一奖励，事实重放为 `DUPLICATE`。
+- CodeGraph：开始 `status` 为 up-to-date；改后显示 4 个待同步文件，`sync` 更新 4 文件/284 nodes。`impact MeetingTaskEvaluator.evaluate` 命中 evaluator 与 Core 测试；`impact MinecraftQuestFactFactory.nearbyEntitiesObserved` 命中 PlayerTick 调度；`affected` 返回 82 个跨项目候选，按直接路径选择 Core evaluator 测试与 `QuestPostgresIntegrationTest.bqMeetingObservationUsesDatabasePartyMembershipForPersonalProgress`。
+- 实际验证：Docker `:galaxy-quest-core:test --tests ...BqCompatibleTaskEvaluatorsTest` 41 项、隔离 PostgreSQL 16 集成用例 1 项，共 42 项实际执行，0 skipped/failure/error；根 `:compileJava :compileTestJava` 通过（22 actionable tasks，5 executed、17 up-to-date）；`:assemble :verifyUi2SelfContained` 通过（29 actionable tasks，6 executed、23 up-to-date）。临时 PG `jgb-r29-meeting-it` 使用 512 MiB tmpfs、无宿主数据卷、仅发布 `127.0.0.1:55484`，结束后已停止自动移除且端口释放。最终 `git diff --check` 通过；未跑全量 root `test`。
+- 同步开发导航、唯一能力矩阵、M.2 行为矩阵与 Docs README。另按 33 个 Location occurrence 的既有只读画像确认当前实际判定只依赖 dimension；本轮没有改 Location evaluator。R.2.9 仍进行中，Location 的导入→Party/PLAYER/JDBC→重复周期回归及 Adapter 事实格式专项验证待做；真实 Forge/GTNH tick、EntityList/NBT 与跨服时序仍 BLOCKED。仅用合成事实与隔离测试数据库；未访问生产玩家进度/数据库、执行生产 DDL/部署、启用 Quest、停用 BQ 或操作 S1/S2。
+
+### 2026-10-10 - R.2.6 在线 PARTY Crafting 个人统计自动闭环
+
+- 按用户确认的合同完成 R.2.6：每个服务端只采样本服在线 PARTY 成员各自的 `objectCraftStats`，为每名玩家提交独立 PLAYER 绝对快照；不把 PARTY 成员或不同服务器计数相加。非消耗物品/流体任务由玩家背包或已接入容器快照自动观察，GT 机器产物不伪造成玩家 crafting 事件；消耗型任务仍要求单独提交。M.2 主体模型未变。
+- 新增 `BqPartyCraftingStatisticsMembers`，根据数据库 PARTY membership 与本服在线玩家目录解析采样名单；无 PARTY 时退化为当前在线玩家，拒绝歧义 membership。`QuestGameplayEventHandler` 对匹配的 craft/smelt/anvil 事件按“在线成员→同 Task 统计目标”顺序读取个人统计，事实保留各自玩家 UUID 和原有幂等键；事件入口捕获异常，统计快照不走 Party 进度 fan-out。观察计划仍过滤不匹配输出。
+- 增加 Core 成员名单/观察计划/evaluator/在线资格回归、根事件分发测试，以及 `QuestPostgresIntegrationTest.bqCraftingStatisticsPersistEachOnlinePartyMembersPersonalSnapshot`：隔离 PostgreSQL 中两个成员的 `[5,2]` 与 `[1,4]` 个人向量保持分离，重放原 fact key 得到 `DUPLICATE`。CodeGraph 开始 `status` 发现 3 added/9 modified；`sync` 纳入 12 文件、665 nodes；完成后针对事件处理、Party active-query/planner 做 `impact`，并对变化文件执行 `affected`（83 个候选，按直接链路收敛到 Core 5 类、根 2 类与 PostgreSQL 集成类）。索引最后一次 sync 更新新集成测试 140 nodes。
+- 最终隔离验证：Core 定向 81 项，根事件分发/失败 4 项，PostgreSQL 个人统计 PARTY 集成 1 项，共 86 项实际执行，0 skipped/failure/error。PG16 容器 `jgb-r26-craft-stats-it` 使用 512 MiB tmpfs、无宿主数据卷，仅绑定 `127.0.0.1:55483`；测试结束后停止并移除，端口已确认释放。Gradle 在 `galaxy-dev:local` 的一次初次组合运行无法清理此前 root-owned 的精确测试报告目录；核实属主后只修复 `galaxy-quest-postgres/build/test-results/test/binary` 生成目录属主，独立重跑通过。最初两个事件用例暴露 null 触发者测试 seam 未调用自定义成员解析器，以及 PARTY/目标遍历顺序与 BQ 源码相反；已修正并复验。
+- 开发导航、唯一能力矩阵、M.2 行为矩阵、Docs README 与本 Worklog 已同步产品合同和状态。当前只完成自动回归与代码路径，不宣称真实 Forge/GTNH 验收、M.2 完成或 BQ 替代；实际 `EntityPlayerMP` 统计文件、各服在线目录/事件时序仍待运行证据。未访问生产玩家进度/数据库、执行生产 DDL/部署、启用 Quest/停用 BQ，也未触碰 S1/S2；`:assemble :verifyUi2SelfContained` 通过（29 actionable tasks，29 executed），`git diff --check` 通过；未运行全量根 `test`、未部署。
+
+### 2026-10-10 - R.2.6 Crafting/Party 回归链复核
+
+- 根据当前能力矩阵继续核对普通产物与统计检测的分流，CodeGraph `explore` 覆盖 `QuestGameplayEventHandler`、`QuestEvaluationPlanner`、`BqPartyActiveQuestQuery`、`QuestRuntimeService`、`RuntimeQuestFactSink`；`impact BqPartyActiveQuestQuery.hasActiveMember` 指向 Planner 与资格测试；`affected` 给出 82 个跨项目候选，按直接调用边界运行 Core 五类与根两类测试。
+- `:galaxy-quest-core:test` 定向运行 `AuthenticatedCraftingStatisticsDetectionServiceTest` 6、`BqCompatibleTaskEvaluatorsTest` 40、`BqPartyActiveQuestQueryTest` 6、`QuestEvaluationPlannerTest` 23、`QuestObservationPlanTest` 7；根 `:test` 运行 `QuestCraftingStatisticsDispatchTest` 2、`QuestGameplayEventHandlerFailureTest` 1。XML 合计 85 项实际执行，0 skipped/failure/error；Gradle 28 actionable tasks，2 executed、26 up-to-date。
+- 这确认现有回归覆盖了 Party 活跃 Quest 在线资格、Crafting Task matcher、统计事实分发及事件失败边界；并不证明真实 Forge 回调、`EntityPlayerMP` 本地统计读取或 BQ 端到端等价。显式检测的 Quest/Task 粒度和 PARTY 统计接收范围仍属未确认产品合同；没有改业务代码、网络或数据库合同。本轮无数据库访问、生产 DDL、部署、Quest 开关或 BQ 停用，M.2 仍 BLOCKED。
+
+### 2026-10-10 - Crafting 普通产物 PARTY 资格与 JDBC 进度回归
+
+- 在不触碰待用户确认的“显式统计检测范围/入口”合同下，补齐 R.2.6 普通 craft 事实的数据库 PARTY 资格链测试：PostgreSQL Party roster + 合成当前服在线目录 + `BqPartyActiveQuestQuery` + Planner/Runtime/JDBC。前置已完成的在线成员获得自己的 PLAYER 任务进度；未解锁的事件来源玩家仍保留 LOCKED 进度；完成奖励权益只归符合资格的成员；进行中的同事实键重放为 `DUPLICATE`。
+- 新增 `QuestPostgresIntegrationTest.bqCraftingEventsUseDatabasePartyEligibilityAndPersistPersonalProgress`。初次测试把“任务完成后重放同事实仍必为 DUPLICATE”设成了过强断言，实际 Planner 在无剩余活动 Quest 时先返回 `IGNORED`；没有据此更改运行时语义，而是将幂等断言移至任务仍进行中的重放，并保留完成后奖励权益仅一条的断言。
+- CodeGraph 起始索引显示该 PostgreSQL 集成文件 1 个待同步修改；最终 `sync` 更新 1 文件、137 nodes；`impact` 与 `affected` 均指向新集成方法/测试类。最终回归使用专用 PostgreSQL 16 Alpine 容器 `jgb-quest-r26-craft-party-final`，数据库 `quest_r26_crafting_party_test`，tmpfs、无数据卷、只绑定 `127.0.0.1:55482`；Gradle 容器未继承 Compose 配置。首次 Gradle 配置因未传代理而在 GTNH 插件请求超时，检查确认本机 7892 正在监听后，仅给本次临时 Gradle 容器设置代理变量并重跑成功；未修改主机代理或网络服务。PostgreSQL 集成方法 1/1、Core `QuestEvaluationPlannerTest` 23/23，0 skipped/failure/error；测试容器已停止移除，端口确认释放，`git diff --check` 通过。
+- 该回归验证 Base 当前普通产物事实 PARTY 路径在合成在线目录下的 JDBC 行为，不调用真实 Forge 事件或 Minecraft 在线玩家目录；不验证 `craft-statistics` 逐 PARTY 成员采集，也不证明完整 BQ 等价。R.2.6 两项产品合同仍待用户确认，R.2.9 Location/Meeting 仍排队；M.2/BQ 替代保持 BLOCKED。未访问生产数据库/玩家进度、未执行生产 DDL/部署、未启用 Quest/停用 BQ，未操作 S1/S2。
+
+### 2026-10-10 - 选择下一长工作包：Location / Meeting 行为兼容
+
+- 对照唯一能力矩阵、M.2 行为矩阵、需求复盘、迁移路线和开发导航后，确认当前仍处于 M.2；R.1 已收口，Crafting 的 Quest 级统计入口与本服在线 PARTY 统计归属仍待产品合同，不能自行变更。
+- 为避免只修一个小点就切换目标，已将 R.2.9 排入后续长工作包：覆盖 S2 `DefaultQuests` 实际存在的 33 个 Location、1 个 Meeting，从固定 BQ 源码到 Base 采集、求值、Party/周期与隔离 PostgreSQL 进度链逐段审计。未出现在实际清单中的 interact 类型不纳入本包；按长期目标顺序，必须先解决 R.2.6 Crafting 合同并收口后才能启动 R.2.9。
+- 已发现的优先回归点是 Meeting 合并最大观察半径后，各 Task 是否仍按自身 BQ bounding-box 范围筛选附近实体；计划中的实现必须复现 BQ 的 AABB 语义，不以实体中心距离近似。Location 仅对当前任务实际使用的维度语义做必要验证，不为结构/视线/Biome 等未使用选项泛化。
+- 预查 CodeGraph：`LocationTaskEvaluator.evaluate` 影响 evaluator 与两条 Core 测试；`MeetingTaskEvaluator.evaluate` 影响 evaluator 与既有 Core Meeting 回归；`QuestGameplayEventHandler.onPlayerTick` 和 `QuestObservationPlan` 为 Minecraft 采集边界。CodeGraph 索引当前可用；实现前仍须对准确的 snapshot/fact 工厂/Planner 调用链执行 `impact/affected`。
+- 本记录仅指定下一工作包，没有改业务代码或测试。实施后要求 Core + Adapter + 隔离 PostgreSQL 导入/进度/周期回归、根构建与自包含门禁；未测试的 Forge/GTNH 事件时序继续标 BLOCKED。无生产数据库/玩家进度访问、生产 DDL、部署或 Quest/BQ 开关变化。
+
+### 2026-10-10 - Crafting shift-craft 数量回退边界对齐
+
+- 固定 BQ `EventHandler.onItemCrafted`/`TaskCrafting.onItemInternal` 源码只对 `InventoryCrafting` 且事件产物 `stackSize == 0` 回查配方；非正回查结果不会推进任务。Base 原先用 `<= 0` 触发回查，可能把负数异常栈量误当有效合成。现改为仅零值触发，并通过包级纯函数隔离回退规则。
+- 新增 `craftingAmountFallbackMatchesBqShiftCraftBoundary`：零数量回查配方、负数和正数直通、无合成矩阵不回查；与既有统计分发测试合计根 `QuestCraftingStatisticsDispatchTest` 2 项通过。
+- CodeGraph `sync` 更新根事件处理器和测试 2 文件、139 nodes；`impact onItemCrafted` 限于 Forge 回调入口，`impact resolveCraftedOutputAmount` 命中新规则与测试；`affected` 给出 20 个 Quest 测试候选，按直接影响选根 Crafting 回归。Docker 构建中 Core 4 个相关类共 87 项测试因前一轮相同输入而 `UP-TO-DATE`（此前该轮均实际执行并通过）；本次根侧重新执行统计分发 2、事件失败边界 1、消费适配 19，共 22 项，0 skipped/failure/error。合并当前源代码下 109 项均通过；`git diff --check` 通过。
+- `:assemble :verifyUi2SelfContained` 通过（29 actionable tasks，6 executed、23 up-to-date）。未连接数据库、未访问玩家进度、未改网络/Party 合同、未部署或触碰生产 Quest 开关。Crafting Quest 级显式检测范围及 PARTY 本服在线成员统计归属仍待用户决定，M.2 状态不变。
+
+### 2026-10-10 - Crafting 统计事件分发回归补齐
+
+- 在不改变 Crafting/Party 语义的前提下，为 `QuestGameplayEventHandler.submitCraftingStatistics` 增加包内可替换的统计事实生成 seam，并新增 `QuestCraftingStatisticsDispatchTest`。回归证明无关产物不会采集或持久化统计；匹配产物只分发同一匹配 Task 的所有统计目标、不带入另一 Task 的目标，并保留 craft/smelt/anvil 渠道。
+- 测试使用合成 `Item` 和确定性属性映射，因为该纯 JUnit 环境未初始化 Minecraft 1.7.10 vanilla `Items` 注册表；因此这验证的是观察计划到事实分发，不是 Forge 事件构造、真实 `ItemStack` 注册名或 `EntityPlayerMP.objectCraftStats` 读取。隔离 `galaxy-dev:local` 执行 `:test --tests com.jsirgalaxybase.modules.quest.infrastructure.minecraft.QuestCraftingStatisticsDispatchTest`：1 项，0 skipped/failure/error。前几轮尝试分别暴露输出 fixture 未得到匹配、测试辅助列表类型不符、vanilla Item 注册表未初始化；改为独立合成 Item 与显式属性映射后通过。
+- 随后联合执行 Core 的 `BqCompatibleTaskEvaluatorsTest` 40、`QuestObservationPlanTest` 7、`QuestEvaluationPlannerTest` 23、`QuestEngineTest` 17，以及根项目 `QuestGameplayEventHandlerFailureTest` 1、`MinecraftPlayerConsumptionPortTest` 19、新分发测试 1；XML 共 108 项，全部执行，0 skipped/failure/error。`:galaxy-quest-core:test :test` 成功。该验证未启动 PostgreSQL，也未跑全量 `assemble`/自包含门禁。
+- CodeGraph `sync` 更新 1 个根事件处理器文件（55 nodes）；`impact submitCraftingStatistics` 命中三个 Forge 回调及新测试，`impact craftingStatisticsForOutput` 命中 Core 观察计划、隔离 JDBC 回归和相关测试；`affected` 给出 20 个 Quest 测试候选，按直接边界选择根分发测试。最终 `git diff --check` 通过。R2.6 的 Quest 级检测入口及 PARTY 在线统计归属仍待用户定合同；没有生产玩家进度/数据库访问、生产 DDL、部署、Quest 开关或 BQ 停用。
+
+### 2026-10-10 - Crafting 兼容 WIP 定向回归复核
+
+- 保护现有未提交 Quest 工作树；CodeGraph `status` 为 up-to-date（索引由较早引擎版本创建）。通过 `explore/node` 复核 `QuestGameplayEventHandler.submitCraftingStatistics`、`MinecraftQuestFactFactory.craftingStatisticObserved`、`QuestObservationPlan.craftingStatisticsForOutput` 与 BQ `TaskCrafting.onItemInternal/detect`；`impact` 与 `affected` 选择了 Core 求值/观察计划测试及根事件失败、消费适配测试。
+- 用不含 Compose `.env`、数据库凭据或 Quest 数据库环境变量的一次性 `galaxy-dev:local` 容器重跑：Core 的 `BqCompatibleTaskEvaluatorsTest` 40、`QuestObservationPlanTest` 7、`QuestEvaluationPlannerTest` 23、`QuestEngineTest` 17；根 `QuestGameplayEventHandlerFailureTest` 1、`MinecraftPlayerConsumptionPortTest` 19。共 107 项，0 skipped/failure/error；Core Gradle 3 项任务、根项目 26 项任务均成功，`git diff --check` 通过。未连接数据库。
+- 覆盖边界仍然明确：R.2.6 的 BQ JSON→合成统计事实→隔离 JDBC 回归不调用真实 Forge `ItemCraftedEvent`、`ItemSmeltedEvent` 或 `AnvilRepairEvent`，也不验证 `EntityPlayerMP` 的 `objectCraftStats` 读取。当前根侧唯一直接命中的 `QuestGameplayEventHandlerFailureTest` 测的是 tick 数据库失败边界，不是 Crafting 事件桥接。Quest 级显式检测范围和 PARTY 成员统计归属仍待用户决定；本轮未改行为、网络、数据库合同或生产开关。
+
+### 2026-10-10 - Crafting 统计事实 PARTY 路由差异确认
+
+- CodeGraph `status` 为 up-to-date；`explore`/`node` 检查 `QuestGameplayEventHandler.submitCraftingStatistics`、`MinecraftQuestFactFactory.craftingStatisticObserved`、`BqPartyTaskProgressScope.isCraftingEvent`、`BqHuntPartyAssignmentPolicy.select`、`QuestEvaluationPlanner.factMembershipFor`，并追踪 `Reference/BetterQuesting/TaskCrafting.detect`。确认普通 craft/smelt/anvil 产物事实和 `craft-statistics` 统计事实走不同分支。
+- BQ `TaskCrafting.detect` 对本服在线 PARTY 成员各自读取本地统计并更新个人进度。Base 统计 fact 由触发事件玩家提供统计值，通道为 `craft-statistics`；该通道不被 PARTY fan-out 识别，因此目前只更新触发玩家的 PLAYER 统计进度。普通产物事实会 Party fan-out，不能据此认为统计值也在队员间逐人采集。
+- 这是现存源码行为与 BQ 的明确差异，不改变实现：统计接收者范围及终端动作粒度仍在等待用户合同选择。更新开发导航、唯一能力矩阵和 M.2 行为矩阵；未改 Java、网络/数据库合同或测试。`git diff --check` 通过。
+
+### 2026-10-10 - Crafting 自动统计跨 Task 隔离回归
+
+- 继续 R.2.6 源码核对，确认 `QuestObservationPlan` 为所有被同一输出触发的 Task 合并所需统计目标；统计事实携带原触发产物/渠道，`ItemVectorTaskEvaluator` 会对每个 Task 再次匹配触发项。因此未发现跨 Task 进度串扰，且无需生产逻辑修改。
+- 新增 `craftingStatisticsFromOneTaskDoNotRefreshAnotherTaskWithoutMatchingTrigger`：含 iron+gold 的 Task 被 iron 产物触发后，可刷新自身 gold 统计；只含 gold 的另一 Task 收到相同统计事实时因原触发项不匹配而保持 0。此行为对应 BQ 对每个 Crafting Task 分别调用 `onItemInternal` 和 `detect`。
+- CodeGraph `status` 起始 up-to-date；`explore` 检查 BQ `TaskCrafting`、Base `QuestObservationPlan.craftingStatisticsForOutput`、`QuestGameplayEventHandler.submitCraftingStatistics`、`ItemVectorTaskEvaluator.evaluate`。改后 `sync` 更新 1 个 Core 测试文件（52 nodes）；`impact ItemVectorTaskEvaluator.evaluate` 覆盖同 Task/跨 Task evaluator 回归，`affected` 精确命中 `BqCompatibleTaskEvaluatorsTest`。
+- `galaxy-dev:local` 执行 `:galaxy-quest-core:test --tests com.jsirgalaxybase.quest.core.BqCompatibleTaskEvaluatorsTest` 成功；XML 为 40 项、0 skipped/failure/error，Gradle 3 actionable tasks，2 executed、1 up-to-date。`git diff --check` 通过。
+- 本轮仅新增 Core 回归与文档，没有生产代码变化；未运行隔离 PostgreSQL、全量 test、assemble 或自包含门禁。Crafting Quest 级入口与本服在线 PARTY 统计归属仍待用户合同选择；未访问生产玩家进度/数据库、执行生产 DDL、部署、启用 Quest、停用 BQ 或操作 S1/S2。
+
+### 2026-10-10 - R.2.8 Hunt 注册实体边界与隔离 JDBC 回归
+
+- 按固定 BQ `Reference/BetterQuesting/src/main/java/bq_standard/tasks/TaskHunt.java:onKilledByPlayer` 和 `bq_standard/handlers/EventHandler.java:onEntityKilled` 核对：BQ 要求目标类可由 `EntityList.stringToClassMapping` 解析，且被击实体有注册 ID；目标或实体注册数据缺失均不增加进度，子类匹配只在有效注册目标下执行。
+- 修复 `MinecraftQuestFactFactory.entityKilled`：未注册的击杀实体不附带父类 aliases，也不尝试写实体 NBT。修复 `SubjectCountTaskEvaluator`：任务目标 subject 或事实 exact subject 缺失/空白时保持现有进度。新增 `huntRejectsMissingTargetAndUnregisteredEntitySubject` 覆盖缺失目标，以及只有已注册父类 alias 的未注册实体事实。
+- CodeGraph 开始前 `status` 为 up-to-date；检查 `QuestGameplayEventHandler.onEntityKilled` → fact factory、`SubjectCountTaskEvaluator.evaluate`、`BqHuntPartyAssignmentPolicy.select` 的调用与影响链。改后同步 Minecraft fact factory、evaluator 与测试文件（133 nodes）；`impact` 覆盖两个被改入口及回归测试，`affected` 对源码返回较宽的跨模块候选集，按直接调用关系补跑 Core evaluator、隔离 PostgreSQL Hunt PARTY/JDBC 集成与根编译。
+- `galaxy-dev:local` 执行 `:galaxy-quest-core:test --tests com.jsirgalaxybase.quest.core.BqCompatibleTaskEvaluatorsTest :compileJava` 成功；测试 XML 为 39 项、0 skipped/failure/error，根 `compileJava` 成功（19 actionable tasks，4 executed、15 up-to-date）。随后仅针对 `QuestPostgresIntegrationTest.concurrentBqHuntFactsUseDatabasePartyMembershipAndCompletePersonalProgress` 运行 1 项隔离 PostgreSQL 测试，0 skipped/failure/error。测试库 `quest_r28_hunt_test` 使用 PostgreSQL 16 Alpine、tmpfs、无宿主数据卷、绑定 `127.0.0.1:55481`；容器已停止并移除，确认端口释放。
+- `git diff --check` 通过。没有运行全量 `test`、`assemble` 或 `verifyUi2SelfContained`；没有真实 Forge `LivingDeathEvent`、FakePlayer/取消事件、GTNH EntityList/NBT 或跨服时序证据，故 Hunt 与 M.2 仍 BLOCKED。没有访问生产玩家进度/数据库、执行生产 DDL、部署、启用 Quest、停用 BQ 或操作 S1/S2。
+
+### 2026-10-10 - R.2.7 block_break 导入与隔离 PostgreSQL 进度回归
+
+- 按固定 BQ 参考源码 `EventHandler.onBlockBreak` / `TaskBlockBreak.onBlockBreak` 核对：顺序匹配需求，首个匹配命中后立即 break；即使该项已达标，后续同类方块仍不会越过它推进后续重叠项。只新增自动回归，不修改生产代码、玩家交互、Party 合同或网络/数据库合同。
+- 新增 `importedBlockBreakPreservesFirstMatchingRequirementOrderInJdbcProgress`：合成 BQ 定义 → importer → 隔离 PostgreSQL 发布 → `BqPartyInventorySnapshotFactSink` → Planner/Runtime → JDBC 进度。验证 `[1,0]`、原事实键重放为 DUPLICATE、第一项达标后同类事实仍为 `[2,0]` 且 Quest 未完成，独立的另一需求后完成为 `[2,1]`。
+- CodeGraph `status/sync` 起始索引干净；核对 `QuestGameplayEventHandler.onBlockBreak` 的 `callees/impact`、`MinecraftQuestFactFactory.blockBroken`、`BlockVectorTaskEvaluator.evaluate`，以及 sink `accept` 的 callers/callees/impact。改后 `sync` 更新测试文件（202 nodes），新测试 `impact` 与 `affected` 均指向 `BqPartyInventorySnapshotFactSinkPostgresTest`。
+- 使用 `galaxy-dev:local` 运行根 `:test --tests com.jsirgalaxybase.modules.quest.infrastructure.minecraft.BqPartyInventorySnapshotFactSinkPostgresTest`（11 项）、`:galaxy-quest-core:test --tests com.jsirgalaxybase.quest.core.BqCompatibleTaskEvaluatorsTest`（38 项）、`:galaxy-quest-bq-importer:test --tests com.jsirgalaxybase.quest.bqimport.BqStandardCodecTest`（5 项），共 54 项，0 skipped/failures/errors。根 Gradle 26 actionable tasks，9 executed、17 up-to-date。数据库为临时 PostgreSQL 16 Alpine，`quest_r27_blockbreak_test`，tmpfs、无数据卷、仅 loopback `127.0.0.1:55480`；测试后已停止并移除容器，确认端口释放。未使用生产数据库凭据或数据。
+- 本轮没有运行全量 `test`、`assemble` 或 `verifyUi2SelfContained`；该集成只使用合成事实，不调用 Forge `BreakEvent`，不证明真实 TileEntity/OreDictionary 注册值、Party 在线资格或 GTNH 时序。block_break 与 M.2 继续 BLOCKED；无生产玩家进度/数据库访问、生产 DDL、部署、Quest 开关、停用 BQ 或 S1/S2 操作。
+
+### 2026-10-10 - R.2.6 Crafting 合成事实到隔离 PostgreSQL 回归
+
+- 在不改变 R.2.6 待确认合同的前提下，新增根项目回归 `importedCraftingOutputRefreshesSameTaskStatisticsAndPersistsAbsoluteProgress`：合成 BQ Crafting JSON → importer → 发布目录/观察计划 → 匹配产物事实 → 同 Task 两个绝对统计目标 → `BqPartyInventorySnapshotFactSink`/Runtime/Planner/JDBC。断言进度 `[1,0] → [4,3] → [4,5]`、单个匹配输出会刷新同 Task 所有统计目标、统计事实按原 event key 去重并最终完成。用单人 membership 明确隔离用例范围；未改变 Forge 接线、Party 统计归属、终端入口或服务端行为。
+- CodeGraph `status` 起始 up-to-date；`explore` 核对 `QuestObservationPlan.craftingStatisticsForOutput`、`QuestGameplayEventHandler.submitCraftingStatistics`、`BqPartyTaskProgressScope.isCraftingEvent`、`ItemVectorTaskEvaluator.evaluate`、`BqStandardCodec.taskParameters`、`QuestEvaluationPlanner.requestsFor` 与 `QuestRuntimeService.apply`。`sync` 更新集成测试（201 nodes）；`impact` 检查观察计划、Planner、Runtime 入口；`affected` 选择该 JDBC 集成类及 Core 观察/求值/Planner 回归。
+- CodeGraph 选择的 Core/Importer/PostgreSQL 模块定向组运行 357 项，44 项因本次未提供数据库配置而 assumption-skip，0 failure/error。根隔离 PostgreSQL 集成类完整运行 10 项，0 skipped/failure/error；新用例单独运行也通过。临时 PostgreSQL 16 Alpine 容器使用 tmpfs、无宿主数据卷、测试库 `quest_r26_crafting_test`、loopback 端口 55479；容器已停止并因 `--rm` 移除，端口已释放。首次回归失败是夹具错误地使用 JDBC Party membership，资格门控挡住了 PLAYER 测试事实；改为显式单人 resolver 后通过。一次中间编译错误为新增测试遗漏 import，已修复。`git diff --check` 通过。
+- 本轮仅新增测试与文档记录；未运行全量根 `test`、`assemble` 或 `verifyUi2SelfContained`，本轮 357 项中的 44 个 skip 不能视作通过，故不能作为完整 M.2 验收证据。合成事实链不证明实际 Forge 回调、Party 统计范围/在线顺序、Quest 级显式动作；这些继续待用户确认/后续验收。M.2/BQ 替代仍 `BLOCKED`。未访问生产数据库/玩家进度、执行生产 DDL/部署、启用 Quest、停用 BQ 或操作 S1/S2。
+
+### 2026-10-10 - R.2.6 合成统计事实按匹配 Task 采集
+
+- 按现有 BQ 合同收口一个纯噪声路径：产物事件只会使匹配当前 Crafting Task 的 BQ `onItemInternal` 进入该 Task 的统计 `detect`。Base 原先对所有已发布统计目标读取 `objectCraftStats` 并生成事实，再由 evaluator 拒绝与触发产物无关的事实；现在由 `QuestObservationPlan` 复用 `ItemVectorTaskEvaluator` 的物品与渠道 matcher，在读取玩家统计前筛出被触发的任务目标。无关输出不会读取统计或入队；匹配输出仍刷新该任务所有已启用的统计目标，PLAYER/PARTY 归属与 UI 动作未改。
+- `MinecraftQuestFactFactory.itemProducedAttributes` 与正式产物事实共享注册名、meta、damageable、OreDictionary、NBT、数量和渠道属性，避免筛选与后续 evaluator 使用不同的物品描述。Core 测试覆盖：匹配目标可带出同 Task 的其它统计目标、无关目标返回空、禁用渠道不触发。
+- CodeGraph 起始 `status` 提示 2 个待同步文件；先同步此前改动，`explore` 核对观察计划、产出事件、统计 evaluator 调用链。完成本轮主要代码后 `sync` 更新 3 个文件（161 nodes）；将 matcher 实例改为静态复用后再同步 1 个文件（43 nodes）。`impact` 检查 `craftingStatisticsForOutput`、`matchesCraftingStatisticsTrigger`、`submitCraftingStatistics`、`itemProducedAttributes`；`affected` 返回 81 个跨模块候选，按直接边界选择 `QuestObservationPlanTest`、`BqCompatibleTaskEvaluatorsTest` 与根项目 Java 编译。最终 CodeGraph status 为 up-to-date。
+- 项目缓存 Gradle 9.3.1 离线执行 `:galaxy-quest-core:test` 的两个测试类：`QuestObservationPlanTest` 7 项、`BqCompatibleTaskEvaluatorsTest` 38 项，共 45 项，0 skipped/failure/error。Docker 首次 `compileJava` 因 convention 插件网络超时未进入编译；只读确认本机 7892 代理监听后，在一次性 `docker run` 环境变量中设置代理并重跑根 `compileJava`，通过（19 actionable tasks，7 executed、12 up-to-date）。未修改系统代理、Compose、远程访问服务或防火墙；本轮未运行隔离 PostgreSQL、assemble、自包含门禁或全量 test。`git diff --check` 在文档更新后另行执行。
+- 尚未完成 Crafting 的事件→隔离 PostgreSQL 进度闭环；本轮仅验证筛选与 Core 行为。显式检测仍按单 Task/认证玩家，Quest 聚合入口及 PARTY 本服在线成员统计范围仍待产品合同确认；真实 Forge/GTNH 事件和在线顺序未验收。M.2 与 BQ 替代继续 `BLOCKED`。无生产玩家进度/数据库读取、生产 DDL、部署、Quest 开关或 BQ 停用，也未操作 S1/S2。
+
+### 2026-10-09 - BQ M.2 Crafting 自动统计复评语义回归
+
+- 补充核对固定 BQ `TaskCrafting`：`onItemCraft`、`onItemSmelt`、`onItemAnvil` 均进入 `onItemInternal`；只有输出匹配当前 Task 并推进进度后，才调用同一个 Task 的 `detect`。该检测会刷新该 Task 的其他统计型未完成目标；完全无关输出不会触发。修正 R2.6 旧文字中“BQ 只在显式 Quest Detect 回填统计”的错误理解。显式 Quest Detect 仍是另一条 Quest 级入口。
+- Base 现有 evaluator 已按触发输出匹配当前 Task 的任一目标及渠道筛选绝对统计快照。本轮新增 `craftingStatisticsRefreshOtherRequirementsAfterMatchingOutputInSameTask`，验证 craft/smelt/anvil 任一匹配目标事件都允许另一目标的统计快照更新；既有单目标无关输出拒绝测试继续覆盖负例。没有修改生产逻辑、UI、网络载荷或 PARTY 归属。
+- CodeGraph 改前 `status` 为 up-to-date；`explore` 检查 `ItemVectorTaskEvaluator`、`TaskCrafting`、`QuestGameplayEventHandler`、观察计划与统计事实入口。改后 `sync` 更新 1 个测试文件（50 nodes）；`impact ItemVectorTaskEvaluator.evaluate` 为 11 个符号，`affected` 命中 `BqCompatibleTaskEvaluatorsTest`。
+- 定向 `:galaxy-quest-core:test --tests com.jsirgalaxybase.quest.core.BqCompatibleTaskEvaluatorsTest --offline` 最终 38 项，0 skipped/failure/error。初次尝试 Wrapper 发行包在线下载超时；改用项目缓存内 Gradle 9.3.1 主机离线执行成功。首轮新测试 fixture 漏设 `progressMode=item-vector` 导致宽度异常，修正 fixture 后整类通过。此前 Core/Importer 测试未受生产源码影响；R2.6 当前不同定向覆盖为 82 项（历史 81 项加新回归）。
+- 开发导航、能力矩阵与 M.2 行为矩阵已同步修正自动统计语义并记录证据。当前 `BqCompatibleTaskEvaluatorsTest` XML 为 38 项，0 skipped/failure/error；最终 `git diff --check` 通过。尚未确定显式检测的统计范围（认证玩家或本服在线 PARTY）及终端动作粒度（单 Task 或 Quest 级仅统计）；R2.6 与整体 M.2 仍 `BLOCKED`。未访问玩家进度/生产数据库、未执行 DDL/部署/Quest 开关、未停用 BQ，未操作 S1/S2 服务。
+
+### 2026-10-09 - BQ M.2 R2.6 Crafting 统计检测与 PARTY 范围源码审计
+
+- 按固定 BQ 源码复核 `NetQuestAction.detectQuest` → `QuestInstance.detect` → `TaskCrafting.detect`，并用 CodeGraph 检查 Base 的 `AuthenticatedCraftingStatisticsDetectionService.detect`、`QuestGameplayEventHandler.submitCraftingStatistics`、`ItemVectorTaskEvaluator.statisticsDetectionAllowed`、`BqPartyTaskProgressScope.isCraftingEvent`、`BqPartyActiveQuestQuery.isActiveFor` 与 `QuestModule.createPartyActivityQuery`。当前 S2 `DefaultQuests` 只读清点复核摘要 hash `9795d6c7fe71e72e91fed8cdc3dea632ab091ccf040e71707d2dd0d90cd355fc`、3,744 个任务、47 章、3,847 个放置；133 个 Crafting 中 `allowCraftedFromStatistics=true` 为 6、false 为 127。输出经筛选，不含任务身份、物品内容或玩家进度。
+- 确认 BQ 显式 Detect 是 Quest 级、遍历未完成 Tasks；Crafting 统计对 `ALL_UUIDS` 成员逐人更新 PLAYER 进度，但只读取当前服务器在线成员的 `objectCraftStats`，匹配仅按 Item ID。Base 显式按钮/服务仍是认证玩家单 Task；Base 直接 Crafting 事件已用在线 PARTY active-query 过滤，不能沿用旧文档所说“尚无在线资格查询”。Base 现于每次产出事件提交统计观察快照，再由 evaluator 根据触发 Item 与渠道筛选；BQ 只在 Quest Detect 调用链中回填统计。后续若改 Quest 级入口，只应聚合统计型 Crafting Task，不调用会触发 Retrieval/Fluid 消耗的泛化任务检测。
+- 更新唯一能力矩阵、开发导航、M.2 行为矩阵与 Docs README，明确修正旧状态并新增 R2.6 决策门。统计范围与入口选择已向用户询问；答案未到前不改玩家交互、网络载荷、归属或自动刷新行为。
+- CodeGraph `impact AuthenticatedCraftingStatisticsDetectionService.detect` 仅返回目标方法（调用通过终端动作桥动态接线）；`impact BqPartyActiveQuestQuery.hasActiveMember` 覆盖 8 个符号；`affected` 对 Core/Planner 返回 60 个候选，人工收敛到直接回归。Core `AuthenticatedCraftingStatisticsDetectionServiceTest` 6、`BqCompatibleTaskEvaluatorsTest` 37、`BqPartyActiveQuestQueryTest` 6、`QuestEvaluationPlannerTest` 23，Importer `BqBehaviorInventoryTest` 9，共 81 项，均执行、0 skipped/failure/error。Docker 离线清点首次因容器 `/workspace` Git safe-directory 校验及网络隔离未到达分析任务；随后以主机 JDK 17.0.20.1、项目 Gradle 缓存离线运行成功。`git diff --check` 通过；本轮没有改 Java、数据库或玩法，未执行 assemble/self-contained。
+- R.2.6 仍“实施待合同确认”，M.2 与 BQ 替代仍 `BLOCKED`。无生产数据库/玩家进度访问、DDL、部署、Quest 开关或 BQ 停用。
+
+### 2026-10-09 - BQ M.2 R2.5 非消耗 Fluid 快照与 PARTY 兼容
+
+- 先按固定 BQ `TaskFluid.detect` 对照非消耗语义：每个需求独立读取同一份未排出库存；`groupDetect=false` 锁存已完成分量并重算未完成分量，`true` 重算所有未完成分量；Task 完成后锁存。修复 Core Fluid evaluator 将同一流体量跨需求共享扣减的错误，并使非消耗快照的组重算规则与 BQ 一致。
+- PARTY 接线复用现有 PostgreSQL inventory session lease：Fluid-only 任务也启用 lease；Item/Fluid 属性合并存放，避免单域刷新覆盖另一域；party 聚合只读取有效期内成员快照，随后由现有 PARTY 事实 fan-out 为每位成员写入独立 PLAYER 进度。限制只有带匹配 BQ 导入标记的非消耗 Fluid 才接受 party aggregate。
+- 根 JDBC 回归先失败并定位到 `QuestEngine`：Fluid evaluator 的绝对值被通用进度 `max(old, observed)` 再次改成只增不减。将仅作用于非消耗 `bq_standard:fluid`/对应 factType 的快照分支接入既有组重算逻辑；consuming Fluid 与其他任务事件归约不变。修复后回归证明 fresh party sum `900 → 700 mB`、过期成员排除、成员进度扇出和完成。另一次早期 Core 测试失败是合成 importer fixture 漏填必需 `factType`，补齐测试输入后通过。
+- 新增/调整 Core evaluator、QuestEngine、ObservationPlan、Fluid attribute codec 测试与根 `BqPartyInventorySnapshotFactSinkPostgresTest`。CodeGraph 起始索引同步；`impact FluidSnapshotTaskEvaluator.evaluate` 7 个关联符号、`BqPartyInventorySnapshotFactSink.publishPartyAggregate` 4 个、`QuestEngine.isNonConsumingSnapshotTask` 3 个；`affected` 命中相关 Core 与根 PostgreSQL 回归。最终 `sync/status` 显示索引 up-to-date。
+- Docker Gradle 完整 `:galaxy-quest-core:test` 257 项、`:galaxy-quest-postgres:test` 52 项、`:galaxy-quest-bq-importer:test` 46 项，根隔离 `:test --tests ...BqPartyInventorySnapshotFactSinkPostgresTest` 9 项，共 364 项全部执行，0 skipped/failure/error。`:assemble :verifyUi2SelfContained` 成功；`git diff --check` 通过。Gradle 发行版最初挂载到空缓存造成慢速下载，停止该次下载后改挂载项目专用缓存，没有清理缓存。
+- PostgreSQL 16 测试库 `quest_runtime_test` 运行在 `jgb-r25-quest-it` 临时容器，tmpfs、无宿主卷，仅绑定 `127.0.0.1:55432`，使用合成玩家/任务。验收后容器随停止自动删除，确认容器与端口均不存在。未访问生产 DB/真实玩家进度，未执行生产 DDL/迁移、部署、Quest 开关或停用 BQ。真实 Forge/GTNH 容器、跨服在线资格与时序未验收；R2.5 仅关闭自动兼容回归，M.2 与 BQ 替代继续 `BLOCKED`。
+
+### 2026-10-09 - BQ M.2 R2.4 consuming Fluid 手动提交闭环
+
+- CodeGraph `status` 起始为 up-to-date；对照固定参考 `TaskFluid`、`TileSubmitStation` 与 Base importer `appendFluids`、`ConsumptionRequestAuthorizer.authorize`、`MinecraftPlayerConsumptionPort.planFluidsDetailed`、`ForgeQuestFluidContainerAdapter`、`ConsumptionSubmissionService.process`。改后 `sync` 2 个测试文件（253 nodes）；`impact` 检查流体规划和提交恢复链，`affected` 返回 52 个候选，再人工收敛到容器规划器和根 PARTY/JDBC 集成回归。
+- 仅新增自动回归，不改生产逻辑/服务端合同。根隔离 PostgreSQL 用合成 BQ Fluid JSON 验证 400 mB 部分提交、玩家 marker 已应用但 PG 状态仍 `PREPARED` 时 `resume` 恢复且不重复排流；随后不可分割 750 mB 容器针对剩余 600 mB 整份排出但只将 600 记入向量，JDBC 总进度到 1,000 并完成，重复请求不重复消费。既有单测另验证 Fluid Name 精确匹配、无 Tag 与空 Tag 精确区分、选中栈最多一个容器、部分量和空容器放不回时拒绝且源库存不变。保留 BQ 会把不可分割容器实际排出量全计入进度而 Base 按剩余目标封顶的已知差异；无槽时 Base 拒绝与 BQ 输出槽/掉落也不宣称相同。
+- Docker Gradle 实际 XML：Core 251、Postgres 52、Importer 46、根 `MinecraftPlayerConsumptionPortTest` 19、根 `BqPartyInventorySnapshotFactSinkPostgresTest` 8，共 376 项，0 skipped/failure/error。`:assemble :verifyUi2SelfContained` 成功；最终 `git diff --check` 通过。首次未限定的 `test --tests` 将类过滤传播给所有子项目并因无匹配而失败，没有构成测试结果；显式使用 `:test` 后跑过。新增集成用例首轮因直接在 JDBC transaction 外调用 authorizer 而失败，按生产事务边界修正后两目标根类全通过。构建有既有 Java 8 source/target 过时警告。
+- 测试 PostgreSQL 16 `jgb-r24-quest-it` 使用 tmpfs、无宿主卷、只发布到 `127.0.0.1:5433`，专用网络 `jgb-r24-testnet`；验收后清理容器与网络。未访问生产数据库/玩家进度、执行生产 DDL、部署、启用 Quest 或停用 BQ。R2.4 是合成 adapter/JDBC 自动闭环，不证明真实 GTNH 容器、EntityPlayer 持久化或玩家崩溃恢复；M.2 与 BQ 替代仍 `BLOCKED`。
+
+### 2026-10-09 - BQ M.2 R2.3 手动 Retrieval 部分提交语义
+
+- CodeGraph `status` 确认索引同步；`explore` 与节点/影响查询检查 UI `QuestCenterVisualDocument.detail` → `TerminalQuestCenterDocument.QuestActionsBridge` → `TerminalService` → 服务端捕获热键栏栈 → `ConsumptionRequestAuthorizer` → `ConsumptionSubmissionService` → `MinecraftPlayerConsumptionPort.planItems`。`impact` 覆盖 `planItems` 的消费适配及 `process` 的提交/恢复链；`affected` 将新增回归落到根 `BqPartyInventorySnapshotFactSinkPostgresTest`。
+- 固定 BQ 源码 `TaskRetrieval.detect`、`TaskRetrieval.submitItem`、`TileSubmitStation.updateEntity` 对照：Quest Detect 顺序扫描完整玩家库存并消费实际命中量；SubmitStation 每次处理一个至多 64 件的输入栈，10 tick 间隔调用提交。Base 当前终端分别提供“全库存匹配项”与“当前服务器捕获热键栏栈”两条动作。保留现有玩家入口与服务端授权合同，不模拟站台方块或节奏。
+- 新增根隔离 PostgreSQL 测试 `importedHeldStackSplitsAcrossOverlappingRetrievalRequirementsAndProjectsActualAmounts`：导入两个重叠 NBT Retrieval 需求（各 4 件），选中 7 件栈经生产匹配器得到 `[4,3]`，未选中栈保持 64 件；下一提交仅扣 1 件得到 `[0,1]` 并完成，重复提交不再扣除。没有改生产逻辑或可见交互合同。
+- 实际测试报告：根 Party/JDBC 测试类 7 项、Core `ConsumptionSubmissionServiceTest` 5 项、根 BQ consumption importer / Minecraft port 测试 19 项，共 31 项，均执行、0 skipped/failure/error。`:assemble verifyUi2SelfContained` 成功（39 actionable tasks，1 executed、38 up-to-date）；`git diff --check` 通过。初次重编译仅发现 NBT `copy()` 返回 `NBTBase`，在测试中显式转换为 `NBTTagCompound` 后通过。
+- 测试 PostgreSQL 16 `jgb-r23-quest-it` 使用 tmpfs、无宿主卷、只绑定 `127.0.0.1:5433`，验收后容器与 `jgb-r23-testnet` 网络均已移除。未访问生产玩家进度/数据库、执行生产 DDL、部署或更改 Quest/BQ 开关。31 项自动证据不等价于真实 GTNH ItemStack、SubmitStation、多服队伍/恢复或 BQ 整体兼容；M.2 仍 BLOCKED。下一窄批 R2.4 验证唯一 consuming Fluid 手动提交的 importer→授权→适配→JDBC/恢复链。
+
+### 2026-10-09 - BQ M.2 R2.2 导入、库存观察与消费恢复闭环
+
+- CodeGraph `status` 发现根集成测试文件有 1 个待同步变更，`sync` 更新 176 nodes。检查 `BqPartyInventorySnapshotFactSink.accept`（`impact` 9 个符号）、`QuestRuntimeService.apply`（25）、`ConsumptionSubmissionService.process`（12）、`MinecraftPlayerConsumptionPort.planItems`（6）；改后 `affected` 指向根 `BqPartyInventorySnapshotFactSinkPostgresTest`。调用链覆盖 Party 快照、事实投影、提交恢复及消费适配器，不因静态图结果替代人工范围判断。
+- 补两条根 PostgreSQL 集成回归。其一将合成 BQ 非消耗 Retrieval JSON 经 importer 发布，再由生产 Party 库存快照 sink、Runtime、planner 和 JDBC 仓储验证当前成员分别累积库存进度并完成。其二将合成 consuming Retrieval 经授权与生产 `MinecraftPlayerConsumptionPort.planItems` 匹配精确 meta/NBT；故意让事实投影暂不可用，验证提交先持久化 `APPLIED`，随后 `resume` 不重扣物品而只完成一次 JDBC 进度，确认后的重复提交仍幂等。测试端口和在线库存为合成替身，不宣称真实 `EntityPlayerMP`/GTNH 行为；本轮无生产行为代码或玩家可见合同变化。
+- 使用一次性 `jgb-r22-quest-it` PostgreSQL 16 容器，数据库仅绑定 `127.0.0.1:5433`、数据目录 tmpfs、无宿主数据卷，并显式设置 `QUEST_TEST_POSTGRES_ISOLATED=true`。实际测试 XML：Core 251、Postgres 52、Importer 46、根 Quest 相关测试 25，共 374；全部执行，0 skipped/failure/error。`:assemble verifyUi2SelfContained` 成功，39 actionable tasks（10 executed、29 up-to-date）。编译仅有 Java 8 source/target 过时警告，无构建失败。
+- `git diff --check` 通过。验收结束后已移除本轮临时数据库容器与专用网络；未连接生产数据库、读取玩家进度、执行生产 DDL、部署、启用 Quest 或停用 BQ。R2.2 只证明合成数据下的跨层数据库链与 APPLIED 恢复可自动回归，不证明真实 Forge/GTNH 背包、SubmitStation、多服切换、玩家崩溃恢复或奖励物理投递。能力矩阵与导航更新为 R2.2 自动验收完成、M.2/BQ 替代仍 BLOCKED；下一窄批 R2.3 只对照现有合同内的手动 Retrieval 提交语义，若需改变提交入口/扣除/进度/奖励合同须先征求用户决定。
+
+### 2026-10-09 - BQ M.2 R2.1 Retrieval 匹配与库存分配复核
+
+- CodeGraph `status` 确认索引 up-to-date；`explore`、`callers/callees`、`impact` 检查 `InventorySnapshotTaskEvaluator.evaluate` 与 `MinecraftPlayerConsumptionPort.planItems`，`affected` 收敛到 Core evaluator 测试以及根消费/导入适配回归。固定参考源码为 `Reference/BetterQuesting/src/main/java/bq_standard/tasks/TaskRetrieval.java`、`TaskOptionalRetrieval.java` 与 `betterquesting/api/utils/ItemComparison.java`。
+- 对照 BQ 按槽位顺序、再按定义需求顺序分配匹配数量的算法；核验 Base 编码保留库存首见顺序，NBT compound 子集比较、OreDictionary 比较方向、damageable 元数据规则，以及列表/数组匹配复用差异。没有发现需要改生产 evaluator 的可复现差异。
+- 仅新增 Core 回归 `retrievalKeepsBqSlotOrderWhenOverlappingNbtRequirementsCompeteForStacks`：构造宽/窄重叠 NBT 需求，分别交换物品观察顺序，经 `InventoryObservationAttributeCodec` 验证 `[1,0]` 与 `[1,1]` 的分配结果，固定槽位顺序语义。已有手动消费适配回归仍验证相应匹配计划；BQ SubmitStation 与 Base hotbar 提交入口的产品差异不在本轮更改范围。
+- Docker Gradle XML：完整 `:galaxy-quest-core:test` 251 项；Importer 选定 `BqQuestDefinitionImporterTest`、`BqStandardCodecTest` 9 项；根项目选定 `BqConsumingRetrievalImportTest`、`MinecraftPlayerConsumptionPortTest` 19 项；合计 279 项，0 skipped/failure/error。新增测试首轮因 fixture 未声明 `item-vector` 失败，修复测试输入后复跑通过。`:assemble :verifyUi2SelfContained` 成功（29 actionable tasks，6 executed、23 up-to-date），`git diff --check` 通过。构建首轮在插件解析阶段因容器未使用本机代理超时；经只读确认 7892 代理监听且可达后，仅在一次性 host-network 开发容器设置临时 HTTP/Java 代理，重跑成功，未改系统网络或代理服务。
+- 本批没有生产代码改写、数据库连接/DDL、玩家进度读取、部署、Quest 开关或 BQ 状态变化。离线算法回归不代表 Forge/GTNH 背包、NBT 注册表、SubmitStation、多服时序已签收；M.2/BQ 替代仍 `BLOCKED`。下一小批 R2.2 先审计“导入定义→事实→Runtime/JDBC”与手动消费调用链的既有覆盖，再只补可复现测试缺口，使用显式隔离临时数据库。
+
+### 2026-10-09 - BQ M.2 R1-04 候选索引与可靠性收口
+
+- CodeGraph `status/sync` 确认索引同步；检查 `QuestEvaluationPlanner.requestsFor`、`JdbcQuestDefinitionRepository.findAllPublished/currentRevision`、`QuestModule.createGameplayEventHandler` 的 callers/callees/impact。改后影响覆盖 Core Planner、Runtime、Postgres 定义仓储、Importer 和周期复评；`affected` 候选较宽，按实际入口选择 Core、Postgres、Importer、Quest 根集成与全量 UI2/Mod 测试。
+- 发布定义不再按每个库存事实完整扫描/解码：PostgreSQL revision 行由与发布目录同事务的触发器递增；共享 `RevisionAwarePublishedQuestCatalog` 每次先读取轻量 revision，仅变化时重载不可变目录。Planner 对单个目录快照建立按事实类型、目标 Quest、前置 Quest 和锁定进度 ID 的候选索引。成员、完成前置、活动 PARTY 资格和 repeat 周期仍实时求值；数据库 revision 读取失败时不使用旧目录继续规划。
+- 回归覆盖 2,501 个定义中仅选择 1 个匹配候选、目录每 revision 只加载一次、revision 更新与故障、前置索引刷新、repeat 冷却后重新检测，以及 PostgreSQL publish/retire 与迁移升级。新增 `ops/sql/migrations/20261009_001_add_quest_definition_catalog_revision.sql`；只在隔离测试库执行迁移升级，没有生产 DDL。
+- CodeGraph 改后 `impact QuestEvaluationPlanner`、`QuestEvaluationCandidateIndex`、`JdbcQuestDefinitionRepository` 与事件入口；`affected` 选测范围包括 98 个跨项目候选，人工收敛至 Quest Core/Postgres/Importer/根 PARTY JDBC 测试及全量测试，不以 CodeGraph 自动选择结果替代调用链判断。
+- 隔离 PostgreSQL 模块测试：Core 250、Postgres 52、Importer 46，共 348 项，全部运行且 0 failure/error/skipped；根 PARTY JDBC 4 项也在新建的无卷临时 PostgreSQL 上通过。全量 XML 共 991 项、935 执行、56 assumption-skip、0 failure/error：48 项缺其它业务 PostgreSQL 测试配置，4 项 Quest PARTY JDBC 用例因全量运行未设隔离库（单独实跑通过），4 项 Warehouse JDBC 用例缺 `JGB_BANKING_IT_*` 配置。首次全量任务因 Docker 开发镜像未挂载 CJK 预览字体失败；只读挂载宿主字体并设置 `UI2_PREVIEW_FONT` 后 `test assemble verifyUi2SelfContained` 成功，字体未复制入仓库或 JAR。
+- R.1 的 R1-01～R1-05 仅此可靠性子批次自动验收完成。新增 revision migration 尚未应用生产；生产迁移、Quest 开关、停用 BQ、玩家进度访问、部署均未做。M.2 的 BQ 行为等价、奖励崩溃策略、玩家迁移、实时影子和正式切换仍为 BLOCKED。下个窄工作包按导航进入 R.2.1：固定 BQ 源码对照高频背包匹配与库存分配，先锁定可复现差异，不改玩家可见合同。
+
+### 2026-10-09 - BQ M.2 可靠性 R1-01～R1-03
+
+- CodeGraph `status/sync` 更新 4 个 Java 文件；检查 `impact QuestGameplayEventHandler.onServerTick`、`QuestGameplayEventHandler.submitInventorySession`、`OrderedQuestFactRetryQueue.retry`，调用链覆盖周期 tick、登录会话首快照和 FIFO 重试。`affected` 返回 47 个跨项目候选，范围过宽；据直接调用/归属手动执行 Core、Postgres、Importer 和根 Quest 定向测试。
+- R1-01：Postgres、BQ Importer、根 PARTY 快照集成测试都需要显式隔离标记及 `_test`/`_it` 数据库名；移除 `galaxy-base`、`POSTGRES_DB` 默认回退。未设置 URL 时按条件跳过；显式配置的隔离库不可达或凭据错误则失败。三个 PostgreSQL 集成范围本轮在无数据卷临时容器 `jgb-quest-r1-it` / `quest_runtime_test` 上运行，未连接 `galaxy-base`。
+- R1-02：玩家锁定进度复评的 `RuntimeException` 在事件处理边界记录并吞止，不逃出服务器 tick；下一个既有周期仍可再次尝试。注入首轮故障、次轮恢复的测试通过；未添加后台线程、持久重试或更改资格/奖励逻辑。
+- R1-03：普通 GameplayFact 和登录 `beginInventorySession` 均进入有序队列，原始不可变事实及幂等键、投递操作类型不变。队列限 1,024 条且估算持有量 8 MiB，每 20 个 END tick 最多重试 32 条；满限拒绝最新并记录，永久失败阻塞队首。关服日志记录未提交/溢出后清空；进程崩溃不可恢复，队列非 WAL/outbox，崩溃或拒绝事实仍可能丢失。已测 FIFO、操作保留、幂等键、重试预算、条数/估算字节上限与关服清理。
+- Docker Gradle：`:galaxy-quest-core:test` 244、`:galaxy-quest-postgres:test` 49、`:galaxy-quest-bq-importer:test` 46、根 `:test` 指定 4 个 Quest 测试类 12 项，合计 351 项，0 failure/error/skipped；Postgres 49 与 Importer 46 以及 PARTY JDBC 测试实际使用隔离临时 DB。`:assemble`、`:verifyUi2SelfContained`、`git diff --check` 通过。临时容器在验收后停止并自动移除；未挂载或读取生产进度，未执行生产 DDL、部署、启用 Quest 或停用 BQ。
+- 过程异常如实记录：首轮根测试启动遇到既有 `build/test-results` 由 root 所有导致 UID 1000 无法访问，修正的仅是该生成目录权限；首轮新增重试测试把故障注入在初次入队而非重试阶段，调整 fixture 后全套重跑通过。最终测试报告 0 跳过，不把 Gradle 任务级 `SKIPPED` 误计作测试。
+- 导航与权威矩阵已记录 R1-01～03 自动验收完成，R1-04 未开始、R1-05 仅本子批次验收完成；M.2 与 BetterQuesting 替代仍 `BLOCKED`。没有将本批可靠性修复表述为行为完全等价或替代完成。
+
+### 2026-10-09 - 代码职责与文档开发入口整理
+
+- CodeGraph status/sync、QuestModule/ConsumptionSubmissionService/TerminalQuestCenterSnapshotMapper 符号查询核对现有入口；按 Core、JDBC、Minecraft Adapter、UI2、Importer 和参考源码建立代码导航。没有为整理而搬移文件、删除 evaluator 或重写业务。
+- 新增统一开发导航，明确需求/状态/实施/行为证据文档分工，固定 R1-01 至 R1-05 工作包、验收条件、后续背包主链边界与变更证据要求。README 和能力矩阵指向导航。
+- 修正路线“没有可执行迁移批次”和交接“应先完成 M.1/待本轮提交”的冲突口径，保留历史背景并说明当前 M.2。未把 311 项环境测试冒充全量行为验收，未重跑测试、部署或访问数据库。仅文档改动，检查本地链接及 diff 空白。
+
+### 2026-10-09 - BQ 替代需求与路线复盘
+
+- 核对 9 月 8 日平台设计、能力矩阵、9 月 17 日路线/交接及当前 BQ/Base 源码。纠正上一轮“应保留 BQ 运行时只换数据库”的泛化建议：既定需求仍是 Base 自包含、PostgreSQL 真源、终端替代任务书、吸收成熟行为，暂停新玩法。方向不推翻，实施顺序收紧。
+- CodeGraph status/sync 更新一个文件，通过 explore 复核当前求值/领取结构；本地参考 TaskRetrieval.detect 与 QuestInstance.claimReward 明确库存规则可剪裁，而单例进度和先奖励后 claimed 不能直接沿用。下一顺序：隔离验证与可靠性 → 背包到领奖 → 实际 Task/Reward → 原 M.3–M.6。
+- 当前 HEAD 6e80f68，已存在累计兼容提交，不能沿用旧“待统一提交”。相关五项风险路径本轮仍可定位，但未进行故障或性能复现。新增需求复盘文档并链接权威矩阵；无业务修改、测试重跑、数据库或部署操作。diff 空白检查单独执行。
+
 ### 2026-10-06 - 使用本地 7892 代理完成 Docker 构建验证
 
 - 实测 HTTP 代理 `127.0.0.1:7892` 正常访问 GitHub raw 与 Docker Registry（Registry 401 为正常认证响应）。仅在临时开发容器配置代理，不改 daemon、系统网络、远控或生产 Compose。
@@ -4399,7 +4983,7 @@
   用真实 GTNH 任务书证明行为等价。发现的 S2 和客户端 `DefaultQuests` 属运行目录，本轮未读取；已向用户索取
   明确的只读副本路径。
 - 新增 `BqBehaviorInventory`：只接受调用方提供的迁移清单，按实际使用次数降序输出 Task/Reward 类型、参数键
-  频率、关键行为开关真假分布、至多三个任务 UUID 和来源哈希。行为状态默认 `BLOCKED`，未知类型为 `UNKNOWN`；离线 inventory 命令
+  频率、关键行为开关真假分布和来源哈希。最初实现曾保留最多三个任务 UUID；2026-10-11 已删除该身份样本及盘点入口的逐 Quest 输出，当前行为画像只输出匿名聚合。行为状态默认 `BLOCKED`，未知类型为 `UNKNOWN`；离线 inventory 命令
   明确区分行为结论与旧 `ADAPTED` 内容解析结论。
 - 修复通用编辑器参数错误未传递到逐元素兼容矩阵的问题：`INVALID_ELEMENT_PARAMETER` 对应的 Task/Reward
   现在会显示 `BLOCKED`，新增回归断言。
@@ -4779,3 +5363,252 @@
 - 增加 Core evaluator 对 metadata、OreDictionary、partial NBT、每事件只推进首个需求的测试，以及 importer 的 block vector/目标/portable NBT 映射测试。CodeGraph 改前 impact：evaluator 14、事实工厂 53、事件入口 34 个符号；改后 sync 4 个文件/138 nodes，索引 1,109 files/30,110 nodes/81,853 edges，`affected` 选中两个对应测试类。
 - Docker 隔离开发容器：`:galaxy-quest-core:test` 244/244；`:galaxy-quest-bq-importer:test` 44 项、5 项因无隔离 PostgreSQL 环境而 assumption-skip，0 failure/error。测试 setup 曾继承 Compose 的 PostgreSQL 环境变量并在认证阶段拒绝连接，失败发生在测试 setup 获取连接阶段、没有创建 schema/执行 DDL；随后显式 unset `POSTGRES_USER/PASSWORD/DB/HOST` 并 `--rerun-tasks`，安全重跑通过，5 项数据库集成明确跳过。根 `compileJava compileTestJava --offline --no-configuration-cache` 通过；配置缓存模式曾因现有 `prepareUi2QzLicense` task 闭包不可序列化报错，禁用配置缓存后构建成功。以后需用隔离数据库显式跑这些 PostgreSQL 集成测试，不能从 `galaxy-dev` 的 `.env` 继承连接配置。
 - 行为仍 `BLOCKED`：纯 evaluator/importer 测试不覆盖 Forge/GTNH BreakEvent、实际 TileEntity/OreDictionary、持久化 Party fan-out 与 BQ `ALL_UUIDS` 完成顺序。未读玩家进度、其他服务端配置或生产数据库；未执行生产 DDL、部署、Quest 开关或服务操作。
+
+### 2026-10-10 - Crafting 跨服绝对统计归并模型审计
+
+- CodeGraph `status` 为 up-to-date；`explore AuthenticatedCraftingStatisticsDetectionService / ItemVectorTaskEvaluator / TaskProgress`、`node recordFactIfAbsent` 与 `impact detectAutomatically` 核对统计采集、事实幂等和进度归约。事实账本以 `(source_server,event_id)` 为键，不同服务器的个人快照可分别入账；但 Crafting 统计投影使用同一 Task 向量，`TaskProgress.merge` 对各分量取最大值，不保留来源服务器贡献。因此同一玩家 S1=5、S2=7 当前显示 7，而不是按来源累加。现有跨服集成回归只锁定这一实现行为，并非产品合同。
+- 进一步确认若采用“每服最高绝对计数相加”，不能简单把通用向量 max 改成 sum：任务进度还接收 craft/smelt/anvil 的增量事实，BQ 在同一 Task 收到匹配产物后会把绝对统计与事件进度合并。正确实现需分开保存逐来源统计基线并与事件增量协调；这可能触及进度模型和数据库持久化合同。
+- 本轮没有改代码或 schema；已把事实键、现状例子和实现影响补入开发导航及唯一能力矩阵。已向用户明确询问跨服样例 5/7 的期望值，答案返回前保持现状，不执行 DDL/部署或访问玩家进度。Crafting 与 M.2 仍 `BLOCKED`。
+
+### 2026-10-10 - BQ 自动检测与消耗提交入口复核
+
+- 用户再次确认任务检测分工：非消耗物品/流体目标应持续自动检测；只有消耗型目标需要玩家明确提交。固定 BQ 源码 `QuestInstance.detect` 显示原版 GUI 每个 Quest 只有一个 Detect/Submit 按钮，服务端按任务定义顺序调用该 Quest 所有未完成 Task 的 `detect`；`TaskRetrieval.onInventoryChange` 则对 `!consume || autoConsume` 自动调用该任务检测。由此可区分“检测何时发生”与“玩家看到几个提交入口”。
+- Crafting 细节也已逐段确认：BQ 的 `TaskCrafting.onItemInternal` 在一个必需物品匹配后调用该 Task 的 `detect`，后者重新读取该 Task 的全部统计目标。Base `QuestObservationPlan.craftingStatisticsForOutput` 按匹配 Task 收集其全部目标，`ItemVectorTaskEvaluator` 校验触发产物归属后更新对应 Task；现有测试覆盖同 Task 全目标与无关 Task 排除。此处未发现待修行为差异，也未重跑测试。
+- 当前 Base 已满足自动/显式分工，但 UI 是每个消耗 Task 分别提供背包匹配提交与手持栈提交；这不同于 BQ 的 Quest 级单入口，后者可能一次按序消费多个 Task。实现原版聚合入口需要明确跨 Task 重叠需求、部分成功及崩溃恢复的批处理合同，不能简单把多个独立提交串在客户端。
+- 已向用户请求在现有逐 Task 提交与 Quest 级一键检测间明确选择；本轮未改运行代码、任务合同或数据库，也未访问玩家进度/生产数据库、执行 DDL、部署或切换 Quest。Crafting 同一玩家跨服绝对计数归并口径仍另待确认；相关自动门槛和 M.2 继续按矩阵标注为 BLOCKED。
+
+### 2026-10-10 - Crafting PARTY 活跃资格调用链复核
+
+- CodeGraph `status` 为 up-to-date；`explore BqPartyCraftingStatisticsMembers / BqPartyActiveQuestQuery / QuestEvaluationPlanner / QuestGameplayEventHandler` 与 `node factMembershipFor`、`node BqHuntPartyAssignmentPolicy.select` 核对完整路径。成员解析要求来源玩家属于唯一 Party，并仅返回本服在线 UUID；solo 回退仅包含来源玩家。`BqPartyActiveQuestQuery` 限定本服来源后检查是否至少一名在线成员的 Quest 当前可活动（前置/`progressWhileLocked`、完成周期、待消费恢复、待领奖与 repeat 时间）；Planner 对统计快照逐玩家写 PLAYER 进度，并由 Party 活跃资格证明该快照属于共享 Quest。匹配产物增量仍按 BQ Task 规则向 Party 成员个人进度扇出。
+- 与本地 BQ `TaskCrafting.detect/onItemInternal` 对照后，没有发现 PARTY 在线资格或“制作事件共享、个人统计分别采样”的新代码差异。CodeGraph 对成员解析测试的自动关联不完整，但仓库有专用 `BqPartyCraftingStatisticsMembersTest`；现已直接选择并重跑。
+- CodeGraph `impact`：`BqPartyActiveQuestQuery.hasActiveMember` 8 个符号、`BqPartyCraftingStatisticsMembers.localOnlineMembers` 6 个；`affected` 对四个入口文件返回 51 个宽泛候选，按调用链选 Core 五类与根事件分发类。Docker `galaxy-dev:local` 无网络运行 Core 五类 50 项、根 `QuestCraftingStatisticsDispatchTest` 4 项，共 54 项，0 skipped/failure/error。首次无网络配置因 convention plugin 访问 `raw.githubusercontent.com` 失败；关闭 Spotless 后 Core 通过；根定向测试另排除只负责下载许可证的 `prepareUi2QzLicense`，因此这不是打包/自包含验收。未部署或访问数据库。
+- 仍待用户选择的是不同服务器的同一玩家个人绝对统计如何合并，以及 Quest 级批量 Detect 与现有逐 Task 消耗入口的交互差异。本轮没有代码/数据库变更；`git diff --check` 通过。未访问玩家进度或生产数据库，未执行 DDL、部署、Quest 开关或服务器操作。
+
+### 2026-10-10 - Crafting 检测分工确认与 DefaultQuests 样本复核
+
+- 用户最新确认：非消耗库存任务应持续自动检测；只有消耗型任务需要玩家提交/检测。此语义与 Base 当前非消耗快照、消耗任务显式逐 Task 提交一致，不需要新增“检测合成”按钮，也不需要改变自动统计复评。
+- 在用户已授权读取的 S2 `DefaultQuests/Quests` 静态定义目录中，只读复核统计检测启用的 6 个 Crafting occurrence：每项均只有一个目标物品，`allowCraft=1`、`allowSmelt=1`、`allowAnvil=0`、`ignoreNBT=0`。没有读取 `Players`、在线状态、玩家进度或数据库；该样本形状不要求扩展 Crafting 统计 matcher。
+- CodeGraph `status` 为 up-to-date；`explore QuestGameplayEventHandler submitCraftingStatistics BqPartyInventorySnapshotFactSink AuthenticatedCraftingStatisticsDetectionService BqPartyCraftingStatisticsScope QuestObservationPlan` 核对当前接线，`impact detectAutomatically` 与 `impact BqPartyInventorySnapshotFactSink.accept` 确认事件/快照调用链，`affected` 给出 75 个宽泛测试候选。结合实际调用链定向回归 Core 6 类 100 项、根项目 3 类 25 项，共 125 项执行，0 skipped/failure/error；本轮没有代码变更，`git diff --check` 通过。
+- 这次答复确认的是自动/显式触发语义，并未明确是否也要把 Base 当前逐 Task 消耗入口合为 BQ 每 Quest 一个批量 Detect；该差异涉及多个消费 Saga 的先后、部分成功与恢复，不擅自改变。相同玩家多服本地绝对统计 5/7 的合并值也仍未确认，保持现有最大值实现但不宣称为用户合同。Crafting/M.2 仍 `BLOCKED`；未连接数据库、未执行 DDL/部署/Quest 开关，也未触碰 S1/S2 运行服务。
+
+### 2026-10-10 - R.2 当前工作树对 S2 DefaultQuests 全量定义解析
+
+- CodeGraph `status` 为 up-to-date；`explore BqQuestDefinitionImporter BqBehaviorInventory`、`explore BqInventoryMain BqMigrationPlanner.plan`、`explore BqBehaviorInventory.toText BqCompatibilityReport.toText` 核对只读解析入口、结构校验和输出口径。无代码变更，因此未运行 `impact/affected`；工作树已有改动均保留。
+- 以 `galaxy-dev:local` 运行 `:galaxy-quest-bq-importer:behaviorInventory -PbqDefaultQuests=/quest-source --no-daemon --no-configuration-cache -PforceToolchainVersion=17`，S2 `DefaultQuests` 仅以 `:ro` 挂载。当前 importer 实际解析 3,744 个 Quest、5,620 个 Task、5,448 个 Reward、47 个章节、3,847 个 placement；来源规划摘要 hash 与既有基线一致，`applicable=true`、ERROR 计数为 0、未知 Task/Reward 类型为 0。仍有 `UNPLACED_QUEST=64` 与 `SEEDED_XOR_CYCLE=4` 警告。所有类型的 `ADAPTED` 仅证明可解析；行为矩阵仍将运行兼容状态标为 `BLOCKED`。
+- Gradle 任务 `BUILD SUCCESSFUL`，约 18 秒；这是全量定义导入/规划门禁，不是 JUnit 数量或运行行为测试。没有连接 PostgreSQL、读取玩家进度、读取其他 S2 配置或触碰运行服务；未执行 DDL、部署、Quest 开关或 S1 操作。文档同步更新导航、M.2 行为矩阵与权威能力矩阵，`git diff --check` 通过。
+
+### 2026-10-10 - 手动消耗任务入口条件回归
+
+- CodeGraph `status` 起始为 up-to-date；`explore`/`node` 检查 `TerminalQuestCenterSnapshotMapper.detail`、`ConsumptionRequestAuthorizer.supports` 与 Quest 中心 UI；`impact` 确认 mapper 的直接范围，改后 `sync` 更新测试文件 33 nodes，`affected` 只选中 `TerminalQuestCenterSnapshotMapperTest`。
+- 新增 `exposesManualSubmissionOnlyForConsumingInventoryTasks`，验证 `consume=true && autoConsume=false` 的 Retrieval 仅在消费运行时可用时暴露手动入口；非消耗任务、`autoConsume=true` 与运行时不可用均隐藏。未改生产代码、任务合同或网络协议。
+- Docker Gradle 根 `:test` 成功：123 个测试套件、591 个测试，67 个被条件跳过、0 failure/error；目标 mapper 类 4 项全部通过。跳过项是当前根测试环境的条件跳过，本轮没有配置或连接隔离 PostgreSQL，因此不把这些跳过计作实际执行。`git diff --check` 通过。
+- 此回归只锁定“非消耗自动观察、消耗显式提交”的入口资格，不解决每 Quest 一个批量 Detect 与逐 Task 入口的选择，也不解决同一玩家跨服绝对统计归并口径。Crafting/M.2 仍 `BLOCKED`；未读取玩家进度/生产数据库，未执行 DDL、部署、启用 Quest 或停用 BQ。
+
+### 2026-10-10 - BQ 当前工作树全量测试复验
+
+- 首次使用通用构建脚本运行根 `test` 时，UI2 Demo 的 Java2D 预览缺少开发专用 CJK 字体，导致 2 个 Demo 测试失败；异常明确为 `no CJK preview font available`，不是布局/渲染断言失败。
+- 按 `scripts/render-ui2-visuals.sh` 的既定方式，将宿主 Noto CJK TTC 只读挂载到开发容器并设置 `UI2_PREVIEW_FONT`，重跑 `test assemble verifyUi2SelfContained`，`BUILD SUCCESSFUL`。当前所有 XML 合计 1,039 项，其中 924 项未跳过、115 项条件跳过，0 failure/error；`:galaxy-quest-core:test` 报告 270 项、0 跳过/失败/错误。字体仅供预览测试，不进入源码或运行 JAR。
+- 本轮未改运行代码、数据库或用户交互。没有连接生产数据库或读取玩家进度，未执行生产 DDL、部署、Quest 开关或服务器操作；文档更新后 `git diff --check` 通过。
+
+### 2026-10-10 - BetterQuesting 阶段摘要与实现状态对齐
+
+- 发现权威能力矩阵顶部仍称 R.2.11 正在实施，而同一文档、开发导航及 Worklog 已记录到 R.2.16；这会使后续执行顺序误判。将矩阵摘要统一为 R.1 与 R.2.1–R.2.16 均有自动回归记录，但 M.2 整体继续 BLOCKED，并明确 Crafting 两项待确认合同及真实 Forge/GTNH、奖励掉落/存档崩溃证据缺口。
+- CodeGraph `status` 为 up-to-date；`explore` 检查进度 importer/mapper/conflict analyzer 与 Core/JDBC progress snapshot/repository，确认当前仍无 BQ 玩家进度 PostgreSQL 写入器，M.3 未开始写入实现。这里只同步阶段摘要，不擅自提前进入 M.3。
+- 仅改文档；没有代码、数据库或运行状态变更。本轮不重跑测试；更新后 `git diff --check` 通过。
+
+### 2026-10-10 - Crafting 来源服计数归并合同实现与 Quest Detect 边界审查
+
+- CodeGraph 起始 `status` 提示 1 个待同步源文件，`sync` 更新完成；之后 `status` up-to-date。`explore` 核对消费 Saga、认证授权、Quest 页面动作和 Runtime 完成路径；`impact TaskProgress` 覆盖 202 个符号，`impact ItemVectorTaskEvaluator.evaluate` 覆盖 13 个直接符号，`impact JdbcQuestRuntimeRepository` 覆盖 116 个符号。`affected` 对三处生产文件给出 92 个宽泛测试候选，实际聚焦 Core `TaskProgressVectorTest`/`BqCompatibleTaskEvaluatorsTest`、PostgreSQL 往返/schema contract 与根 Party/JDBC 集成类。
+- 按用户确认的合同，实现同一玩家跨服务器的 Crafting 统计：每个来源分别取 `max(来源事件累计, 来源绝对统计快照)`，来源之间相加；不同 Party 成员仍是互相独立的 PLAYER 进度。`TaskProgress` 保存来源贡献及 legacy baseline；旧数据作为非叠加下限，避免升级后把既有聚合值重复加到各服来源上。JDBC 使用 `source_progress_json` 持久化；新增 idempotent migration 文件，但没有执行 DDL。首次隔离 JDBC 运行发现新 insert 少一个 JSONB 参数占位符，修复后回归通过。
+- Docker 隔离验证实际执行 Core 273 项、Quest PostgreSQL 55 项、根 Quest Party/JDBC 15 项，共 343 项；0 skipped、failure、error。隔离 PostgreSQL 16 测试库仅在临时网络/tmpfs 容器运行，无生产 DSN/卷/对外端口；测试后已停止并删除本任务创建的精确容器与网络。`:assemble verifyUi2SelfContained` 通过：39 actionable tasks，7 executed、32 up-to-date。最终 `git diff --check` 在文档收口时复核。
+- Quest 级 Detect 已由用户选定：UI 仅提交 Quest ID，服务端按发布定义顺序逐项处理未完成消耗 Task，使用每 Task 独立持久化 Saga/登录恢复，不承诺跨数据库和背包全有或全无。实现审查发现 `QuestRuntimeService` 在每条任务事实后立即判定完成、生成 entitlement 并冻结已完成周期；OR/可选任务可能在批次中途完成。继续消费会有物品被扣除但进度写不进去的风险。因此本轮没有添加 Quest Detect 入口，已向用户确认应采用“批次末延迟完成结算”还是“首次达成即停止”；未得到选择前不改奖励时机。
+- 开发导航、权威能力矩阵、行为兼容历史与文档索引已同步新的归并合同和当前实现边界。数据层和源计数自动测试完成不代表 M.2 或 BetterQuesting 替代完成；来源 migration 未执行，没有生产数据查询、部署、Quest 开关、生产 DDL 或 S1/S2 操作。真实 Forge/GTNH 事件、多服在线时序和 migration 升级演练仍待验证。
+
+### 2026-10-11 - R.2.18 Fluid Quest Detect 保留不可分割容器的实测超量
+
+- 对照本地固定 BQ `TaskFluid.detect` / `Detector.run`：每个背包槽依序检测；消耗时请求目标剩余量，但将 fluid container 实际返回量加到该项进度。不可分割注册容器可整份排空并使进度高于目标。只读 S2 `DefaultQuests` 当前有 15 个 Fluid Task、16 项需求，唯一消耗项为 Honey 1,000 mB；未读取玩家进度、在线状态或其他服务器配置。
+- 原 Base 适配器会完整排空不可分割容器，却只把剩余需求传给进度，和 BQ 的数值进度不等价。现由消费 Saga/JDBC 保存实际 fluid 排出量，Fluid evaluator 允许实测量超过当前目标；请求与数据库校验只为 `fluid` 允许该实际值，其它物品/XP 消费保持请求上限。通用 Task 目标完成判定和 Quest Detect 批次末结算未改。
+- 新回归含 Core 400+750=1,150/1,000、Minecraft adapter 过量返回，以及合成 BQ Fluid JSON 导入→隔离 PostgreSQL 发布→Quest 级 Detect→容器扣除/空容器返回→JDBC 进度 1,150→重放不再扣除。该测试模拟不可分割容器，不证明 Forge/GTNH registry 的真实注册行为。
+- CodeGraph `status/sync` 后同步 8 个文件；`impact` 覆盖 TaskProgress、ConsumptionApplied evaluator、Fluid adapter、ConsumptionRequest 和 JDBC `markApplied`；`affected` 给出 94 个宽候选后按真实调用链选择 Core、Root adapter 与 PARTY/JDBC 测试。Docker Gradle：Core 279、Quest PostgreSQL 58、Importer 49 均 0 skipped/failure/error；根 `:test` 593 项、52 条条件跳过（缺少其它业务模块各自 DB 配置）、541 项实际执行、0 failure/error；根隔离 PARTY/JDBC 类 15 项 0 skipped。`:assemble`、`verifyUi2SelfContained` 成功；`:test` 首次通过 Docker 内未安装的全局 `gradle` 启动而未运行，改用 `./gradlew` 后成功。Gradle 有非致命 Git safe-directory/no-tag 版本提示；本批不部署、不生成生产版本。`git diff --check` 通过。
+- PostgreSQL 16 测试库为临时容器、512 MiB tmpfs、无数据卷、仅 `127.0.0.1:55498`；测试后已删除，端口确认释放。未执行生产 DDL/迁移、未部署、未开关 Quest/BQ、未读取生产玩家进度或触碰 S1/S2。此项只关闭一个 Fluid 自动语义差异；Fluid 与 M.2 仍 `BLOCKED`，Forge/GTNH 实机及跨服时序未验收。
+
+### 2026-10-11 - Crafting PARTY 延迟事实归属审计（R.2.19 前置；决策待确认）
+
+- 按目标先核对实际 Crafting 业务链。CodeGraph `status` 显示索引 up-to-date；`explore` 检查 Crafting 事件、统计 Detect、Party scope 和有界重试；`node` 核对 `QuestGameplayEventHandler.submitCraftingStatistics/onItemCrafted/localOnlineStatisticMembers`、`OrderedQuestFactRetryQueue.retry`、`RuntimeQuestFactSink.accept`、`QuestEvaluationPlanner.requestsFor/accepts/bqPartyActivityMembership`、`BqHuntPartyAssignmentPolicy.select` 与 `BqPartyCraftingStatisticsMembers.localOnlineMembers`；`impact` 覆盖 `submitCraftingStatistics`（6 个符号）和 Party 在线成员解析（6 个直接符号）。固定 BQ 工作树为 `Reference/BetterQuesting` HEAD `6e80f68c22ede0e52247c6ea8d1587f5010eb77e`。
+- 固定 BQ `EventHandler.onItemCrafted` 在同步回调内构造 `ParticipantInfo`，以事件时在线成员 Quest cache 取得 shared Quest；`TaskCrafting.onItemInternal` 对当时 `ALL_UUIDS` 写入匹配产物计数，再调用同 Task `detect()`。BQ 的 `TaskCrafting.detect()` 对各 UUID 单独读取当前服务端在线玩家的 `objectCraftStats`。Base 的个人统计事件会在触发时解析本服在线 Party UUID、读取并冻结各自的统计值；但 generic `galaxy:item_produced` 事实未携带事件时 Party roster/可接受 Quest，失败事实被队列重试后，Planner 再按数据库当前 membership 与活动 Quest 资格规划。故 Party 变更与队列积压交错时，共享 Crafting 产物可能从事件时旧 Party 漏记，或在重试时被归入新 Party；普通无故障同步路径不暴露此差异。
+- 这不是源服计数 max/sum 算法或当前 60 tick 个体统计轮询缺陷；它是 R1-03 队列重试语义和 BQ 同步事件时点之间的跨服归属合同缺口。完整对齐 BQ 建议冻结可信的事件时 Party/成员及活动 Quest 资格后再异步应用，但 PostgreSQL 不可用时如何取得/验证快照，以及旧成员在离队后是否继续收到待处理事件，需要一起设计。暂不修改代码或做部分快照，避免只冻结 Party UUID 却仍使用重试时 roster/Quest 资格造成假等价。
+- 已更新开发导航、唯一能力矩阵与文档索引。仅做源码/调用链审计；本轮没有代码或回归测试、没有访问 PostgreSQL/玩家进度、没有执行 DDL、部署或 Quest/BQ 开关操作。`git diff --check` 为最终文档门槛；下一步需用户选择事件时归属（推荐，匹配 BQ）或接收时归属（保留当前行为并记录差异）。R.2.19 未实施；R.2.6、Crafting 和 M.2 仍 `BLOCKED`。
+
+### 2026-10-11 - Crafting 与 Quest Detect 合同复核及隔离回归
+
+- 用户再次确认：非消耗库存任务自动观察，消耗型任务通过 Quest 级 Detect；同一玩家的 Crafting 按每个来源服 `max(事件累计, 绝对统计快照)` 后求和，不同 Party 成员仍是独立 PLAYER 进度。该回答确认既有开发导航合同，没有授权改变 R.2.19 的事件时/接收时归属。
+- 固定 BQ `EventHandler.onItemSmelted/onItemAnvil` 与 `TaskCrafting.onItemInternal/detect`；CodeGraph `status` 为 up-to-date，`node/impact` 核对 `QuestGameplayEventHandler.onItemSmelted/onItemAnvil`、`TaskProgress.advanceFromSource`、`JdbcQuestRuntimeRepository.findProgress`、Quest 页面 Document/Mapper 与已有目标测试。`affected` 对核心/JDBC/Forge 入口给出 94 个宽候选，按直接调用链运行 Crafting evaluator、统计采样、成员资格、Planner/Runtime、Minecraft 事件分发、任务中心动作和 PostgreSQL 回归。
+- Docker 定向测试使用 `galaxy-dev:local`、无外网的容器；总计 Core 101、UI2 Terminal 6、根 Quest 事件/Mapper 10、根隔离 Party/JDBC 2、Quest Postgres 隔离 2，共 121 项，0 skipped/failure/error。覆盖来源内最大值/来源间求和、不同玩家隔离、Quest Detect 页面合同、批次游标持久化、source-progress migration 幂等。根标准构建曾被旧 root-owned `injectTags` 输出目录阻挡；没有移动/删除旧产物，改用仓库 `.gradle/codex-root-build` 临时输出后通过。一次初始 Gradle 配置尝试因远程 Spotless 资源不可达未进入测试，最终在 `--offline -PdisableSpotless=true` 下通过；临时 init 脚本已删除。
+- PostgreSQL 为临时 PG16，512 MiB tmpfs、无宿主卷、无发布端口，仅处于 `--internal` Docker 网络；只注入新建 `quest_it_test` 测试库凭据。测试后数据库容器和网络均已删除并复核不存在。未访问生产玩家进度/数据库、未执行生产 DDL、未部署、未切换 Quest/BQ、未触碰 S1/S2。
+- 本轮不改运行代码，因此 R.2.19 尚未实施。仍需单独决定 Party 变更与有界重试交错时，Crafting 事实按事件发生时快照还是数据库成功接收时成员归属；没有把统计来源合并合同误当作这项归属决定。Crafting/M.2 以及整体 BetterQuesting 替代继续 `BLOCKED`。`git diff --check` 收口时复核。
+
+### 2026-10-11 - Crafting 兼容最小回归复验
+
+- 按用户项目技能先读当前产品方向文档；CodeGraph `status` 为 up-to-date，`node` 复核 `onPlayerTick`、60 tick 自动统计检测、服务器 tick 有界重试与 FIFO `retry`，`affected` 对 Crafting、TaskProgress、终端 Detect 入口给出 135 个宽泛候选。调用链没有发现绕开 R.2.19 Party 归属选择即可安全修正的新增行为差异。
+- 用无网络 `galaxy-dev:local` 对当前工作树重跑核心 evaluator/统计来源/Party 活跃资格/观察计划/来源进度 5 个测试类 73 项、UI2 Quest 级单入口 6 项、Forge 事件分发/故障及详情 Snapshot mapper 3 类 10 项，共 89 项，0 skipped/failure/error。没有运行 PostgreSQL 测试或声称验证 Forge 实机。
+- 根测试首次被历史 root-owned 测试结果文件阻断；没有清理或覆盖旧输出，改用 `.gradle/codex-isolated-build` 临时输出目录。其后根 Forge 构建因 `prepareUi2QzLicense` 访问 `raw.githubusercontent.com` 在测试前失败；按既有离线边界排除此纯下载任务后，所选 10 项通过。临时 init 脚本随后删除；隔离构建报告保留在忽略目录。
+- 这次仅复验已确认合同，不改业务代码或数据库。R.2.19 仍需用户明确事件发生时快照，还是数据库接收/重试时成员归属；M.2 继续 `BLOCKED`。没有生产玩家进度/数据库访问、生产 DDL、部署、Quest/BQ 开关或 S1/S2 服务操作。
+
+### 2026-10-11 - R.2.11 Item typed NBT 导入交付回归
+
+- 固定 BQ 源码仍为 `Reference/BetterQuesting` HEAD `6e80f68c22ede0e52247c6ea8d1587f5010eb77e`；对照 `RewardItem`、`RewardChoice`、`BigItemStack`、`NBTConverter.NBTtoJSON_Compound(format=true)` 与 `NBTReplaceUtil.replaceStrings`。确认 BQ 使用带类型后缀的 Compound/List JSON；Base importer 保留该 raw typed JSON，`BqTypedNbtCodec` 解码后构造 Minecraft NBT 并递归替换变量。本轮未发现当前 DefaultQuests 注册名/奖励数量或已支持类型的静态差异。
+- 按用户此前授权只读扫描 S2 `config/betterquesting/DefaultQuests/Quests`：Item 4,181 条/6,271 栈、Choice 957 条/3,062 选项；9,333 个 Item/Choice 栈的 `id` 均为字符串，Count 均为正数、范围 1–8,192；440 个栈有非空 Tag。匿名递归类型计数为 NBT 1–6、8–11，包含 5 处 IntArray。没有读取 Players、其他配置、生产玩家进度或数据库，也未导出任务名/UUID/NBT 内容。
+- 为 `BqItemRewardImportDeliveryTest` 增加 `importedBqItemRewardPreservesTypedNestedNbtListsAndArrays`，走真实 importer→RewardDefinition→Minecraft item handler 替身，验证 byte/short/int/long/float/double、嵌套 Compound/List、VAR_NAME/VAR_UUID、ByteArray 和 IntArray。CodeGraph 起始 `status` up-to-date，`explore` 核对 importer/NBT codec/reward handler；`impact BqTypedNbtCodec` 覆盖 20 个符号，`affected` 将新测试收敛到本类；`sync` 更新 1 文件/66 nodes。
+- Docker `galaxy-dev` 隔离运行根测试类 5 项，0 skipped/failure/error。首跑在 `injectTags` 清理历史 root-owned `build/generated/sources/injectTags` 时因权限失败，未改权限、移动或删除该文件；随后为每个 Gradle project 设置全新的忽略输出根 `.gradle/codex-reward-nbt-build-20261011`，定向测试 `BUILD SUCCESSFUL`。测试 XML 显示 5/0/0/0；Minecraft Log4j 对 `logs/latest.log` 有非致命 Permission denied 诊断，未影响测试。没有数据库任务，未运行 `assemble`/自包含检查（本批只有测试改动，运行时产物未变）。
+- 更新开发导航、M.2 行为矩阵、权威能力矩阵和文档索引；`git diff --check` 通过。Item 世界掉落与玩家存档/entitlement 的崩溃窗口、真实 Forge/GTNH 玩家和 WorldSave 仍 `BLOCKED`；R.2.19 Party 事件时点归属未由本轮答案决定，M.2 整体仍 `BLOCKED`。没有生产 DDL、部署、Quest/BQ 开关或服务器操作。
+
+### 2026-10-11 - Fluid 返回空容器空间不足语义复核
+
+- 在上述 item 奖励测试收口后继续 M.2 源码核对。CodeGraph `status` up-to-date；`explore TaskRetrieval/TaskFluid/MinecraftPlayerConsumptionPort.planFluidsDetailed/ConsumptionAppliedTaskEvaluator` 与 `impact planFluidsDetailed` 覆盖适配器和隔离 PARTY/JDBC 回归调用链。固定 BQ `TaskFluid.getFluid` 的 `IFluidContainerItem` 与 `FluidContainerRegistry` 两条 drain 路径，确认成功排空后都会先从输入槽扣除，再尝试把单个空容器放回玩家背包；放不下则调用 `dropPlayerItemWithRandomChoice` 丢到世界。
+- Base `planFluidsDetailed` 采用先计划再整体应用；若空容器无法放回当前玩家库存，`insert` 返回 false 并令整次 fluid 计划为 null，原库存保持不变。因此这是已确认的安全失败差异，不是容器未成功排空后的返还丢失。完全复制 BQ 的世界掉落语义，需要把空容器溢出纳入 player marker/消费 Saga，并面对玩家存档与 WorldSave 两侧无法原子提交导致的掉落重复或丢失窗口。本轮没有更改该策略，也没有声称兼容；待后续确定安全边界后单独处理。
+- 本轮仅静态读固定 BQ 源码与当前 Base 适配器，无新增测试/代码、无 DB 查询或生产操作。该差异与当前 M.2 文档中“无空容器槽 Base 拒绝仍不同于 BQ 世界掉落”记录一致；Fluid 与 M.2 继续 `BLOCKED`。
+
+### 2026-10-11 - R.2.20 Crafting 统计超目标值保留
+
+- 用户确认 Quest 级 Detect，以及同一玩家按每个来源服 `max(事件累计, 绝对统计快照)` 后求和；这没有决定 R.2.19 的 PARTY 事实在重试期间如何归属，本轮继续不改该边界。
+- CodeGraph `status` up-to-date；`node TaskProgress.aggregate`、`node JdbcQuestRuntimeRepository.readTaskProgress` 确认聚合只在 Core 计算、JDBC 重读时核验 JSONB/可见值一致；`impact TaskProgress.aggregate` 命中 10 个符号，`affected` 给 79 个宽候选后，按调用链选择 Core 全套与一个 Crafting/JDBC 集成回归。固定 BQ 源码 `TaskCrafting.detect()` 将更大的 `objectCraftStats` 绝对计数写回；`TaskProgressableBase.setUserProgress()` 不按任务目标截断。
+- BQ `onItemInternal()` 对每名成员的单服事件向量按目标封顶，而 `detect()` 统计快照不封顶；Base `advanceFromSource()` 现按该单服 target 封顶，`aggregate()` 则对每来源取 `max(封顶事件累计, 未封顶绝对快照)` 并跨来源求和。legacy baseline 仍不被截断，避免丢弃历史已保存值。新增 Core 回归验证事件封顶、同来源统计值覆盖事件值、来源间求和后值可高于目标；扩展 PostgreSQL PARTY Crafting 测试，目标 4、统计快照 5，验证 `progress_values` 与 `source_progress_json` 经 JDBC 写入/重读仍一致且保留 5。Completion 仍以 `value >= target` 判定。
+- Docker `galaxy-dev` 全套 `:galaxy-quest-core:test` 最终实际 281 项，0 skipped/failure/error；第一次全套运行发现既有断言仍期待统计目标截断（7/5 被断言为 2/3），按 BQ 统计语义更新。后续源码复核又发现 BQ 产物事件自身会封顶，补了事件封顶回归并重新运行全套，最终 281/0/0/0。隔离 PostgreSQL Crafting/JDBC 定向集成 1 项通过。PG16 使用新建 `--internal` 网络、512 MiB tmpfs、无数据卷和无端口发布；只配置 `quest_it_test` 合成库凭据，测试后容器/网络均已移除并确认不存在。
+- `:assemble :verifyUi2SelfContained` 最终通过（28 actionable tasks，4 executed、24 up-to-date）。首次尝试遇到历史 build 结果文件权限拒绝，未改权限/清理旧输出，改用独立 `.gradle/codex-crafting-over-target-build-20261011`；Forge Shadow 依赖变换前显式生成 UI2 JAR。离线环境中的 `prepareUi2QzLicense` 下载动作未能完成，使用已有缓存许可证（SHA-256 与构建中声明值相同）填充隔离输出，并仅跳过该下载任务；JAR 自包含验证本身实际运行且通过。`git diff --check` 在最终文档修改后另行执行。
+- 更新开发导航、M.2 行为矩阵与权威能力矩阵。该变更只关闭 Crafting 数值聚合的窄差异；真实 `objectCraftStats`/Forge 事件、Party 重试时点、生产迁移与玩家进度均未验证/访问。没有执行生产 DDL、部署、Quest/BQ 开关或服务器操作；R.2.19 与整体 M.2/BQ 替代仍 `BLOCKED`。
+
+### 2026-10-11 - R.2.19 Party 重试归属实现边界细化（仅源码/架构审计）
+
+- CodeGraph `status` 为 up-to-date；`node` 检查 `OrderedQuestFactRetryQueue.retry/enqueue/deliver`、`QuestGameplayEventHandler.onItemCrafted`、`QuestEvaluationPlanner.requestsFor/forcedMemberships`、`BqHuntPartyAssignmentPolicy.select`、`BqPartyCraftingStatisticsMembers.localOnlineMembers`。事实当前不可变且重试保留原键，但普通 Crafting 事实不携带 Party/成员快照；Planner 按重试时 membership 重建请求。
+- 进一步核对 `QuestModule`：Party membership 由 `JdbcParticipantMembershipResolver` 读取；`BqPartyActiveQuestQuery` 还经 JDBC 检查每个在线成员的前置、任务进度、重复周期、未完成消费和待领奖状态。仅冻结 Party UUID 或 roster 不能固定 BQ 事件时活动 Quest 资格。事件入口没有可在 PostgreSQL 故障时使用的新鲜权威 membership/进度快照；使用无新鲜度界限的缓存会引入另一种误归属。`OrderedQuestFactRetryQueue` 仅在内存中，进程崩溃后不恢复，因此快照方案也不能覆盖当前既定的进程崩溃窗口。
+- 用户已通过另一组确认 Quest 级消耗 Detect 与来源内 max/来源间 sum；这两项不等于 R.2.19 Party 故障时点选择。事件时归属与 BQ 同步语义更接近，但若采用，必须定义缓存新鲜度、无可信快照时的失败/诊断、旧成员迟到投影与崩溃边界；重试时当前 Party 则维持实现简单但保留已记录的 BQ 差异。已向用户单独请求选择，本轮未更改业务代码/数据合同、未运行测试、未访问 PostgreSQL/玩家进度、未执行 DDL/部署或 Quest/BQ 开关。文档差异复核与 `git diff --check` 为本批门槛。
+
+### 2026-10-11 - R.2.23 Crafting PARTY 事件匹配前置过滤
+
+- CodeGraph `status` 起始显示 3 个待同步文件，`sync` 后复核 `ItemVectorTaskEvaluator.matchesCraftingStatisticsTrigger`、`BqPartyTaskProgressScope.isCraftingEvent`、`QuestEvaluationPlanner.bqPartyActivityMembership`；`impact` 显示新 matcher 仅进入 Party scope，随后影响 `requiresUnlockedPartyMember/supports`；`affected` 对三个改动文件给出 56 个宽候选。固定 BQ `TaskCrafting.onItemInternal` 的必要条件是产物命中某项需求；Base 之前只按通道开关判断是否进入 PARTY 在线资格检查。
+- 新增 `ItemVectorTaskEvaluator.matchesCraftingProgressEvent`，与实际 Task evaluator 共用通道准入和 `matches`，涵盖注册名、meta/wildcard、damageable、OreDictionary、NBT/partial match。`BqPartyTaskProgressScope` 仅在真实输出命中至少一个导入 BQ Crafting 需求后认定为共享任务事件。新增 Planner 回归验证无关 Gold 产物只产生来源玩家本地请求、不触发 Party 活动查询或 PARTY fan-out；真实命中输出既有 Party 路径不变。
+- Docker `galaxy-dev:local` 无网络运行隔离输出下 Core 全套：62 suite / 284 项，0 skipped/failure/error。首跑先被既有 root-owned `galaxy-quest-core/build/test-results/test/binary/results-generic.bin` 权限拒绝，未改权限；隔离运行的新测试首轮发现测试错误假定个人 `factMembership` 为 null，按 Core 合同修正为来源 PLAYER membership。随后 Planner 类 24 项、Core 全套最终均通过。`git diff --check` 与本次文档空白检查通过。
+- 本批只改纯 Java Core 与文档；没有运行 PostgreSQL、Forge 实机、根 `assemble` 或自包含门禁，因为变化只改变无关事件的资格预检查，不改事实/JDBC合同。R.2.19 的“事件时 Party / 重试时当前 Party”选择仍待答，R.2.23 不将其视作已解决；未访问生产进度/数据库、未执行 DDL/部署/Quest/BQ 开关或服务器操作。
+
+### 2026-10-11 - M.2 Meeting 半径实现与文档状态复核
+
+- CodeGraph `status` 为 up-to-date；`impact MeetingTaskEvaluator.evaluate` 显示 Core evaluator 与两项 Meeting 回归，`affected` 为 71 个宽候选。固定 BQ `TaskMeeting.detect` 对每个任务独立查询 `player.boundingBox.expand(range)`；当前工作树实际已在 `MeetingTaskEvaluator` 对最大半径共享快照执行逐任务实体 AABB 交集过滤，缺少几何或几何非法时拒绝完成，精确半径旧快照仍可按其已筛选事实处理。已有回归覆盖远处实体排除、AABB 相交、只接触边界、缺失坐标与非法坐标。
+- 发现 M.2 行为矩阵的 Meeting 汇总行仍写“过滤缺失”，与已存在的 R.2.9 实现、测试及同一文档后文相矛盾。未改生产代码；已将摘要和能力矩阵阶段行同步到现有代码证据，保留真实 Forge/GTNH `EntityList`、NBT、tick 与多服 PARTY 验收为未完成。
+- 使用 `galaxy-dev:local` Docker 环境、`--network none`、隔离 Gradle build dir 强制执行 `:galaxy-quest-core:test --rerun-tasks`：62 suite / 284 tests，0 skipped/failure/error；包括 Meeting AABB 过滤回归。最终 `git diff --check` 通过。
+- 本次只修正文档状态，没有访问 PostgreSQL/玩家进度、执行 DDL、部署、启用 Quest 或停用 BQ。R.2.19 Party 事实重试归属时点仍待用户选择；M.2 与整体 BQ 替代继续 BLOCKED。
+
+### 2026-10-11 - M.2 Item 奖励最大堆叠数文档复核
+
+- CodeGraph `impact MinecraftItemRewardDeliveryHandler.deliver` 覆盖交付 handler 与现有恢复/溢出测试。固定 BQ `BigItemStack.getCombinedStacks()` 按物品 `getMaxStackSize()` 拆分；当前 Base 奖励生成和世界溢出分栈也使用物品 max stack，背包槽位插入另外取 `min(item max, inventory 64)`。
+- 对照已有回归，确认 max stack=128 的物品发放 130 件时世界溢出栈为 128/2；导入 JSON 的普通物品奖励 8,192 件在 36 格背包后余量按 64 分栈掉落。发现行为矩阵仍误写“Base 也按 64 上限分栈”，已更正为“世界溢出按物品上限、库存插入另受 64 限制”。未改生产代码。
+- Docker `galaxy-dev:local` 无网络环境定向实跑 2 项：`MinecraftRewardDeliveryTest.rewardOverflowUsesBqItemSpecificMaximumStackSize` 与 `BqItemRewardImportDeliveryTest.importedBqMaximumItemRewardSplitsAndDropsOverflowOnce`，0 skipped/failure/error。首次运行被 `prepareUi2QzLicense` 的 GitHub 下载前置阻断；按离线构建边界排除此下载任务后，所选测试成功。此处没有执行 JAR/自包含门禁。
+- 测试使用替身玩家，不证明真实 Forge 掉落、玩家存档或 WorldSave 崩溃窗口；未访问 PostgreSQL/玩家进度，未执行 DDL、部署、启用 Quest 或停用 BQ。Item 奖励与 M.2 仍 BLOCKED。
+
+### 2026-10-11 - S2 消耗型 Quest Detect 范围复核
+
+- 按用户授权只读 `/mnt/m600/zhitai-data/gtnh/data/Galaxy_GTNH284_S2/config/betterquesting/DefaultQuests/Quests`，只输出 Task/Reward 类型及布尔配置计数，不读取 Players、服务器配置、数据库或任何玩家进度。Task 画像为 308 个 `consume=true` occurrence：307 Retrieval、1 Fluid；全部 `autoConsume=false`；无显式 `isGlobal=true`（283 个显式 false、25 个省略并按 BQ 默认 false）；284 个有 `globalShare=true`，但该字段不能推出 Party 进度同步。Reward 画像为 Item 4,181、Choice 957、QuestCompletion 308、XP 2；未出现 command 或 scoreboard reward。仅有的 2 项 XP 定义已在既有矩阵中记录为 `isLevels=true`，Base 已有 XP handler 与 typed-import 测试，本轮未执行该测试。
+- 复核固定 `Reference/BetterQuesting` 源码：`TaskRetrieval.detect` 与 `TaskFluid.detect` 在 `fullySyncQuests=false` 时对消耗型检测使用发起玩家身份/库存；源码默认值为 false，注释标记 `[NYI]`。BQ 服务器的实际配置没有读取，因此不能认定 GTNH 运行值一定等于源码默认值。现有 Base PLAYER-only Quest Detect 与当前定义范围在该默认语义下吻合；本项没有扩大到 PARTY 消耗，也没有改变模型/代码。
+- 本轮先前 `:galaxy-quest-bq-importer:behaviorInventory` 因容器首次配置请求 Mojang version manifest 超时而未完成；相同内容的计数通过只读 `jq` 画像取得，故没有把失败命令记为成功测试。未运行测试（纯文档证据同步），没有 PostgreSQL 查询或 DDL、部署、Quest/BQ 开关或 S1/S2 服务操作。`git diff --check` 为本批收口门槛；R.2.19 的 Party 事件时/重试时归属问题仍未由当前答案决定，M.2 继续 BLOCKED。
+
+### 2026-10-11 - Quest Detect 批次与定义版本并发审计
+
+- CodeGraph `status` up-to-date；追踪 `AuthenticatedQuestConsumptionDetectService.detect/continueBatch`、`ConsumptionRequestAuthorizer.publishedVersion/published`、`JdbcQuestDefinitionRepository.publish/findAllPublished` 与 `JdbcConsumptionDetectBatchRepository.findActive/createIfAbsent`。当前发布流程允许新版本发布且保留旧 PUBLISHED 行；目录只返回每个 Quest 的最高版本。Detect 查活动批次时同时要求当前版本；持久化唯一键也含 definition version。因此，已暂停的旧版批次在管理员发布新版本后不会被当前正常 Detect 入口找到，也无法走批次末旧版 settlement，存在“旧版部分消费/提交已发生但 Quest 未结算，且新版本可以再建另一批”的恢复缺口。
+- 尚无用户决定要采用“活动批次存在时拒绝发布新版本”，还是“旧批次固定旧定义并按旧版完成/奖励后允许新版本并行”。后者更符合批次保存版本身份的意图，但会允许新版本发布后旧版任务与奖励继续完成；这是管理员发布和玩家奖励可见性的合同变化。本轮只记录问题，不改代码、DDL或运行行为。
+- CodeGraph 显示当前定向回归覆盖游标持久化/幂等及来源服恢复，但没有覆盖“部分批次暂停→发布新版本→重启检测”的版本并发场景。未运行测试；`git diff --check` 收口。没有访问 PostgreSQL/玩家进度或服务器配置，没有执行生产 DDL、部署、Quest/BQ 开关或 S1/S2 服务操作。
+
+### 2026-10-11 - Crafting PARTY 统计采样失败路径审计
+
+- CodeGraph `status` 为 up-to-date；`explore` 核对 `QuestGameplayEventHandler.submitCraftingStatistics/localOnlineStatisticMembers/onItemCrafted/onItemSmelted/onItemAnvil`、`QuestModule.createGameplayEventHandler`、`MinecraftQuestFactFactory.craftingStatisticObserved` 与 `AuthenticatedCraftingStatisticsDetectionService.detectAutomatically`。生产组合根用本服在线 Party 成员列表对每个成员读取个人 vanilla Crafting 统计并生成独立事实；失败/空列表时的 handler 明确回退到触发玩家 singleton。自动周期服务拒绝 `participantScope != PLAYER` 或 global Quest，因此 PARTY 绝对统计没有周期补偿路径。
+- 结论：一次 PostgreSQL membership lookup 失败可使当次 crafting 事件缺少 Party peer 的统计事实；除非下一匹配产物再次触发采样，否则这些 peer 可能漏记。若事后按当前 Party 重试，会有归属变化差异；若要严格按事件时归属，则需要具备新鲜度边界的 event-time roster/Quest 资格来源。现有代码无此权威缓存，用户尚未决定 R.2.19 事件时或 retry-time 合同，因此本轮只记录风险，不改 fallback 或事实语义。
+- 本轮未运行测试或修改生产代码。`git diff --check` 为文档验收门槛；没有访问 PostgreSQL、玩家进度、服务端配置，未执行 DDL/部署/Quest/BQ 开关或 S1/S2 操作。
+
+### 2026-10-11 - Crafting PARTY 周期统计补偿结论更正
+
+- 复核上方故障审计时发现把“统计服务仅处理 PLAYER scope”错误地等同于“不能补齐 PARTY peer”。实际路径是：`QuestGameplayEventHandler.onPlayerTick` 每 60 tick 对每名在线玩家运行 `detectAutomaticCraftingStatistics`；导入 BQ Crafting Task 已进入 `QuestObservationPlan` 自动目标；服务为传入玩家读取个人绝对统计，`BqPartyCraftingStatisticsScope`/Planner 可在当前 Party 活动资格成立时为该玩家建立独立 PLAYER 进度请求。隔离 PostgreSQL 测试 `automaticBqCraftingStatisticsKeepPersonalCountersAndSumPerServerMaxima` 已分别检测 Party 中的 owner 和 peer，并验证个人进度隔离。
+- 因此，当次事件 membership 查询失败只会漏掉该次事件采样的 peer 列表；数据库/membership 恢复后，仍在线且资格未变的 peer 可在下一周期由自己的轮询补采，不要求再发生匹配输出。它不冻结事件时 Party roster，也不保证离线、离队或资格已变化的玩家追补；真实 Forge tick 与生产时序仍未验证。该结论修正本 Worklog 上一节、较早 R.2.6 中“统计仅更新触发玩家”的记录、开发导航和 M.2 行为文档中的过度断言；R.2.19 产物事实延迟重试归属仍未决。
+- 本轮为代码审计与文档纠错，没有生产代码变化，因此未运行测试；CodeGraph `status` up-to-date，`impact detectAutomatically` 与 `impact detectAutomaticCraftingStatistics` 已确认实际调用/回归范围。未访问 PostgreSQL 或玩家进度，未执行 DDL、部署、Quest/BQ 开关或 S1/S2 操作。
+
+### 2026-10-11 - S2 实际启用 Crafting 统计任务形状复核
+
+- 按用户此前授权只读 S2 `DefaultQuests/Quests` 定义文件，以 `allowCraftedFromStatistics:1 == 1` 筛选实际启用项。当前找到 6 个启用定义，目标形状为 furnace×1、flint×3、chest×1、crafting_table×1、piston×1、flint_and_steel×1；均 `allowCraft=true`、`allowSmelt=true`、`allowAnvil=false`、`partialMatch=true`、`ignoreNBT=false`、meta=0，未用 OreDictionary 目标。没有读取玩家进度、服务端其他配置或数据库。
+- 与当前实现对照：CodeGraph `status` up-to-date；`explore QuestGameplayEventHandler.submitCraftingStatistics QuestObservationPlan.craftingStatisticsForOutput MinecraftQuestFactFactory.craftingStatisticObserved BqPartyCraftingStatisticsScope.matchesAutomaticPartyActivity` 及 `explore QuestModule.createGameplayEventHandler` 核实生产接线。事件 matcher 支持的通道与这些真实配置一致；绝对 `objectCraftStats` 按 Item ID 读取且本样本目标无 metadata/OreDictionary 特例。此画像不改变已确认的来源内 max/来源间 sum，也不关闭 R.2.19 的事件重试 Party 归属差异；它只说明当前 S2 启用统计的 Crafting 任务没有额外 Item matcher 形状缺口。
+- 这是只读定义检查和文档补充，无代码变化、无需测试。修正 M.2 表格与早期 active-quest 审计的过时句子；`git diff --check` 通过。没有 PostgreSQL 连接/查询、生产 DDL、部署、Quest/BQ 开关或 S1/S2 服务操作。
+
+### 2026-10-11 - Quest Core 当前状态复验尝试
+
+- 按用户确认的 Quest 级消耗 Detect 与 Crafting 来源服 max/sum 合同，尝试重新执行 `:galaxy-quest-core:test`。项目构建脚本及显式 `--offline` 路径均在应用 `com.gtnewhorizons.gtnhconvention` 时遇到 `java.net.SocketTimeoutException: timeout`；直接运行时又发现历史 root-owned 测试结果阻止普通开发 UID 访问。没有修改旧产物权限或删除文件。
+- 随后用只对一次性 `galaxy-dev` 容器生效的本机 7892 代理，并以临时 Gradle init script 将所有 project build output 重定向到容器 `/tmp`，强制 `--rerun-tasks` 后完整执行 Core suite：284 项，0 failure、0 skipped、0 errors，`BUILD SUCCESSFUL`。init script 已删除，容器退出后临时输出销毁；工作树旧构建结果保持原样。
+- 未更改生产代码、Gradle 项目配置、宿主代理/防火墙或游戏服务。未访问 PostgreSQL、玩家进度或服务器配置，未执行 DDL、部署、Quest/BQ 开关或 S1/S2 服务操作。
+
+### 2026-10-11 - R.2.24 QuestCompletion 缺失目标 no-op 兼容
+
+- 按既有授权只读 S2 `DefaultQuests/Quests`：匿名解析 3,744 个定义、0 个解析错误；308 个 QuestCompletion reward 有 251 个不同目标，219 个可解析、32 个缺失，malformed/missing UUID 为 0。没有读取 Players、服务器运行配置、在线状态或数据库。固定 BQ `RewardQuestCompletion.claimReward0` 在目标 Quest 缺失时直接返回，不阻止来源奖励领取结束。
+- CodeGraph `status` up-to-date；`explore JdbcQuestCompletionRewardPort RewardQuestCompletionDeliveryHandler`、`impact JdbcQuestCompletionRewardPort.completeInTransaction`、`explore QuestCompletionRewardDeliveryHandlerTest`、`explore RewardDeliveryOutcome RewardDeliveryWorker JdbcRewardDeliveryRepository RewardDeliveryController`、`impact QuestCompletionRewardDeliveryHandler.deliver` 核对端口/handler/worker；改后 `sync` 更新 2 个文件，`affected` 返回 49 个宽候选。Base 原来把 `TARGET_NOT_FOUND` 永久失败；现按 BQ no-op 映射为已投递，避免实际定义中的缺失目标变成永久失败/恢复项。坏 UUID 和目标 scope unavailable 仍失败；测试拆分覆盖三态。
+- Docker `galaxy-dev:local` 隔离输出强制执行完整 `:galaxy-quest-core:test`：286 项、0 skipped/failure/error。`compileJava assemble verifyUi2SelfContained` 成功：36 actionable tasks，24 executed、12 up-to-date；先在独立忽略目录编译 7 个子模块 jar（15 tasks）。首次将全部 buildDir 临时指向一次性容器 `/tmp` 时，旧 Forge Gradle dependency transform 在任务图解析时找不到尚未生成的子模块 jar；未碰历史 root-owned build。改用 `.gradle/codex-bq-r224-build` 持久隔离目录、分两次构建后根门禁通过。测试后 XML 汇总第一次因容器没有 `python3` 返回 127（Gradle 测试已成功）；随后用 awk 强制复跑并读取 XML，以上计数为最终结果。临时 init 脚本已删除；隔离 build 输出位于忽略目录。
+- 隔离构建的 runtime JAR 为 `.gradle/codex-bq-r224-build/_/libs/jsirgalaxybase-6e80f68-main+6e80f68c22-dirty.jar`，SHA-256 `0c8ff31e6698c633c584897bac2ad28fcdbbef8cff0a099a91c16eff3cc94656`；只作构建验收，未部署。
+- 已同步开发导航、唯一能力矩阵及 M.2 行为矩阵；`git diff --check` 通过。没有 PostgreSQL 测试/查询、生产玩家进度访问、DDL、部署、Quest/BQ 开关或 S1/S2 操作。此项只完成 Core 自动语义修复，真实奖励运行/玩家存档窗口与整体 M.2 仍 BLOCKED。
+
+### 2026-10-11 - BQ GLOBAL / globalShare 运行语义状态纠正
+
+- 固定 BQ `QuestInstance.isComplete(UUID)` 在 `isGlobal=true` 时以任意完成记录作为全局完成；`hasClaimed(UUID)` 仅在 `isGlobal && !globalShare` 时采用全局领取状态。`globalShare=true` 本身不是 Party 进度同步开关。
+- CodeGraph `explore/impact QuestBehavior.isGlobal` 核对 Base 当前调用链：定义导入/JSON 持久化、管理快照以及 Crafting 统计资格检查；未进入 `QuestEngine` 完成归约或奖励领取路径。因此字段可保存不等于 BQ 全局行为已实现。只读 S2 画像为 3,744 个定义中 `isGlobal=true` 0 个、`globalShare=true` 2,494 个且均 `isGlobal=false`，所以这是通用 BQ 导入能力缺口，不是当前快照中已观察到的内容行为差异。
+- 据此修正能力矩阵的过度表述，并在 M.2 行为文档标明该范围。未扩展数据库模型或运行语义，也未修改代码/测试；尚未决定是否把通用 GLOBAL 作为本轮实际内容兼容门槛。`git diff --check` 通过。没有访问玩家进度或数据库、执行 DDL/部署、启用 Quest/停用 BQ 或操作 S1/S2。
+
+### 2026-10-11 - Crafting 自动复评单目标失败重试回归
+
+- 按既定周期检测边界补充根测试 `automaticBqDetectionRetriesFailedImportedTaskOnTheNextPeriodicPass`：首轮让一个带 `bq.raw` 的导入 Crafting Task 抛出瞬时数据库异常，同时验证下一个导入目标不被阻塞；第二轮再次调度后失败目标被重试并成功。项目自有（无 `bq.raw`）Task 在两轮均不进入自动轮询。此回归不改变服务端行为或任务合同，也不模拟真实 Forge Tick/数据库。
+- CodeGraph `status` 为 up-to-date（工具提示索引由早期版本生成）；`impact QuestGameplayEventHandler.detectAutomaticCraftingStatistics` 覆盖事件处理器 `onPlayerTick` 与此根测试，`affected` 收敛到 `QuestCraftingStatisticsDispatchTest.java`。测试通过 `galaxy-dev:local`、`--network none`、不加载 Compose `.env` 的一次性 Docker 容器运行；Gradle build 输出重定向到忽略的 `.gradle/codex-r2-periodic-retry-build`，项目缓存放容器 `/tmp`。XML 计数：4 tests、0 skipped、0 failures、0 errors；`BUILD SUCCESSFUL`，32 actionable tasks/32 executed。没有连接数据库。
+- `git diff --check` 通过。未访问生产玩家进度/数据库、执行生产 DDL、部署、启用 Quest、停用 BQ 或操作 S1/S2。该自动回归不证明真实 60-tick Forge 调度和 PostgreSQL 故障恢复，也不解除 R.2.6 的运行时/M.2 BLOCKED 状态。
+
+### 2026-10-11 - TaskXP 实际使用范围排除复核
+
+- 为选择下一项 M.2 实际兼容工作，固定参考 `Reference/BetterQuesting/src/main/java/bq_standard/tasks/TaskXP.java` 的 `detect/tickTask`，并对 S2 授权目录 `DefaultQuests/Quests` 的 typed NBT key（`tasks:9` / `taskID:8`）匿名聚合。当前 5,620 个 Task occurrence 完整分布为 Retrieval 3,863、Optional Retrieval 1,267、Checkbox 203、Crafting 133、Fluid 15、Hunt 104、Location 33、Block Break 1、Meeting 1；XP、Scoreboard、Item/Entity Interaction 均为 0。此前通用矩阵中的 XP 条目不是当前定义内容，故不应为本轮 M.2 优先实现/签收 consuming XP。只读取 `DefaultQuests/Quests`，未读取 Players、其他配置或数据库。
+- CodeGraph `status` up-to-date；`explore TaskXP/XpSnapshotTaskEvaluator/QuestObservationPlan`、`impact XpSnapshotTaskEvaluator.evaluate` 及 `affected` 确认现有通用 evaluator 与 PlayerTick 观察链，但此类为当前内容零 occurrence；未改代码、未运行测试。更新 M.2 实际类型矩阵与下一门禁：用户已确认 Quest 级消耗 Detect、Crafting 自动复评及来源服 max/sum，不再列为待决选择；R.2.19 仅 Party 延迟事实归属仍需用户决策。下一代码包按实际频率优先审计 Retrieval/Optional Retrieval。
+- `git diff --check` 通过。没有生产数据库/玩家进度访问、DDL、部署、Quest/BQ 开关或 S1/S2 服务操作；R.2.19 与 M.2 真实 Forge/GTNH 运行状态保持 BLOCKED。
+
+### 2026-10-11 - Quest 级消耗 Detect 隔离回归复验
+
+- 用户再次确认：消耗型任务采用单一 Quest 级 Detect，按定义顺序逐项持久化/恢复；不同 Party 成员 Crafting 计数不合并，同一玩家跨来源服按各自 `max(事件累计, 绝对统计快照)` 后求和。该决定与开发导航和能力矩阵一致；未改变业务实现。
+- CodeGraph `status` 为 up-to-date（索引版本提示较旧）；`explore` 核对 `AuthenticatedQuestConsumptionDetectService.detect/continueBatch`、`ConsumptionRequestAuthorizer.planQuestDetect`、`ConsumptionSubmissionService.submit/process`、`QuestRuntimeService.execute/reconcileAfterConsumptionDetectBatch` 与 JDBC 批次游标；`impact` 覆盖 Detect 服务及批次末结算，`affected` 返回 49 个宽候选。直接回归集中在 Core Detect/授权/Runtime 测试与 PostgreSQL 批次仓储集成测试。
+- 根 Gradle 构建在 GTNH convention 插件配置时因离线容器无法解析 `raw.githubusercontent.com` 而未进入测试；这不是测试失败，也没有尝试连接生产环境。改用一次性 `galaxy-dev:local`、`--network none`、独立 Java Core 构建目录，强制执行 `galaxy-quest-core` 全套：62 suites / 286 tests，0 skipped/failure/error。该路径不包含 Forge 根构建。
+- 批次游标用例在临时 PostgreSQL 16 上执行 1 项，0 skipped/failure/error。数据库仅位于无外部路由的 `--internal` 网络，512 MiB tmpfs、无宿主卷/发布端口；Gradle 隔离运行仅为该不使用 Mockito 的测试排除了缓存缺失的 `objenesis` 运行时传递依赖，项目依赖未改。临时网络与数据库容器已移除。该测试验证游标幂等/恢复与结算围栏，不代表生产 DDL 或真实库存副作用。
+- 现有 Core 回归已验证 Quest OR 条件不会在批次中途提前结算奖励、任务按顺序执行、失败后沿稳定幂等键恢复；定义在批次执行期间被重新发布的并发策略仍待用户选择，故本轮不改发布或旧批次合同。`git diff --check` 收口时复核。
+- 本轮没有读取/连接生产数据库或玩家进度、执行生产 DDL、部署、启用 Quest、停用 BQ 或操作 S1/S2。真实 Forge/GTNH 时序与消费恢复仍未验收，M.2 继续 BLOCKED。
+
+### 2026-10-11 - R.2.17 多任务 Detect 有序 journal PostgreSQL 回归
+
+- 用户再次确认现有合同：消耗型任务由一次 Quest 级 Detect 按定义顺序逐项持久化/恢复；不同 Party 成员 Crafting 进度独立；同一玩家同一来源取 `max(事件累计, 绝对统计快照)`，再汇总各来源。开发导航与能力矩阵已记录该语义，本次不改生产实现。
+- 扩展 `QuestPostgresIntegrationTest.consumingDetectBatchCursorIsDurableIdempotentAndFencesQuestSettlement`：以三项有序 task key 验证 PostgreSQL journal 重读顺序不变、重复入口不能覆盖原 Task 列表、cursor 按索引推进且重复推进幂等，最后完成并释放活动批次。与 Core 的 `questDetectProcessesEveryConsumingTaskInOrderAndSettlesOnlyAfterTheBatch` 合看，补足“Core 按定义顺序处理 + JDBC 持久化顺序/恢复”的自动证据；仍不覆盖真实玩家背包/Forge。
+- CodeGraph 起始 `status` 为 up-to-date（索引由早期 engine 版本生成）；`explore` 核对 Quest Detect 服务、授权器、JDBC repository 与既有多任务 Core 测试。修改后 `sync` 更新 1 个测试文件/147 nodes；`impact JdbcConsumptionDetectBatchRepository.advance` 覆盖 repository 接口、服务端 continueBatch 与该集成测试；`affected` 选择 `QuestPostgresIntegrationTest`。
+- 最终通过一次性 `galaxy-dev:local` 容器在内部 Docker 网络中的 PostgreSQL 16 上执行此隔离用例：1 test、0 skipped/failure/error。初次尝试分别因独立 Gradle Home 缺少 Gson 缓存、历史 `build/test-results` 权限以及子项目继承单测试过滤器而未进入目标测试；未改旧产物权限。最终通过挂载已有离线缓存、忽略目录隔离 build output、排除无关 `:galaxy-quest-core:test` 后成功。临时 settings/init 文件已移除；数据库使用 512 MiB tmpfs、无宿主卷/发布端口，网络与容器已删除。
+- 已更新唯一能力矩阵和 M.2 行为矩阵；最终 `git diff --check` 通过。临时设置文件/init script 已删除，临时 PostgreSQL 容器/内部网络已移除。本轮未访问生产数据库/玩家进度、执行生产 DDL、部署、启用 Quest/停用 BQ 或操作 S1/S2。活动批次遇到新定义发布时的旧版恢复/结算合同仍待用户决定；M.2 继续 BLOCKED。
+
+### 2026-10-11 - Retrieval/Detect 合同复核与 S2 磁盘配置核实
+
+- 按用户本轮再次确认的合同更新评估基线：消耗任务使用单一 Quest 级 Detect，按定义顺序逐项持久化并恢复；Crafting 统计对同一玩家按来源服分别取 `max(事件累计, 绝对统计快照)` 后求和，Party 成员各自保留 PLAYER 进度。
+- CodeGraph `status` 显示索引 up-to-date；`explore` 核对 `InventorySnapshotTaskEvaluator`、`QuestObservationPlan`、`BqPartyInventorySnapshotFactSink`、`QuestRuntimeService` 及 Detect 批次链；`impact InventorySnapshotTaskEvaluator.evaluate` 为 14 个符号，`impact AuthenticatedQuestConsumptionDetectService.detect` 覆盖 Core/根集成/终端调用方，`affected` 返回 71 个宽候选。与固定 BQ `TaskRetrieval`、`TaskOptionalRetrieval` 源码逐项对照：非消耗 ACTIVE_PLAYERS 库存、`groupDetect`、需求顺序与 matcher、optional 忽略语义都已有 Base 逻辑和既有回归；Minecraft 快照枚举玩家 InventoryPlayer 全部槽位，规范化保持首次出现顺序并仅合并完全相同的物品形状。没有发现可由安全代码修改闭合的新 Retrieval 求值差异，因此不为增加代码而改写稳定实现。
+- 只读检查 S2 `config/betterquesting/questbook.cfg` 得到磁盘 `fullySyncQuests=false`；实际 GTNH 3.7.15-GTNH 源码读取该配置，但注释标记 `[NYI]`，该文件值不证明运行进程已加载。固定 `TaskRetrieval`/`TaskFluid` 在 false 分支使用发起者库存和 PLAYER 进度；Crafting 不读此开关。对应修正开发导航、能力矩阵和 M.2 行为说明中“配置文件未读取”的过时状态，并保留运行时加载/覆盖未验证的边界。
+- BQ Retrieval 的 Observation Station 会补充 owner 在线时的六邻方块容器库存观察；其 retrieval/fluid 路径不消费容器物品。按已确认的背包优先范围与既有计划，本轮仍延期该入口，DefaultQuests 定义也不能证明玩家是否实际使用。非消耗库存时序、多服真实在线 roster、ItemStack/NBT 与 Forge 实机仍未验收。
+- 本轮仅更新文档，无生产代码/测试改动，因此未运行测试。`git diff --check` 作为文档收口门槛；没有读取玩家进度、连接 PostgreSQL、执行 DDL/部署、启用 Quest/停用 BQ 或操作 S1/S2。R.2.19 Party 延迟事实归属与活动 Detect 批次遇新定义发布后的恢复政策仍待用户选择；M.2 继续 BLOCKED。
+
+### 2026-10-11 - Crafting PARTY 在线资格与全 roster 进度语义核对
+
+- CodeGraph `status` 为 up-to-date；`explore`/`callers`/`callees`/`impact` 复核 `QuestGameplayEventHandler.onItemCrafted/submitCraftingStatistics`、`QuestObservationPlan`、`MinecraftQuestFactFactory.craftingStatisticObserved`、`BqPartyTaskProgressScope`、`BqHuntPartyAssignmentPolicy.select`、`QuestEvaluationPlanner.requestsFor`、`BqPartyActiveQuestQuery.hasActiveMember`、`AuthenticatedCraftingStatisticsDetectionService.detectAutomatically` 与 Quest 级消耗 Detect 调用；随后以本地固定 BQ `ParticipantInfo`、`EventHandler`、`TaskCrafting` 源码核对上游时序。
+- 发现必须分开的两件事：BQ 用本服在线 `ACTIVE_PLAYERS` 的 active Quest 并集决定该事件 Quest 是否参与；任务被选中后，`TaskCrafting.onItemInternal` 将匹配产物事件进度投影到完整 `ALL_UUIDS`，包括离线 Party 成员，而绝对 `objectCraftStats` 只读取在线成员各自的统计。Base 成功处理时对应为 `BqPartyActiveQuestQuery` 在线活动资格门控、`BqHuntPartyAssignmentPolicy` 对当前完整 Party roster 的 PLAYER 进度 fan-out；Crafting 统计事实则仍按各在线玩家个人采集。自动统计不跨成员相加；该路径的绝对值继续按用户确认的来源服 max/sum。
+- 因此目前发现的不是“离线成员未获 Crafting 事件增量”，也不是“Party 统计被聚合到一个人”；自动实现已经分离在线资格与全 roster 事件 fan-out。仍未解决的是事实因数据库故障排队后，Base 在重试时重新解析 Party 和活动 Quest，而固定 BQ 在事件回调中同步读取当时资格/roster。严格事件时快照还受当前无新鲜权威缓存、内存队列崩溃丢失等边界影响，需等用户对 R.2.19 选择后再实施。
+- 更新 M.2 行为矩阵、权威能力矩阵与开发导航，避免把在线资格误写成在线进度接收范围。只做源码/调用链审计和文档更正，无运行代码/测试改动；本批 CodeGraph 影响查询范围覆盖上述事件、统计与 Planner 链。`git diff --check` 已通过。没有访问生产玩家进度/数据库、执行生产 DDL、部署、启用 Quest、停用 BQ 或操作 S1/S2。R.2.19 与定义发布并发选择仍待用户确认，M.2 继续 BLOCKED。
+
+### 2026-10-11 - Quest Detect 活动批次与发布版本并发边界补查
+
+- CodeGraph `status` 为 up-to-date；`node`/`impact` 追踪 `AuthenticatedQuestConsumptionDetectService.detect/continueBatch`、`ConsumptionRequestAuthorizer.planQuestDetect`、`JdbcConsumptionDetectBatchRepository.findActive/createIfAbsent` 与 `QuestDraftManagementService.publish`。影响面集中在 Core Detect、Quest 管理终端与已有 Core/根 PARTY-JDBC 回归。
+- 具体恢复缺口：入口按当前 `publishedVersion` 查询批次；旧批次在 `continueBatch` 中仍调用当前定义授权，并在结算时硬性校验定义版本相同。PostgreSQL 活动唯一索引目前按 `(participant_type, participant_id, quest_id, definition_version)` 限定，因此新版本发布后不仅旧批次不可续跑，当前版本也能创建另一批。若选择“允许发布并续跑旧批次”，必须同时固定旧定义的提交/结算语义并阻止同一主体同一 Quest 跨版本并行消耗；只调整 `findActive` 或仅续跑旧 batch 都不足以保证库存安全。若选择阻止发布，则现有版本授权与源服恢复模型可继续使用，但服务器或玩家长期不可用会使发布受阻。
+- R.2.19 归属审计进一步确认 `GameplayFact` 目前只固化来源服、事件键、玩家、类型、发生时间和属性；`QuestEvaluationPlanner` 在队列重试时重新读取发布 Quest、Party 成员、在线资格、完成前置和个人进度。因此要冻结事件时语义，不只是把 UUID 列表写进事实：还需快照哪些 Quest/版本当时符合 BQ active cache，并冻结对应 Party roster/接收 PLAYER 集合。若这些权威数据无法及时取得，必须选择 fail-closed（不重分配）或保留当前 retry-time 语义；本次已向用户明确询问，不预先假设。
+- 已有自动测试覆盖批次 Task 顺序、游标幂等、源服门控和最终结算 fence；未发现覆盖“批次部分应用 → 发布新定义 → 重启后 Detect”的测试。用户最新确认的 Quest 级消耗 Detect、来源内 max/来源间求和均已与权威文档相符；这不是对上述版本并发选项的回答。
+- 本次为静态审计与 Worklog 补记，无生产代码/测试改动，因此未运行测试；不访问生产数据库/玩家进度，不执行 DDL、部署或 Quest/BQ 开关变更。版本并发与 R.2.19 延迟事实归属仍待用户确认；M.2 保持 BLOCKED。
+
+### 2026-10-11 - Checkbox 配置语义更正与 QuestCompletion 奖励链复核
+
+- 只读复核固定 BQ `QBConfig.init` 与 `fullySyncQuests` 调用点：默认值 false 与 `[NYI]` 注释不是“配置未接线”的证据；该值仍从 Forge Configuration 读取，并被 `NetTaskCheckbox`、`QuestInstance`、`TaskRetrieval`、`TaskFluid` 直接分支使用。此前只读得到的 S2 磁盘 `questbook.cfg` 值为 false；它不证明服务器进程已加载或未被运行时覆写。已修正开发导航、能力矩阵及 M.2 行为说明的陈旧措辞。没有把 Checkbox PARTY/TEAM/PUBLIC 兼容性提升为已完成。
+- 继续检查 DefaultQuests 实际使用的 QuestCompletion 奖励：BQ `RewardQuestCompletion.claimReward0` 对缺目标、无 QuestCache 或无目标 UUID 是 no-op；目标已经对当前玩家完成时不重复完成；否则以该玩家身份设置目标完成并标记客户端 QuestCache dirty。Base 生产链为 entitlement handler → `JdbcQuestCompletionRewardPort`，在事务中解析目标已发布版本、解析目标 scope/参与成员、实施“曾完成”闩锁、创建目标 Task 完成态并插入目标奖励权益。CodeGraph `impact JdbcQuestCompletionRewardPort.complete` 命中接口、handler 和 4 个 PostgreSQL 用例（目标原子完成、仅接收玩家、重复周期不重做、目标 scope/成员冻结）；`affected` 返回 49 个宽测试候选。现有测试覆盖合成 definitions 的数据库语义，尚非真实 BQ `QuestCache`/Forge 或 DefaultQuests 全量影子验证；未发现可据此安全改写的当前行为差异。
+- 本轮环境验证：Gradle `:galaxy-quest-core:test --rerun-tasks` 在测试启动前因构建要求 JDK 25、Foojay toolchain 下载不可用而终止；这不是测试失败。随后用 JDK 17 对 Core 主/测试源码执行 `javac --release 8`，使用缓存的 JUnit 4.13.2/hamcrest 运行 62 个测试类、290 项，结果 `OK (290 tests)`，0 failure/error。该直接 JUnit 路径不是根 Forge/Gradle、PostgreSQL、assemble 或自包含验收。
+- 本轮只作源码/CodeGraph 审计及文档更正，不修改生产 Java、数据库合同或配置；继续不读取玩家进度/生产数据库，不执行 DDL、部署、启用 Quest、停用 BQ 或操作 S1/S2。R.2.19 事实重试归属与活动 Detect 遇新定义发布的恢复策略仍待用户选择，M.2 继续 BLOCKED。
