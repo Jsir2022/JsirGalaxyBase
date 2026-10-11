@@ -11,8 +11,6 @@ import com.jsirgalaxybase.quest.core.QuestDefinition;
 import com.jsirgalaxybase.quest.core.QuestProgressSnapshot;
 import com.jsirgalaxybase.quest.core.QuestStatus;
 import com.jsirgalaxybase.quest.core.ConsumptionRequestAuthorizer;
-import com.jsirgalaxybase.quest.core.QuestBooleanParameter;
-import com.jsirgalaxybase.quest.core.QuestParticipantScope;
 import com.jsirgalaxybase.quest.core.RewardDefinition;
 import com.jsirgalaxybase.quest.core.TaskDefinition;
 import com.jsirgalaxybase.quest.core.TaskProgress;
@@ -26,14 +24,10 @@ public final class TerminalQuestCenterSnapshotMapper {
     }
     public TerminalQuestCenterSectionSnapshot map(QuestCenterPage page,String filter,String query,String selectedQuestId,
         boolean detailView,String message,boolean consumptionAvailable){
-        return map(page,filter,query,selectedQuestId,detailView,message,consumptionAvailable,false);
-    }
-    public TerminalQuestCenterSectionSnapshot map(QuestCenterPage page,String filter,String query,String selectedQuestId,
-        boolean detailView,String message,boolean consumptionAvailable,boolean craftingDetectionAvailable){
         List<TerminalQuestCenterSectionSnapshot.Chapter> chapters=new ArrayList<TerminalQuestCenterSectionSnapshot.Chapter>();
         for(QuestCenterChapterSummary value:page.getChapters())chapters.add(new TerminalQuestCenterSectionSnapshot.Chapter(value.getId(),value.getName(),value.getCompleted(),value.getTotal()));
         List<TerminalQuestCenterSectionSnapshot.Quest> quests=new ArrayList<TerminalQuestCenterSectionSnapshot.Quest>();TerminalQuestCenterSectionSnapshot.Detail detail=null;
-        for(QuestCenterEntry entry:page.getQuests()){TerminalQuestCenterSectionSnapshot.Quest summary=summary(entry,page.getSelectedChapterId());quests.add(summary);if(detailView&&entry.getDefinition().getId().toString().equals(selectedQuestId))detail=detail(entry,summary,consumptionAvailable,craftingDetectionAvailable);}
+        for(QuestCenterEntry entry:page.getQuests()){TerminalQuestCenterSectionSnapshot.Quest summary=summary(entry,page.getSelectedChapterId());quests.add(summary);if(detailView&&entry.getDefinition().getId().toString().equals(selectedQuestId))detail=detail(entry,summary,consumptionAvailable);}
         return new TerminalQuestCenterSectionSnapshot(quests.isEmpty()?"EMPTY":"READY",message,
             detail==null?TerminalQuestCenterSectionSnapshot.View.BROWSE:TerminalQuestCenterSectionSnapshot.View.DETAIL,
             page.getSelectedChapterId(),detail==null?"":selectedQuestId,filter,query,chapters,page.getChapterPageIndex(),
@@ -42,13 +36,11 @@ public final class TerminalQuestCenterSnapshotMapper {
     }
     private static TerminalQuestCenterSectionSnapshot.Quest summary(QuestCenterEntry entry,String chapterId){QuestDefinition q=entry.getDefinition();int done=0;if(entry.getProgress()!=null)for(TaskProgress p:entry.getProgress().getTasks().values())if(p.isComplete())done++;String registry=icon(q);return new TerminalQuestCenterSectionSnapshot.Quest(q.getId().toString(),chapterId,q.getName(),subtitle(entry),state(entry),done,q.getTasks().size(),registry,0,q.getName(),entry.isTracked());}
     private static TerminalQuestCenterSectionSnapshot.Detail detail(QuestCenterEntry entry,
-        TerminalQuestCenterSectionSnapshot.Quest summary,boolean consumptionAvailable,boolean craftingDetectionAvailable){
+        TerminalQuestCenterSectionSnapshot.Quest summary,boolean consumptionAvailable){
         QuestDefinition q=entry.getDefinition();
         QuestProgressSnapshot progress=entry.getProgress();
         boolean repeatReady=entry.getStatus()==QuestStatus.COMPLETED&&progress!=null
             &&q.getRepeatPolicy().isAvailable(progress.getCompletedAt(),System.currentTimeMillis());
-        boolean detectStatusAvailable=entry.getStatus()!=QuestStatus.LOCKED
-            &&(entry.getStatus()!=QuestStatus.COMPLETED||repeatReady);
         List<TerminalQuestCenterSectionSnapshot.Task> tasks=new ArrayList<TerminalQuestCenterSectionSnapshot.Task>();
         for(TaskDefinition task:q.getTasks()){
             TaskProgress value=progress==null?null:progress.getTasks().get(task.getKey());
@@ -58,13 +50,8 @@ public final class TerminalQuestCenterSnapshotMapper {
             boolean submittable=consumptionAvailable&&entry.getStatus()!=QuestStatus.LOCKED
                 &&entry.getStatus()!=QuestStatus.COMPLETED&&!entry.getRewards().hasClaimable()&&!value.isComplete()
                 &&ConsumptionRequestAuthorizer.supports(q,task);
-            boolean detectable=craftingDetectionAvailable&&detectStatusAvailable&&!entry.getRewards().hasClaimable()
-                &&(!value.isComplete()||repeatReady)&&q.getBehavior().getParticipantScope()==QuestParticipantScope.PLAYER
-                &&!q.getBehavior().isGlobal()
-                &&"bq_standard:crafting".equals(task.getTypeId())
-                &&QuestBooleanParameter.parse(task.getParameters().get("allowCraftedFromStatistics"),false);
             tasks.add(new TerminalQuestCenterSectionSnapshot.Task(task.getKey(),typeName(task.getTypeId(),"任务"),
-                task.isOptional()?"可选目标":"必需目标",value.getValue(),value.getTarget(),confirmable,submittable,detectable));
+                task.isOptional()?"可选目标":"必需目标",value.getValue(),value.getTarget(),confirmable,submittable,false));
         }
         List<TerminalQuestCenterSectionSnapshot.Reward> rewards=new ArrayList<TerminalQuestCenterSectionSnapshot.Reward>();
         for(RewardDefinition reward:q.getRewards()){

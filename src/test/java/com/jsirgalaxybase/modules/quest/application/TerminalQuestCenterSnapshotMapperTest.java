@@ -26,24 +26,24 @@ import com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot;
 
 public class TerminalQuestCenterSnapshotMapperTest {
     @Test
-    public void exposesCraftingDetectOnlyForAvailablePlayerCraftingTasks() {
+    public void keepsCraftingStatisticsAutomaticInsteadOfExposingManualDetect() {
         QuestDefinition personal = quest(QuestBehavior.DEFAULT, "true");
-        assertDetectable(personal, QuestStatus.IN_PROGRESS, true, true);
-        assertDetectable(personal, QuestStatus.LOCKED, true, false);
-        assertDetectable(personal, QuestStatus.COMPLETED, true, false);
-        assertDetectable(personal, QuestStatus.IN_PROGRESS, false, false);
-        assertDetectable(quest(QuestBehavior.builder().globalShare(true).build(), "true"),
-            QuestStatus.IN_PROGRESS, true, true);
-        assertDetectable(quest(QuestBehavior.builder().global(true).globalShare(true).build(), "true"),
-            QuestStatus.IN_PROGRESS, true, false);
-        assertDetectable(quest(QuestBehavior.builder()
+        assertNotDetectable(personal, QuestStatus.IN_PROGRESS, true);
+        assertNotDetectable(personal, QuestStatus.LOCKED, true);
+        assertNotDetectable(personal, QuestStatus.COMPLETED, true);
+        assertNotDetectable(personal, QuestStatus.IN_PROGRESS, false);
+        assertNotDetectable(quest(QuestBehavior.builder().globalShare(true).build(), "true"),
+            QuestStatus.IN_PROGRESS, true);
+        assertNotDetectable(quest(QuestBehavior.builder().global(true).globalShare(true).build(), "true"),
+            QuestStatus.IN_PROGRESS, true);
+        assertNotDetectable(quest(QuestBehavior.builder()
             .participantScope(com.jsirgalaxybase.quest.core.QuestParticipantScope.PARTY).build(), "true"),
-            QuestStatus.IN_PROGRESS, true, false);
-        assertDetectable(quest(QuestBehavior.DEFAULT, "false"), QuestStatus.IN_PROGRESS, true, false);
+            QuestStatus.IN_PROGRESS, true);
+        assertNotDetectable(quest(QuestBehavior.DEFAULT, "false"), QuestStatus.IN_PROGRESS, true);
     }
 
     @Test
-    public void exposesCraftingDetectAgainWhenARepeatCycleIsAvailable() {
+    public void repeatCraftingQuestStillUsesAutomaticStatisticsRefresh() {
         QuestDefinition definition = quest(QuestBehavior.DEFAULT, "true");
         UUID player = UUID.randomUUID();
         QuestProgressSnapshot progress = new QuestProgressSnapshot(player, definition.getId(), definition.getVersion(),
@@ -55,8 +55,8 @@ public class TerminalQuestCenterSnapshotMapperTest {
             Collections.<com.jsirgalaxybase.quest.core.QuestCenterChapterSummary>emptyList(), 0, 6, 0,
             Collections.singletonList(entry), 0, 7, 1);
         TerminalQuestCenterSectionSnapshot snapshot = new TerminalQuestCenterSnapshotMapper().map(page,
-            "all", "", definition.getId().toString(), true, "", false, true);
-        assertTrue(snapshot.getDetail().getTasks().get(0).isDetectable());
+            "all", "", definition.getId().toString(), true, "", false);
+        assertFalse(snapshot.getDetail().getTasks().get(0).isDetectable());
     }
 
     @Test
@@ -68,16 +68,22 @@ public class TerminalQuestCenterSnapshotMapperTest {
             QuestStatus.LOCKED, true);
     }
 
-    private static void assertDetectable(QuestDefinition definition, QuestStatus status, boolean runtimeAvailable,
-        boolean expected) {
+    @Test
+    public void exposesManualSubmissionOnlyForConsumingInventoryTasks() {
+        assertSubmittable(retrievalQuest(true, false), true, true);
+        assertSubmittable(retrievalQuest(false, false), true, false);
+        assertSubmittable(retrievalQuest(true, true), true, false);
+        assertSubmittable(retrievalQuest(true, false), false, false);
+    }
+
+    private static void assertNotDetectable(QuestDefinition definition, QuestStatus status, boolean runtimeAvailable) {
         QuestCenterEntry entry = new QuestCenterEntry(definition, null, QuestRewardSummary.EMPTY, status);
         QuestCenterPage page = new QuestCenterPage(ParticipantId.player(UUID.randomUUID()), "chapter",
             Collections.<com.jsirgalaxybase.quest.core.QuestCenterChapterSummary>emptyList(), 0, 6, 0,
             Collections.singletonList(entry), 0, 7, 1);
         TerminalQuestCenterSectionSnapshot snapshot = new TerminalQuestCenterSnapshotMapper().map(page,
-            "all", "", definition.getId().toString(), true, "", false, runtimeAvailable);
-        boolean detectable = snapshot.getDetail().getTasks().get(0).isDetectable();
-        if (expected) assertTrue(detectable); else assertFalse(detectable);
+            "all", "", definition.getId().toString(), true, "", false);
+        assertFalse(snapshot.getDetail().getTasks().get(0).isDetectable());
     }
 
     private static QuestDefinition quest(QuestBehavior behavior, String allowStatistics) {
@@ -102,6 +108,33 @@ public class TerminalQuestCenterSnapshotMapperTest {
             "all", "", definition.getId().toString(), true, "");
         if (expected) assertTrue(snapshot.getDetail().getTasks().get(0).isConfirmable());
         else assertFalse(snapshot.getDetail().getTasks().get(0).isConfirmable());
+    }
+
+    private static void assertSubmittable(QuestDefinition definition, boolean runtimeAvailable, boolean expected) {
+        QuestCenterEntry entry = new QuestCenterEntry(definition, null, QuestRewardSummary.EMPTY,
+            QuestStatus.IN_PROGRESS);
+        QuestCenterPage page = new QuestCenterPage(ParticipantId.player(UUID.randomUUID()), "chapter",
+            Collections.<com.jsirgalaxybase.quest.core.QuestCenterChapterSummary>emptyList(), 0, 6, 0,
+            Collections.singletonList(entry), 0, 7, 1);
+        TerminalQuestCenterSectionSnapshot snapshot = new TerminalQuestCenterSnapshotMapper().map(page,
+            "all", "", definition.getId().toString(), true, "", runtimeAvailable);
+        if (expected) assertTrue(snapshot.getDetail().getTasks().get(0).isSubmittable());
+        else assertFalse(snapshot.getDetail().getTasks().get(0).isSubmittable());
+    }
+
+    private static QuestDefinition retrievalQuest(boolean consume, boolean autoConsume) {
+        Map<String, String> parameters = new LinkedHashMap<String, String>();
+        parameters.put("consume", Boolean.toString(consume));
+        parameters.put("autoConsume", Boolean.toString(autoConsume));
+        parameters.put("item.count", "1");
+        parameters.put("item.0.registryName", "minecraft:iron_ingot");
+        parameters.put("item.0.meta", "0");
+        parameters.put("item.0.amount", "4");
+        return new QuestDefinition(UUID.randomUUID(), 1, "Retrieval", "", QuestLogic.AND, QuestLogic.AND,
+            Collections.<UUID>emptySet(), Collections.singletonList(new TaskDefinition("retrieval",
+                "bq_standard:retrieval", false, parameters)),
+            Collections.<com.jsirgalaxybase.quest.core.RewardDefinition>emptyList(), RepeatPolicy.never(),
+            QuestBehavior.DEFAULT);
     }
 
     private static QuestDefinition checkboxQuest(QuestBehavior behavior) {

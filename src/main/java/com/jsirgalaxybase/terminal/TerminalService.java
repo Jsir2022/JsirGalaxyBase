@@ -95,7 +95,8 @@ import com.jsirgalaxybase.quest.core.StoredQuestDefinition;
 import com.jsirgalaxybase.quest.core.RewardChoiceSelectionStatus;
 import com.jsirgalaxybase.quest.core.AuthenticatedCheckboxConfirmationService;
 import com.jsirgalaxybase.quest.core.AuthenticatedQuestConsumptionService;
-import com.jsirgalaxybase.quest.core.AuthenticatedCraftingStatisticsDetectionService;
+import com.jsirgalaxybase.quest.core.AuthenticatedQuestConsumptionDetectService;
+import com.jsirgalaxybase.quest.core.ConsumptionDetectBatchResult;
 import com.jsirgalaxybase.quest.core.ConsumptionSelection;
 import com.jsirgalaxybase.quest.core.ConsumptionSubmissionStatus;
 import com.jsirgalaxybase.quest.core.FactProcessingStatus;
@@ -125,8 +126,8 @@ public final class TerminalService {
     private static volatile AuthenticatedQuestClaimService questClaimService;
     private static volatile AuthenticatedRewardChoiceService rewardChoiceService;
     private static volatile AuthenticatedCheckboxConfirmationService checkboxConfirmationService;
-    private static volatile AuthenticatedCraftingStatisticsDetectionService craftingStatisticsDetectionService;
     private static volatile AuthenticatedQuestConsumptionService questConsumptionService;
+    private static volatile AuthenticatedQuestConsumptionDetectService questConsumptionDetectService;
     private static volatile AuthenticatedQuestTrackingService questTrackingService;
     private static volatile AuthenticatedQuestDefinitionManagementQuery questDefinitionManagementQuery;
     private static volatile QuestDraftManagementService questDraftManagementService;
@@ -214,8 +215,8 @@ public final class TerminalService {
     public static void installQuestClaimService(AuthenticatedQuestClaimService service) { questClaimService = service; }
     public static void installRewardChoiceService(AuthenticatedRewardChoiceService service) { rewardChoiceService = service; }
     public static void installCheckboxConfirmationService(AuthenticatedCheckboxConfirmationService service) { checkboxConfirmationService = service; }
-    public static void installCraftingStatisticsDetectionService(AuthenticatedCraftingStatisticsDetectionService service) { craftingStatisticsDetectionService = service; }
     public static void installQuestConsumptionService(AuthenticatedQuestConsumptionService service) { questConsumptionService = service; }
+    public static void installQuestConsumptionDetectService(AuthenticatedQuestConsumptionDetectService service) { questConsumptionDetectService = service; }
     public static void installQuestTrackingService(AuthenticatedQuestTrackingService service) { questTrackingService = service; }
     public static void installQuestDefinitionManagementQuery(AuthenticatedQuestDefinitionManagementQuery query) { questDefinitionManagementQuery = query; }
     public static void installQuestDraftManagementService(QuestDraftManagementService service) { questDraftManagementService = service; }
@@ -1235,24 +1236,32 @@ public final class TerminalService {
                     :status==FactProcessingStatus.DUPLICATE?"该任务确认已提交。":"任务不存在、不可确认或尚未满足完成条件。";
             }catch(IllegalArgumentException invalid){message="复选任务标识无效，进度没有改变。";}
         }else if(actionType==TerminalActionType.QUEST_DETECT_CRAFTING){
-            if(safeIntent.getQuestId().isEmpty()||safeIntent.getTaskKey().isEmpty())
-                message="合成检测任务标识无效，进度没有改变。";
-            else if(craftingStatisticsDetectionService==null)
-                message="合成统计检测尚未启用，任务进度没有改变。";
+            // Keep the legacy packet ID decodable, but Crafting statistics now refresh automatically.
+            message="合成统计由系统自动复评，无需手动检测。";
+        }else if(actionType==TerminalActionType.QUEST_DETECT_CONSUMPTION){
+            if(safeIntent.getQuestId().isEmpty())message="任务标识无效，物品没有改变。";
+            else if(questConsumptionDetectService==null)message="任务物品检测尚未启用，背包没有改变。";
             else try{
-                java.util.List<com.jsirgalaxybase.quest.core.FactProcessingResult> results =
-                    craftingStatisticsDetectionService.detect(authenticatedPlayerId,
-                        UUID.fromString(safeIntent.getQuestId()),safeIntent.getTaskKey(),System.currentTimeMillis());
-                boolean accepted=false,duplicate=false;
-                for(com.jsirgalaxybase.quest.core.FactProcessingResult result:results){
-                    accepted|=result.getStatus()==FactProcessingStatus.ACCEPTED;
-                    duplicate|=result.getStatus()==FactProcessingStatus.DUPLICATE;
+                ConsumptionDetectBatchResult result=questConsumptionDetectService.detect(authenticatedPlayerId,
+                    UUID.fromString(safeIntent.getQuestId()),System.currentTimeMillis());
+                if(result.getStatus()==ConsumptionDetectBatchResult.Status.NO_CONSUMING_TASKS)
+                    message="当前任务没有可提交的消耗目标。";
+                else if(result.getStatus()==ConsumptionDetectBatchResult.Status.WAITING_FOR_SOURCE_SERVER)
+                    message="该检测批次从 "+result.getSourceServer()+" 服开始，请回到该服继续；物品不会重复扣除。";
+                else if(result.getStatus()==ConsumptionDetectBatchResult.Status.RESUMABLE)
+                    message="检测批次已保存，将从第 "+(result.getNextTaskIndex()+1)+" / "+result.getTaskCount()
+                        +" 项继续；请稍后再次检测。";
+                else{
+                    int confirmed=0,rejected=0;
+                    for(com.jsirgalaxybase.quest.core.ConsumptionSubmission submission:result.getSubmissions()){
+                        if(submission.getStatus()==ConsumptionSubmissionStatus.CONFIRMED)confirmed++;
+                        else if(submission.getStatus()==ConsumptionSubmissionStatus.REJECTED)rejected++;
+                    }
+                    message="任务物品检测完成：已提交 "+confirmed+" 项，无匹配/无需消耗 "+rejected+" 项。";
                 }
-                message=accepted?"已检测当前玩家的合成统计并更新任务进度。":duplicate?"合成统计已检测，进度已是最新。"
-                    :"没有符合条件的合成统计，或任务尚未解锁。";
-            }catch(IllegalArgumentException invalid){message="合成检测任务标识无效，进度没有改变。";}
-            catch(RuntimeException failure){GalaxyBase.LOG.error("Quest crafting statistics detection failed for "
-                +authenticatedPlayerName,failure);message="合成统计检测遇到服务端错误，请刷新任务进度后再试。";}
+            }catch(IllegalArgumentException invalid){message="任务标识无效或当前任务不可检测，背包没有改变。";}
+            catch(RuntimeException failure){GalaxyBase.LOG.error("Quest-level consumption Detect failed for "
+                +authenticatedPlayerName,failure);message="任务物品检测遇到服务端错误；再次检测可从已保存位置恢复。";}
         }else if(actionType==TerminalActionType.QUEST_SUBMIT_TASK){
             if(safeIntent.getQuestId().isEmpty()||safeIntent.getTaskKey().isEmpty())
                 message="消耗任务标识无效，背包没有改变。";
@@ -1301,7 +1310,7 @@ public final class TerminalService {
             :questCenterQuery.loadPage(participant,request);
         boolean detail=!safeIntent.getQuestId().isEmpty()&&actionType!=TerminalActionType.QUEST_BACK;
         return questCenterMapper.map(page,safeIntent.getFilter(),safeIntent.getQuery(),safeIntent.getQuestId(),detail,message,
-            questConsumptionService!=null,craftingStatisticsDetectionService!=null)
+            questConsumptionService!=null)
             .withParticipants(participantSnapshots(authenticatedPlayerId));
     }
 

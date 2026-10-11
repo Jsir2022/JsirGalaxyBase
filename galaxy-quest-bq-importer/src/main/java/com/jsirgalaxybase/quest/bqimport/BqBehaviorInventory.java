@@ -59,8 +59,7 @@ public final class BqBehaviorInventory {
             }
             questProfile.add(quest);
             for (BqStandardTaskSpec spec : quest.getTaskSpecs()) {
-                usage(tasks, spec.getTypeId()).add(spec.getOptions(), spec.getItems(), spec.getFluids(),
-                    quest.getDefinition().getId().toString());
+                usage(tasks, spec.getTypeId()).add(spec.getOptions(), spec.getItems(), spec.getFluids());
                 if ("bq_standard:location".equals(spec.getTypeId())) {
                     locationTaskCount++;
                     addLocationProfile(locationProfiles, spec.getOptions());
@@ -80,7 +79,7 @@ public final class BqBehaviorInventory {
                 }
             }
             for (BqStandardRewardSpec spec : quest.getRewardSpecs()) {
-                usage(rewards, spec.getTypeId()).add(spec.getOptions(), quest.getDefinition().getId().toString());
+                usage(rewards, spec.getTypeId()).add(spec.getOptions());
             }
         }
         return new BqBehaviorInventory(manifest.getSourceHash(), tasks, rewards, questProfiles, questCompletionProfiles,
@@ -309,8 +308,7 @@ public final class BqBehaviorInventory {
             if (usage.itemRequirements > 0) out.append("|itemMatchProfiles=").append(usage.itemMatchProfiles);
             if (usage.fluidRequirements > 0) out.append("|fluidRequirements=").append(usage.fluidRequirements)
                 .append("|fluidAmountProfiles=").append(usage.fluidAmountProfiles);
-            out
-                .append("|sampleQuestIds=").append(usage.sampleQuestIds).append('\n');
+            out.append('\n');
         }
     }
 
@@ -324,9 +322,7 @@ public final class BqBehaviorInventory {
         private int itemRequirements;
         private final Map<String, Integer> fluidAmountProfiles = new TreeMap<String, Integer>();
         private int fluidRequirements;
-        private final List<String> sampleQuestIds = new ArrayList<String>();
-
-        private void add(Map<String, String> options, String questId) {
+        private void add(Map<String, String> options) {
             count++;
             for (String key : options.keySet()) {
                 Integer previous = optionKeys.get(key);
@@ -344,7 +340,6 @@ public final class BqBehaviorInventory {
             }
             String profile = behaviorProfile(options);
             if (!profile.isEmpty()) increment(behaviorProfiles, profile);
-            if (sampleQuestIds.size() < 3 && !sampleQuestIds.contains(questId)) sampleQuestIds.add(questId);
         }
 
         private static String behaviorProfile(Map<String, String> options) {
@@ -360,8 +355,8 @@ public final class BqBehaviorInventory {
         }
 
         private void add(Map<String, String> options, List<BqItemStackSpec> items,
-            List<BqFluidStackSpec> fluids, String questId) {
-            add(options, questId);
+            List<BqFluidStackSpec> fluids) {
+            add(options);
             if (items != null) {
                 boolean nbtCheckConfigured = options.containsKey("ignoreNBT") && "false".equals(options.get("ignoreNBT"));
                 boolean partialMatchDisabled = options.containsKey("partialMatch")
@@ -451,8 +446,6 @@ public final class BqBehaviorInventory {
         public Map<String, Integer> getFluidAmountProfiles() {
             return Collections.unmodifiableMap(fluidAmountProfiles);
         }
-        public List<String> getSampleQuestIds() { return Collections.unmodifiableList(sampleQuestIds); }
-
         private static boolean isBehaviorFlag(String key) {
             return "consume".equals(key) || "autoConsume".equals(key) || "groupDetect".equals(key)
                 || "ignoreNBT".equals(key) || "partialMatch".equals(key)

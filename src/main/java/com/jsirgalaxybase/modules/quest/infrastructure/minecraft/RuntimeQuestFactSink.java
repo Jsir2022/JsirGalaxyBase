@@ -4,10 +4,12 @@ import com.jsirgalaxybase.quest.core.FactProcessingResult;
 import com.jsirgalaxybase.quest.core.GameplayFact;
 import com.jsirgalaxybase.quest.core.QuestClock;
 import com.jsirgalaxybase.quest.core.QuestEvaluationRequestProvider;
+import com.jsirgalaxybase.quest.core.QuestEvaluationRequest;
 import com.jsirgalaxybase.quest.core.ParticipantId;
 import com.jsirgalaxybase.quest.core.QuestRuntimeService;
 
 import java.util.UUID;
+import java.util.List;
 
 public final class RuntimeQuestFactSink implements QuestFactSink {
     private final QuestRuntimeService runtime;
@@ -26,6 +28,17 @@ public final class RuntimeQuestFactSink implements QuestFactSink {
     public void accept(GameplayFact fact) {
         FactProcessingResult result = runtime.apply(fact, plans, clock.currentTimeMillis());
         // ACCEPTED, DUPLICATE and IGNORED are all terminal for this immutable fact.
+        if (result == null) throw new IllegalStateException("quest runtime returned no fact result");
+    }
+
+    @Override
+    public void accept(GameplayFact fact, List<QuestEvaluationRequest> eventTimeRequests) {
+        if (fact == null || eventTimeRequests == null) throw new IllegalArgumentException(
+            "fact and event-time requests are required");
+        // No eligible Quest existed at event time. Do not let a later Party, publication or prerequisite change
+        // retroactively turn this already-observed event into progress.
+        if (eventTimeRequests.isEmpty()) return;
+        FactProcessingResult result = runtime.apply(fact, eventTimeRequests, plans, clock.currentTimeMillis());
         if (result == null) throw new IllegalStateException("quest runtime returned no fact result");
     }
 

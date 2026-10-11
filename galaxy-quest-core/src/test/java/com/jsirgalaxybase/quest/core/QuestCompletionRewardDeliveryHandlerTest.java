@@ -31,16 +31,21 @@ public class QuestCompletionRewardDeliveryHandlerTest {
         assertTrue(outcome.isDelivered());
     }
 
-    @Test public void malformedAndMissingTargetArePermanentFailures() {
+    @Test public void malformedTargetIsPermanentFailure() {
         RewardDeliveryOutcome malformed = new QuestCompletionRewardDeliveryHandler(
             new Capture(QuestCompletionRewardPort.Result.COMPLETED), () -> 1L).deliver(lease("bad"));
         assertFalse(malformed.isDelivered());
         assertFalse(malformed.isRetryable());
+    }
+
+    @Test public void missingTargetMatchesBetterQuestingNoOpAndCompletesDelivery() {
         RewardDeliveryOutcome missing = new QuestCompletionRewardDeliveryHandler(
             new Capture(QuestCompletionRewardPort.Result.TARGET_NOT_FOUND), () -> 1L)
                 .deliver(lease(new UUID(3L, 4L).toString()));
-        assertFalse(missing.isDelivered());
-        assertFalse(missing.isRetryable());
+        assertTrue(missing.isDelivered());
+    }
+
+    @Test public void unavailableTargetScopeIsPermanentFailure() {
         RewardDeliveryOutcome unavailable = new QuestCompletionRewardDeliveryHandler(
             new Capture(QuestCompletionRewardPort.Result.TARGET_SCOPE_UNAVAILABLE), () -> 1L)
                 .deliver(lease(new UUID(3L, 4L).toString()));

@@ -38,7 +38,20 @@ public final class ConsumptionRequestAuthorizer {
     }
 
     public ConsumptionRequest authorize(ConsumptionIntent intent, long now) {
-        QuestDefinition definition = published(intent);
+        return authorize(intent, now, null, null);
+    }
+
+    /** Batch variant pins participant and repeat cycle before any player inventory side effect is applied. */
+    public ConsumptionRequest authorize(ConsumptionIntent intent, long now, ParticipantId expectedParticipant,
+        Integer expectedCycle) {
+        return authorize(intent, now, expectedParticipant, expectedCycle, null);
+    }
+
+    /** Version-pinned authorization for a durable Detect batch; a newer publication cannot rewrite its tasks. */
+    public ConsumptionRequest authorize(ConsumptionIntent intent, long now, ParticipantId expectedParticipant,
+        Integer expectedCycle, Integer expectedDefinitionVersion) {
+        QuestDefinition definition = expectedDefinitionVersion == null ? published(intent)
+            : published(intent.getQuestId(), expectedDefinitionVersion.intValue());
         TaskDefinition task = task(definition, intent.getTaskKey());
         if (!supports(definition, task)) {
             throw new IllegalArgumentException("task is outside the verified manual item-consumption subset");
@@ -51,11 +64,11 @@ public final class ConsumptionRequestAuthorizer {
         Optional<QuestProgressSnapshot> stored = progress.findProgress(participant, definition.getId(),
             definition.getVersion());
         Set<java.util.UUID> completed = completions.findCompletedQuestIds(participant);
-        int activeCycle = stored.isPresent() ? stored.get().getCycle() : 0;
-        boolean pendingActiveCycle = progress.hasPendingConsumptionSubmission(participant, definition.getId(),
-            definition.getVersion(), activeCycle);
-        QuestProgressSnapshot normalized = engine.evaluate(membership, definition, stored.orElse(null), null,
-            completed, now, pendingActiveCycle).getProgress();
+        if (expectedParticipant != null && !expectedParticipant.equals(participant)) throw new IllegalArgumentException(
+            "quest membership changed during consuming Detect batch");
+        QuestProgressSnapshot normalized = normalize(membership, definition, stored.orElse(null), completed, now);
+        if (expectedCycle != null && expectedCycle.intValue() != normalized.getCycle()) throw new IllegalArgumentException(
+            "quest repeat cycle changed during consuming Detect batch");
         if (progress.hasPendingConsumptionSubmission(participant, definition.getId(), definition.getVersion(),
             normalized.getCycle())) {
             throw new IllegalArgumentException("another item submission is pending for this quest cycle");
@@ -87,6 +100,101 @@ public final class ConsumptionRequestAuthorizer {
             parameters, intent.getCreatedAt());
     }
 
+    public int publishedVersion(java.util.UUID questId) {
+        if (questId == null) throw new IllegalArgumentException("questId is required");
+        return published(questId).getVersion();
+    }
+
+    /** Current server-side evaluation context used only for final Quest settlement after a Detect batch. */
+    public QuestEvaluationRequest evaluationRequest(java.util.UUID playerId, java.util.UUID questId) {
+        if (playerId == null || questId == null) throw new IllegalArgumentException("player and quest are required");
+        QuestDefinition definition = published(questId);
+        return evaluationRequest(playerId, definition, null);
+    }
+
+    /** Uses the pinned historical definition and participant to settle an already-started Detect batch. */
+    public QuestEvaluationRequest evaluationRequest(java.util.UUID playerId, java.util.UUID questId,
+        int definitionVersion, ParticipantId expectedParticipant) {
+        if (playerId == null || questId == null || definitionVersion < 1 || expectedParticipant == null) {
+            throw new IllegalArgumentException("player, pinned quest version and participant are required");
+        }
+        if (expectedParticipant.getType() != ParticipantType.PLAYER
+            || !playerId.equals(expectedParticipant.getId())) throw new IllegalArgumentException(
+                "consuming Detect settlement is only supported for the authenticated PLAYER participant");
+        return evaluationRequest(playerId, published(questId, definitionVersion), expectedParticipant);
+    }
+
+    private QuestEvaluationRequest evaluationRequest(java.util.UUID playerId, QuestDefinition definition,
+        ParticipantId expectedParticipant) {
+        if (definition.getBehavior().getParticipantScope() != QuestParticipantScope.PLAYER) {
+            throw new IllegalArgumentException("consuming Detect is not enabled for this quest participant scope");
+        }
+        ParticipantMembership membership;
+        if (expectedParticipant != null) {
+            membership = ParticipantMembership.player(playerId);
+        } else {
+            List<ParticipantMembership> selected = assignments.select(definition, memberships.resolve(playerId));
+            if (selected.isEmpty()) throw new IllegalArgumentException("player has no active participant for quest scope");
+            membership = selected.get(0);
+        }
+        return new QuestEvaluationRequest(definition, membership, completions.findCompletedQuestIds(
+            membership.getParticipantId()));
+    }
+
+    /** Builds the ordered server-side task list for a single Quest-level consuming Detect action. */
+    public QuestConsumptionDetectPlan planQuestDetect(java.util.UUID playerId, java.util.UUID questId, long now) {
+        if (playerId == null || questId == null) throw new IllegalArgumentException("player and quest are required");
+        QuestEvaluationRequest request = evaluationRequest(playerId, questId);
+        QuestDefinition definition = request.getDefinition();
+        ParticipantMembership membership = request.getMembership();
+        ParticipantId participant = membership.getParticipantId();
+        Optional<QuestProgressSnapshot> stored = progress.findProgress(participant, definition.getId(),
+            definition.getVersion());
+        Set<java.util.UUID> completed = request.getCompletedPrerequisites();
+        QuestProgressSnapshot normalized = normalize(membership, definition, stored.orElse(null), completed, now);
+        if (progress.hasPendingConsumptionSubmission(participant, definition.getId(), definition.getVersion(),
+            normalized.getCycle())) throw new IllegalArgumentException(
+                "another consumption operation is still pending for this quest cycle");
+        if (normalized.getStatus() == QuestStatus.LOCKED || normalized.getStatus() == QuestStatus.COMPLETED) {
+            throw new IllegalArgumentException("quest is not accepting consumption in status " + normalized.getStatus());
+        }
+        List<String> taskKeys = new ArrayList<String>();
+        for (TaskDefinition task : definition.getTasks()) {
+            if (!supports(definition, task)) continue;
+            TaskProgress taskProgress = normalized.getTasks().get(task.getKey());
+            if (taskProgress == null || taskProgress.isComplete()) continue;
+            boolean remaining = false;
+            for (int i = 0; i < taskProgress.getValues().size(); i++) {
+                if (taskProgress.getTargets().get(i) > taskProgress.getValues().get(i)) {
+                    remaining = true;
+                    break;
+                }
+            }
+            if (remaining) taskKeys.add(task.getKey());
+        }
+        return new QuestConsumptionDetectPlan(request, normalized.getCycle(), taskKeys);
+    }
+
+    private QuestProgressSnapshot normalize(ParticipantMembership membership, QuestDefinition definition,
+        QuestProgressSnapshot previous, Set<java.util.UUID> completed, long now) {
+        ParticipantId participant = membership.getParticipantId();
+        int cycle = previous == null ? 0 : previous.getCycle();
+        boolean holdCompletedCycle = progress.hasPendingConsumptionSubmission(participant, definition.getId(),
+            definition.getVersion(), cycle);
+        long repeatAnchorMillis = previous == null ? 0L : previous.getCompletedAt();
+        if (!holdCompletedCycle && previous != null && previous.getStatus() == QuestStatus.COMPLETED
+            && definition.getRepeatPolicy().isRepeatable()) {
+            holdCompletedCycle = progress.hasClaimableRewardEntitlement(participant, definition.getId(),
+                definition.getVersion(), cycle);
+            if (!holdCompletedCycle) repeatAnchorMillis = progress.findRepeatCycleAnchorMillis(participant,
+                definition.getId(), definition.getVersion(), cycle, previous.getCompletedAt());
+        }
+        boolean activeDetectBatch = progress.hasActiveConsumptionDetectBatch(participant, definition.getId(),
+            definition.getVersion());
+        return engine.evaluate(membership, definition, previous, null, completed, now, holdCompletedCycle, false,
+            repeatAnchorMillis, activeDetectBatch).getProgress();
+    }
+
     /** Manual item retrieval is supported for player-owned quests; other consumption types remain gated. */
     public static boolean supports(QuestDefinition definition, TaskDefinition task) {
         if (definition == null || task == null
@@ -98,15 +206,29 @@ public final class ConsumptionRequestAuthorizer {
     }
 
     private QuestDefinition published(ConsumptionIntent intent) {
+        return published(intent.getQuestId());
+    }
+
+    private QuestDefinition published(java.util.UUID questId) {
         QuestDefinition found = null;
         for (StoredQuestDefinition stored : definitions.findAllPublished()) {
             QuestDefinition candidate = stored.getDefinition();
-            if (!candidate.getId().equals(intent.getQuestId())) continue;
+            if (!candidate.getId().equals(questId)) continue;
             if (found != null) throw new IllegalStateException("published catalog contains duplicate quest versions");
             found = candidate;
         }
         if (found == null) throw new IllegalArgumentException("quest is not published");
         return found;
+    }
+
+    private QuestDefinition published(java.util.UUID questId, int version) {
+        Optional<StoredQuestDefinition> stored = definitions.findPublished(questId, version);
+        if (!stored.isPresent()) throw new IllegalArgumentException(
+            "pinned quest definition is no longer published: " + questId + " v" + version);
+        QuestDefinition definition = stored.get().getDefinition();
+        if (!questId.equals(definition.getId()) || version != definition.getVersion()) throw new IllegalStateException(
+            "published quest catalog returned a different pinned definition");
+        return definition;
     }
 
     private TaskDefinition task(QuestDefinition definition, String key) {

@@ -16,7 +16,8 @@ public enum TerminalActionType {
     QUEST_CLAIM("quest_claim"),
     QUEST_FORCE_CLAIM("quest_force_claim"),
     QUEST_CONFIRM_TASK("quest_confirm_task"),
-    QUEST_DETECT_CRAFTING("quest_detect_crafting"),
+    QUEST_DETECT_CRAFTING("quest_detect_crafting"), // Legacy packet ID; statistics are now automatic.
+    QUEST_DETECT_CONSUMPTION("quest_detect_consumption"),
     QUEST_SUBMIT_TASK("quest_submit_task"),
     QUEST_SUBMIT_HELD_ITEM("quest_submit_held_item"),
     QUEST_SELECT_REWARD_CHOICE("quest_select_reward_choice"),

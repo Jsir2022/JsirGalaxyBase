@@ -37,6 +37,12 @@ final class BqStandardCodec {
             "bq_standard:scoreboard", "bq_standard:xp")));
     }
 
+    static boolean isOptionalTaskType(String type) {
+        // Optional is behavior declared by a known BQ task implementation, not a naming convention. Unknown
+        // task types must stay required so an unsupported task cannot silently make its quest easier to complete.
+        return "bq_standard:optional_retrieval".equals(type);
+    }
+
     private final Gson gson;
 
     BqStandardCodec(Gson gson) { this.gson = gson; }

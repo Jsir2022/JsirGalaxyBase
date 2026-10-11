@@ -4,8 +4,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.HashMap;
 import java.util.UUID;
+import java.util.Optional;
 
 public final class QuestEvaluationPlanner implements QuestEvaluationRequestProvider {
     private final PublishedQuestCatalog definitions;
@@ -13,6 +16,7 @@ public final class QuestEvaluationPlanner implements QuestEvaluationRequestProvi
     private final ParticipantMembershipResolver memberships;
     private final QuestAssignmentPolicy assignments;
     private final QuestPartyActivityQuery partyActivity;
+    private volatile CatalogPlan cachedPlan;
 
     public QuestEvaluationPlanner(PublishedQuestCatalog definitions, QuestCompletionQuery completions,
         ParticipantMembershipResolver memberships, QuestAssignmentPolicy assignments) {
@@ -35,19 +39,48 @@ public final class QuestEvaluationPlanner implements QuestEvaluationRequestProvi
         if (resolved == null) resolved = Collections.emptyList();
         validateMemberships(fact.getPlayerId(), resolved, isForcedConsumption(fact));
         List<QuestEvaluationRequest> result = new ArrayList<QuestEvaluationRequest>();
-        for (StoredQuestDefinition stored : definitions.findAllPublished()) {
+        Map<ParticipantId, Set<UUID>> completedByParticipant = new HashMap<ParticipantId, Set<UUID>>();
+        Set<UUID> originCompleted = null;
+        for (StoredQuestDefinition stored : definitionsForFact(fact)) {
             QuestDefinition definition = stored.getDefinition();
             if (!accepts(definition, fact, resolved)) continue;
-            if (BqPartyInventorySnapshotScope.isPartySnapshot(fact) && !originCanDetect(definition, fact)) continue;
+            if (BqPartyInventorySnapshotScope.isPartySnapshot(fact)) {
+                if (originCompleted == null) {
+                    originCompleted = completedFor(completedByParticipant,
+                        ParticipantId.player(fact.getPlayerId()));
+                }
+                if (!originCanDetect(definition, originCompleted)) continue;
+            }
             ParticipantMembership party = bqPartyActivityMembership(definition, fact, resolved);
             if (party != null && !partyActivity.hasActiveMember(definition, fact, party)) continue;
             for (ParticipantMembership membership : assignments.select(definition, resolved, fact)) {
-                ParticipantMembership factMembership = factMembershipFor(definition, fact, membership, resolved);
+                ParticipantMembership factMembership = factMembershipFor(definition, fact, membership, resolved,
+                    party);
                 result.add(new QuestEvaluationRequest(definition, membership, factMembership,
-                    completions.findCompletedQuestIds(membership.getParticipantId())));
+                    completedFor(completedByParticipant, membership.getParticipantId())));
             }
         }
         return result;
+    }
+
+    private List<StoredQuestDefinition> definitionsForFact(GameplayFact fact) {
+        if (!"galaxy:consumption_applied".equals(fact.getTypeId())) return plan().index.forFact(fact);
+        String quest = fact.getAttributes().get("questId");
+        String version = fact.getAttributes().get("definitionVersion");
+        if (quest == null || version == null) throw new IllegalArgumentException(
+            "confirmed consumption fact is missing its pinned definition identity");
+        try {
+            UUID questId = UUID.fromString(quest);
+            int definitionVersion = Integer.parseInt(version);
+            Optional<StoredQuestDefinition> exact = definitions.findPublished(questId, definitionVersion);
+            // A durable APPLIED consumption may outlive publication of its pinned definition. In that
+            // case do not evaluate against a newer version; returning no requests keeps the saga APPLIED
+            // for explicit recovery/compensation instead of confirming the wrong task.
+            if (!exact.isPresent()) return Collections.emptyList();
+            return Collections.singletonList(exact.get());
+        } catch (NumberFormatException invalid) {
+            throw new IllegalArgumentException("confirmed consumption fact has an invalid pinned definition", invalid);
+        }
     }
 
     @Override
@@ -60,7 +93,7 @@ public final class QuestEvaluationPlanner implements QuestEvaluationRequestProvi
         if (completed == null || !completed.contains(completedQuestId)) return Collections.emptyList();
         List<QuestEvaluationRequest> result = new ArrayList<QuestEvaluationRequest>();
         ParticipantMembership membership = ParticipantMembership.player(player.getId());
-        for (StoredQuestDefinition stored : definitions.findAllPublished()) {
+        for (StoredQuestDefinition stored : plan().index.newlyUnlockedBy(completedQuestId)) {
             QuestDefinition definition = stored.getDefinition();
             if (!definition.getBehavior().isProgressWhileLocked()
                 || definition.getBehavior().getParticipantScope() != QuestParticipantScope.PLAYER
@@ -86,7 +119,7 @@ public final class QuestEvaluationPlanner implements QuestEvaluationRequestProvi
         if (completed == null) return Collections.emptyList();
         List<QuestEvaluationRequest> result = new ArrayList<QuestEvaluationRequest>();
         ParticipantMembership membership = ParticipantMembership.player(player.getId());
-        for (StoredQuestDefinition stored : definitions.findAllPublished()) {
+        for (StoredQuestDefinition stored : plan().index.forIds(lockedQuestIds)) {
             QuestDefinition definition = stored.getDefinition();
             if (!lockedQuestIds.contains(definition.getId()) || !definition.getBehavior().isProgressWhileLocked()
                 || definition.getBehavior().getParticipantScope() != QuestParticipantScope.PLAYER) continue;
@@ -103,7 +136,15 @@ public final class QuestEvaluationPlanner implements QuestEvaluationRequestProvi
     }
 
     private ParticipantMembership factMembershipFor(QuestDefinition definition, GameplayFact fact,
-        ParticipantMembership progressMembership, List<ParticipantMembership> resolved) {
+        ParticipantMembership progressMembership, List<ParticipantMembership> resolved,
+        ParticipantMembership partyActivityMembership) {
+        if (progressMembership.getParticipantId().getType() == ParticipantType.PLAYER
+            && BqPartyCraftingStatisticsScope.isAutomaticTaskSnapshot(fact)
+            && partyActivityMembership != null
+            && partyActivityMembership.contains(fact.getPlayerId())
+            && partyActivityMembership.contains(progressMembership.getParticipantId().getId())) {
+            return partyActivityMembership;
+        }
         if (progressMembership.getParticipantId().getType() != ParticipantType.PLAYER
             || !hasMatchingPartyFanoutFact(definition, fact)) return progressMembership;
         ParticipantMembership source = null;
@@ -121,13 +162,15 @@ public final class QuestEvaluationPlanner implements QuestEvaluationRequestProvi
     }
 
     private boolean hasMatchingPartyFanoutFact(QuestDefinition definition, GameplayFact fact) {
-        return BqPartyTaskProgressScope.supports(definition, fact) || isBqPartyRetrievalSnapshot(definition, fact);
+        return BqPartyTaskProgressScope.supports(definition, fact)
+            || BqPartyInventorySnapshotScope.matchesBqPartySnapshot(definition, fact);
     }
 
     private ParticipantMembership bqPartyActivityMembership(QuestDefinition definition, GameplayFact fact,
         List<ParticipantMembership> resolved) {
         if (definition.getBehavior().getParticipantScope() != QuestParticipantScope.PLAYER
-            || !hasMatchingPartyFanoutFact(definition, fact)) return null;
+            || (!hasMatchingPartyFanoutFact(definition, fact)
+                && !BqPartyCraftingStatisticsScope.matchesAutomaticPartyActivity(definition, fact))) return null;
         ParticipantMembership selected = null;
         for (ParticipantMembership membership : resolved) {
             if (membership.getParticipantId().getType() != ParticipantType.PARTY
@@ -139,20 +182,11 @@ public final class QuestEvaluationPlanner implements QuestEvaluationRequestProvi
         return selected;
     }
 
-    private boolean isBqPartyRetrievalSnapshot(QuestDefinition definition, GameplayFact fact) {
-        for (TaskDefinition task : definition.getTasks()) if (BqPartyInventorySnapshotScope.isPartySnapshot(fact)
-            && "galaxy:inventory_observed".equals(fact.getTypeId())
-            && ("bq_standard:retrieval".equals(task.getTypeId())
-                || "bq_standard:optional_retrieval".equals(task.getTypeId()))
-            && task.getParameters().containsKey("bq.raw")
-            && !QuestBooleanParameter.parse(task.getParameters().get("consume"), false)) return true;
-        return false;
-    }
-
     private List<ParticipantMembership> forcedMemberships(GameplayFact fact) {
         if (BqPartyInventorySnapshotScope.hasMetadata(fact)) {
-            if (!"galaxy:inventory_observed".equals(fact.getTypeId())) throw new IllegalArgumentException(
-                "BQ party scope metadata is only valid on inventory observations");
+            if (!BqPartyInventorySnapshotScope.isSupportedObservationType(fact.getTypeId())) {
+                throw new IllegalArgumentException("BQ party scope metadata is only valid on inventory observations");
+            }
             ParticipantId party = BqPartyInventorySnapshotScope.party(fact);
             List<ParticipantMembership> resolved = memberships.resolve(fact.getPlayerId());
             if (resolved == null) throw new IllegalArgumentException("BQ party membership is unavailable");
@@ -207,22 +241,16 @@ public final class QuestEvaluationPlanner implements QuestEvaluationRequestProvi
             for (TaskDefinition task : definition.getTasks()) {
                 if (task.getKey().equals(targetTaskKey) && "bq_standard:crafting".equals(task.getTypeId())
                     && QuestBooleanParameter.parse(task.getParameters().get("allowCraftedFromStatistics"), false)) {
-                    return true;
+                    return !BqPartyCraftingStatisticsScope.isAutomaticTaskSnapshot(fact)
+                        || BqPartyCraftingStatisticsScope.matchesAutomaticPartyActivity(definition, fact);
                 }
             }
             return false;
         }
         if (BqPartyInventorySnapshotScope.isPartySnapshot(fact)) {
-            if (!"galaxy:inventory_observed".equals(factType)
-                || definition.getBehavior().getParticipantScope() != QuestParticipantScope.PLAYER) return false;
-            for (TaskDefinition task : definition.getTasks()) {
-                if (factType.equals(task.getParameters().get("factType"))
-                    && ("bq_standard:retrieval".equals(task.getTypeId())
-                        || "bq_standard:optional_retrieval".equals(task.getTypeId()))
-                    && task.getParameters().containsKey("bq.raw")
-                    && !QuestBooleanParameter.parse(task.getParameters().get("consume"), false)) return true;
-            }
-            return false;
+            return BqPartyInventorySnapshotScope.isSupportedObservationType(factType)
+                && definition.getBehavior().getParticipantScope() == QuestParticipantScope.PLAYER
+                && BqPartyInventorySnapshotScope.matchesBqPartySnapshot(definition, fact);
         }
         if (InventorySnapshotScope.isGroupSnapshot(fact)) {
             ParticipantId participant = InventorySnapshotScope.participant(fact);
@@ -290,12 +318,32 @@ public final class QuestEvaluationPlanner implements QuestEvaluationRequestProvi
         return false;
     }
 
-    private boolean originCanDetect(QuestDefinition definition, GameplayFact fact) {
+    private boolean originCanDetect(QuestDefinition definition, Set<UUID> completed) {
         if (definition.getPrerequisites().isEmpty()) return true;
-        Set<UUID> completed = completions.findCompletedQuestIds(ParticipantId.player(fact.getPlayerId()));
         int count = 0;
         for (UUID prerequisite : definition.getPrerequisites()) if (completed.contains(prerequisite)) count++;
         return definition.getPrerequisiteLogic().satisfied(count, definition.getPrerequisites().size());
+    }
+
+    private Set<UUID> completedFor(Map<ParticipantId, Set<UUID>> completedByParticipant,
+        ParticipantId participant) {
+        if (!completedByParticipant.containsKey(participant)) {
+            completedByParticipant.put(participant, completions.findCompletedQuestIds(participant));
+        }
+        return completedByParticipant.get(participant);
+    }
+
+    private CatalogPlan plan() {
+        List<StoredQuestDefinition> published = definitions.findAllPublished();
+        CatalogPlan current = cachedPlan;
+        if (current != null && current.catalog == published) return current;
+        synchronized (this) {
+            current = cachedPlan;
+            if (current != null && current.catalog == published) return current;
+            CatalogPlan refreshed = new CatalogPlan(published, new QuestEvaluationCandidateIndex(published));
+            cachedPlan = refreshed;
+            return refreshed;
+        }
     }
 
     private void validateMemberships(UUID playerId, List<ParticipantMembership> values, boolean authorizedConsumption) {
@@ -313,5 +361,15 @@ public final class QuestEvaluationPlanner implements QuestEvaluationRequestProvi
     private static <T> T require(T value, String name) {
         if (value == null) throw new IllegalArgumentException(name + " must not be null");
         return value;
+    }
+
+    private static final class CatalogPlan {
+        private final List<StoredQuestDefinition> catalog;
+        private final QuestEvaluationCandidateIndex index;
+
+        private CatalogPlan(List<StoredQuestDefinition> catalog, QuestEvaluationCandidateIndex index) {
+            this.catalog = catalog;
+            this.index = index;
+        }
     }
 }

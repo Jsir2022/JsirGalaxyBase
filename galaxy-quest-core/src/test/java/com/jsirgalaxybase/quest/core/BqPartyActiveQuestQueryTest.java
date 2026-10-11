@@ -4,9 +4,11 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -54,6 +56,111 @@ public class BqPartyActiveQuestQueryTest {
 
         fixture.online.add(offlineMember);
         assertEquals(2, planner.requestsFor(fact).size());
+    }
+
+    @Test
+    public void oneOnlineEligiblePartyMemberActivatesCraftingAndFansOutToTheEntireRoster() {
+        UUID actor = id(55), eligiblePeer = id(56), offlinePeer = id(57), prerequisite = id(58);
+        QuestDefinition crafting = partyCraftingDefinition(id(59), prerequisite);
+        Fixture fixture = new Fixture(actor, new HashSet<UUID>(Arrays.asList(eligiblePeer, offlinePeer)), crafting);
+        fixture.completions.put(ParticipantId.player(eligiblePeer), Collections.singleton(prerequisite));
+        fixture.online.add(actor);
+        fixture.online.add(eligiblePeer);
+        QuestCompletionQuery completions = participant -> {
+            Set<UUID> found = fixture.completions.get(participant);
+            return found == null ? Collections.<UUID>emptySet() : found;
+        };
+        QuestEvaluationPlanner planner = new QuestEvaluationPlanner(
+            () -> Collections.singletonList(new StoredQuestDefinition(crafting,
+                QuestDefinitionLifecycle.PUBLISHED, "hash", 1L)),
+            completions,
+            ignored -> Arrays.asList(ParticipantMembership.player(actor), fixture.party),
+            new BqHuntPartyAssignmentPolicy(), fixture.query);
+        GameplayFact fact = new GameplayFact("s2", "party-crafting-fanout", actor,
+            "galaxy:item_produced", 10L, map("channel", "craft", "registryName", "minecraft:iron_ingot",
+                "meta", "0", "amount", "1"));
+
+        List<QuestEvaluationRequest> requests = planner.requestsFor(fact);
+        Set<ParticipantId> owners = new HashSet<ParticipantId>();
+        for (QuestEvaluationRequest request : requests) owners.add(request.getMembership().getParticipantId());
+        assertEquals(3, requests.size());
+        assertEquals("the online unlocked peer activates the Quest, then BQ fan-out keeps all PARTY owners",
+            new HashSet<ParticipantId>(Arrays.asList(ParticipantId.player(actor),
+                ParticipantId.player(eligiblePeer), ParticipantId.player(offlinePeer))), owners);
+
+        fixture.online.remove(eligiblePeer);
+        assertTrue("an offline-only unlocked member cannot activate this server's event",
+            planner.requestsFor(fact).isEmpty());
+    }
+
+    @Test
+    public void craftingStatisticsUsePartyOnlineEligibilityButKeepPersonalProgressOwner() {
+        UUID actor = id(61), unlockedPeer = id(62), prerequisite = id(63);
+        QuestDefinition crafting = partyCraftingStatisticsDefinition(id(64), prerequisite);
+        Fixture fixture = new Fixture(actor, unlockedPeer, crafting);
+        fixture.completions.put(ParticipantId.player(unlockedPeer), Collections.singleton(prerequisite));
+        fixture.online.add(actor);
+        QuestCompletionQuery completions = participant -> {
+            Set<UUID> found = fixture.completions.get(participant);
+            return found == null ? Collections.<UUID>emptySet() : found;
+        };
+        QuestEvaluationPlanner planner = new QuestEvaluationPlanner(
+            () -> Collections.singletonList(new StoredQuestDefinition(crafting,
+                QuestDefinitionLifecycle.PUBLISHED, "hash", 1L)),
+            completions,
+            ignored -> java.util.Arrays.asList(ParticipantMembership.player(actor), fixture.party),
+            new BqHuntPartyAssignmentPolicy(), fixture.query);
+        Map<String, String> attributes = map("channel", "craft-statistics", "registryName", "minecraft:iron_ingot",
+            "meta", "0", "amount", "4", "trigger.channel", "craft",
+            "trigger.registryName", "minecraft:iron_ingot", "trigger.meta", "0");
+        attributes.put(BqPartyCraftingStatisticsScope.PERSONAL_ONLINE_SNAPSHOT, "true");
+        GameplayFact fact = new GameplayFact("s2", "party-crafting-statistics", actor,
+            "galaxy:item_produced", 10L, attributes);
+
+        assertTrue("an offline unlocked Party member does not make the Quest active on this server",
+            planner.requestsFor(fact).isEmpty());
+        fixture.online.add(unlockedPeer);
+        List<QuestEvaluationRequest> requests = planner.requestsFor(fact);
+        assertEquals("the online peer activates the Party Quest, but this fact remains actor-personal",
+            1, requests.size());
+        assertEquals(ParticipantId.player(actor), requests.get(0).getMembership().getParticipantId());
+        assertEquals(ParticipantId.player(actor), requests.get(0).getFactMembership().getParticipantId());
+    }
+
+    @Test
+    public void automaticBqCraftingStatisticsUseOnlinePartyEligibilityAndKeepPersonalProgressOwner() {
+        UUID actor = id(71), unlockedPeer = id(72), prerequisite = id(73), questId = id(74);
+        QuestDefinition crafting = partyCraftingStatisticsDefinition(questId, prerequisite);
+        Fixture fixture = new Fixture(actor, unlockedPeer, crafting);
+        fixture.completions.put(ParticipantId.player(unlockedPeer), Collections.singleton(prerequisite));
+        fixture.online.add(actor);
+        QuestCompletionQuery completions = participant -> {
+            Set<UUID> found = fixture.completions.get(participant);
+            return found == null ? Collections.<UUID>emptySet() : found;
+        };
+        QuestEvaluationPlanner planner = new QuestEvaluationPlanner(
+            () -> Collections.singletonList(new StoredQuestDefinition(crafting,
+                QuestDefinitionLifecycle.PUBLISHED, "hash", 1L)),
+            completions,
+            ignored -> java.util.Arrays.asList(ParticipantMembership.player(actor), fixture.party),
+            new BqHuntPartyAssignmentPolicy(), fixture.query);
+        Map<String, String> attributes = map("channel", "craft-statistics", "registryName", "minecraft:iron_ingot",
+            "meta", "0", "amount", "4", "targetQuestId", questId.toString(), "targetQuestVersion", "1",
+            "targetTaskKey", "craft");
+        attributes.put(BqPartyCraftingStatisticsScope.PERSONAL_ONLINE_SNAPSHOT, "true");
+        attributes.put(BqPartyCraftingStatisticsScope.AUTOMATIC_TASK_SNAPSHOT, "true");
+        GameplayFact fact = new GameplayFact("s2", "automatic-party-crafting-statistics", actor,
+            "galaxy:item_produced", 10L, attributes);
+
+        assertTrue("an offline unlocked Party member cannot activate this server's automatic Detect",
+            planner.requestsFor(fact).isEmpty());
+        fixture.online.add(unlockedPeer);
+        List<QuestEvaluationRequest> requests = planner.requestsFor(fact);
+        assertEquals(1, requests.size());
+        assertEquals("each online member is detected into their own player progress row",
+            ParticipantId.player(actor), requests.get(0).getMembership().getParticipantId());
+        assertEquals("the trusted Party identity is used only for active-quest/locked-progress authorization",
+            fixture.party.getParticipantId(), requests.get(0).getFactMembership().getParticipantId());
     }
 
     @Test
@@ -130,6 +237,18 @@ public class BqPartyActiveQuestQueryTest {
             QuestBehavior.builder().participantScope(QuestParticipantScope.PLAYER).build());
     }
 
+    private static QuestDefinition partyCraftingStatisticsDefinition(UUID id, UUID prerequisite) {
+        Map<String, String> parameters = map("factType", "galaxy:item_produced", "progressMode", "item-vector",
+            "item.count", "1", "item.0.registryName", "minecraft:iron_ingot", "item.0.meta", "0",
+            "item.0.amount", "1", "allowCraft", "true", "allowSmelt", "true", "allowAnvil", "false",
+            "allowCraftedFromStatistics", "true", "bq.raw", "{}");
+        TaskDefinition task = new TaskDefinition("craft", "bq_standard:crafting", false, parameters);
+        return new QuestDefinition(id, 1, "Party crafting statistics", "", QuestLogic.AND, QuestLogic.AND,
+            Collections.singleton(prerequisite), Collections.singletonList(task),
+            Collections.<RewardDefinition>emptyList(), RepeatPolicy.never(),
+            QuestBehavior.builder().participantScope(QuestParticipantScope.PLAYER).build());
+    }
+
     private static UUID id(long value) { return new UUID(0L, value); }
 
     private static Map<String, String> map(String... pairs) {
@@ -148,11 +267,15 @@ public class BqPartyActiveQuestQueryTest {
         private final BqPartyActiveQuestQuery query;
 
         private Fixture(UUID actor, UUID other, QuestDefinition definition) {
+            this(actor, Collections.singleton(other), definition);
+        }
+
+        private Fixture(UUID actor, Set<UUID> otherMembers, QuestDefinition definition) {
             this.actor = actor;
             this.definition = definition;
             Set<UUID> members = new HashSet<UUID>();
             members.add(actor);
-            members.add(other);
+            members.addAll(otherMembers);
             party = new ParticipantMembership(new ParticipantId(ParticipantType.PARTY, id(999L)), members);
             query = new BqPartyActiveQuestQuery("s2", participant -> {
                 Set<UUID> found = completions.get(participant);

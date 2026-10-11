@@ -203,6 +203,32 @@ public class TerminalServiceTest {
     }
 
     @Test
+    public void legacyCraftingDetectActionOnlyReportsAutomaticRefresh() {
+        UUID authenticatedPlayer = UUID.randomUUID();
+        TerminalService.installQuestCenterQuery(new QuestCenterQuery() {
+            @Override public QuestCenterSnapshot load(ParticipantId participantId) {
+                return new QuestCenterSnapshot(participantId, Collections.emptyList(), Collections.emptyList());
+            }
+            @Override public QuestCenterPage loadPage(ParticipantId participantId, QuestCenterPageRequest request) {
+                return new QuestCenterPage(participantId, request.getSelectedChapterId(), Collections.emptyList(),
+                    request.getChapterPageIndex(), request.getChapterPageSize(), 0, Collections.emptyList(),
+                    request.getQuestPageIndex(), request.getQuestPageSize(), 0);
+            }
+        });
+        try {
+            TerminalQuestCenterSectionSnapshot result = TerminalService.buildAuthenticatedQuestCenterSnapshot(
+                authenticatedPlayer, "Player", TerminalActionType.QUEST_DETECT_CRAFTING,
+                new TerminalQuestActionPayload("chapter", "quest", "all", "", 0, 0, "craft", -1));
+
+            assertEquals("EMPTY", result.getServiceState());
+            assertTrue(result.getMessage().contains("自动复评"));
+            assertTrue(result.getMessage().contains("无需手动检测"));
+        } finally {
+            TerminalService.installQuestCenterQuery(null);
+        }
+    }
+
+    @Test
     public void questManagementUsesAuthenticatedActorAndBoundedServerQuery() {
         final UUID player=UUID.randomUUID();final com.jsirgalaxybase.quest.core.QuestEditorActor[] actor={null};
         final com.jsirgalaxybase.quest.core.QuestDefinitionManagementRequest[] request={null};

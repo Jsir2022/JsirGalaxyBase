@@ -20,6 +20,8 @@ public final class ItemVectorTaskEvaluator implements TaskEvaluator {
     @Override
     public TaskProgress evaluate(TaskDefinition definition, TaskProgress current, GameplayFact fact) {
         if (!factType.equals(fact.getTypeId()) || !channelAllowed(definition.getParameters(), fact)) return current;
+        if (BqPartyCraftingStatisticsScope.isPersonalOnlineSnapshot(fact)
+            && !definition.getParameters().containsKey("bq.raw")) return current;
         String targetTaskKey = fact.getAttributes().get("targetTaskKey");
         if (targetTaskKey != null && !targetTaskKey.equals(definition.getKey())) return current;
         if ("craft-statistics".equals(fact.getAttributes().get("channel"))
@@ -28,6 +30,37 @@ public final class ItemVectorTaskEvaluator implements TaskEvaluator {
         if (current.getValues().size() != count) throw new IllegalArgumentException(
             "item task vector width does not match definition");
         long amount = positive(fact.getAttributes().get("amount"), 1L);
+        boolean crafting = "bq_standard:crafting".equals(typeId);
+        boolean statistics = "craft-statistics".equals(fact.getAttributes().get("channel"));
+        if (crafting) {
+            List<Long> observed = new ArrayList<Long>(count);
+            List<Long> deltas = new ArrayList<Long>(count);
+            TaskProgress.SourceContribution source = current.getSourceContributions().get(fact.getSourceServer());
+            for (int i = 0; i < count; i++) {
+                observed.add(Long.valueOf(source == null ? 0L : source.getObservedValues().get(i).longValue()));
+                deltas.add(Long.valueOf(0L));
+            }
+            boolean matched = false;
+            for (int i = 0; i < count; i++) {
+                if (!matches(definition.getParameters(), i, fact.getAttributes())) continue;
+                matched = true;
+                if (statistics) {
+                    long target = current.getTargets().get(i).longValue();
+                    long sourceValue = source == null ? 0L : source.getValue(i, target);
+                    // BQ TaskCrafting.detect only reads objectCraftStats while this requirement's
+                    // source-local progress is still below its target. In particular, a craft event
+                    // that reaches the target is capped before detect runs, so its absolute statistic
+                    // must not inflate that same requirement afterward. Other requirements and other
+                    // server sources remain independently eligible for detection.
+                    if (sourceValue < target) {
+                        observed.set(i, Long.valueOf(Math.max(observed.get(i).longValue(), amount)));
+                    }
+                } else deltas.set(i, Long.valueOf(amount));
+            }
+            if (!matched) return current;
+            return statistics ? current.observeFromSource(fact.getSourceServer(), observed)
+                : current.advanceFromSource(fact.getSourceServer(), deltas);
+        }
         List<Long> next = new ArrayList<Long>(current.getValues());
         for (int i = 0; i < count; i++) {
             if (!matches(definition.getParameters(), i, fact.getAttributes())) continue;
@@ -52,6 +85,33 @@ public final class ItemVectorTaskEvaluator implements TaskEvaluator {
         if (!channelAllowed(parameters, trigger)) return false;
         int count = integer(parameters.get("item.count"), 0);
         for (int i = 0; i < count; i++) if (matches(parameters, i, trigger)) return true;
+        return false;
+    }
+
+    /**
+     * Checks whether a real output event would cause this Crafting task to run its automatic statistics Detect.
+     * The same channel and item matching rules are used by normal progress evaluation.
+     */
+    public boolean matchesCraftingStatisticsTrigger(TaskDefinition definition, Map<String, String> output) {
+        if (!"bq_standard:crafting".equals(typeId) || definition == null || output == null
+            || !typeId.equals(definition.getTypeId())
+            || !bool(definition.getParameters().get("allowCraftedFromStatistics"), false)
+            || !channelAllowed(definition.getParameters(), output)) return false;
+        int count = integer(definition.getParameters().get("item.count"), 0);
+        for (int i = 0; i < count; i++) if (matches(definition.getParameters(), i, output)) return true;
+        return false;
+    }
+
+    /** Checks whether a craft/smelt/anvil output matches a BQ Crafting requirement. */
+    public boolean matchesCraftingProgressEvent(TaskDefinition definition, Map<String, String> output) {
+        if (!"bq_standard:crafting".equals(typeId) || definition == null || output == null
+            || !typeId.equals(definition.getTypeId()) || !channelAllowed(definition.getParameters(), output)) {
+            return false;
+        }
+        String channel = output.get("channel");
+        if (!"craft".equals(channel) && !"smelt".equals(channel) && !"anvil".equals(channel)) return false;
+        int count = integer(definition.getParameters().get("item.count"), 0);
+        for (int i = 0; i < count; i++) if (matches(definition.getParameters(), i, output)) return true;
         return false;
     }
 

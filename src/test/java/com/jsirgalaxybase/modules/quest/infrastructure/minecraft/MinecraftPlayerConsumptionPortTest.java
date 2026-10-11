@@ -204,6 +204,21 @@ public class MinecraftPlayerConsumptionPortTest {
     }
 
     @Test
+    public void fluidPlanReportsWholeAmountDrainedFromAnIndivisibleContainer() {
+        TestTank tank = new TestTank();
+        ItemStack input = tank(1, tank, 750);
+        input.getTagCompound().setBoolean("indivisible", true);
+        List<ItemStack> before = new ArrayList<ItemStack>(Arrays.asList(input, null));
+
+        MinecraftPlayerConsumptionPort.FluidPlan plan = port().planFluidsDetailed(before, fluidRequest(600));
+
+        assertNotNull(plan);
+        assertEquals(Collections.singletonList(750L), plan.appliedAmounts);
+        assertEquals(0, totalFluid(plan.inventory));
+        assertEquals(750, totalFluid(before));
+    }
+
+    @Test
     public void heldFluidSubmissionConsumesAtMostOneContainerFromSelectedStack() {
         TestTank tank = new TestTank();
         ItemStack selected = tank(2, tank, 1000);
@@ -245,6 +260,15 @@ public class MinecraftPlayerConsumptionPortTest {
         assertNotNull(port().planFluidsDetailed(before, noTag));
         assertNull(port().planFluidsDetailed(before, emptyTag));
         assertEquals(1000, totalFluid(before));
+    }
+
+    @Test
+    public void fluidConsumptionRequiresExactFluidNameWhenNbtMatchingIsIgnored() {
+        TestTank tank = new TestTank();
+        List<ItemStack> before = new ArrayList<ItemStack>(Arrays.asList(tank(1, tank, 1000), null));
+
+        assertNull(port().planFluidsDetailed(before, fluidRequest(1000, "another_test_fluid")));
+        assertEquals("a different registered fluid must not be drained", 1000, totalFluid(before));
     }
 
     @Test
@@ -324,7 +348,8 @@ public class MinecraftPlayerConsumptionPortTest {
         @Override public FluidDrain drain(ItemStack container, int maximumAmount) {
             FluidView stored = inspect(container);
             if (stored == null || maximumAmount <= 0) return null;
-            int drained = Math.min(stored.getAmount(), maximumAmount);
+            int drained = container.getTagCompound().getBoolean("indivisible")
+                ? stored.getAmount() : Math.min(stored.getAmount(), maximumAmount);
             container.getTagCompound().setInteger("amount", stored.getAmount() - drained);
             return new FluidDrain(new FluidView(stored.getName(), drained, null), container);
         }

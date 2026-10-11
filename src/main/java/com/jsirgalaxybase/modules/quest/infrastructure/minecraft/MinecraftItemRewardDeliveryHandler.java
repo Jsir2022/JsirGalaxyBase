@@ -15,7 +15,7 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 
-/** Crash-safe player inventory delivery for imported BQ item and choice rewards. */
+/** Marker-based inventory delivery; world drops and final marker persistence are not an atomic operation. */
 public final class MinecraftItemRewardDeliveryHandler implements RewardDeliveryHandler {
     private static final int PLAYER_INVENTORY_STACK_LIMIT = 64;
 
@@ -196,8 +196,11 @@ public final class MinecraftItemRewardDeliveryHandler implements RewardDeliveryH
             String registryName = values.get(prefix + "registryName");
             Item found = itemLookup.find(registryName);
             if (found == null) throw new IllegalArgumentException("unknown item " + registryName);
-            // BQ BigItemStack.getCombinedStacks() deliberately emits at least one item, even for Count <= 0.
-            int amount = Math.max(1, integer(values.get(prefix + "amount"), 0));
+            int configuredAmount = integer(values.get(prefix + "amount"), 0);
+            // RewardChoice returns before BigItemStack.getCombinedStacks() for non-positive choices.
+            if ("bq_standard:choice".equals(typeId) && configuredAmount <= 0) continue;
+            // RewardItem delegates to BigItemStack.getCombinedStacks(), which guarantees at least one item.
+            int amount = Math.max(1, configuredAmount);
             ItemStack base = new ItemStack(found, 1, integer(values.get(prefix + "meta"), 0));
             NBTTagCompound tag = BqTypedNbtCodec.compound(values.get(prefix + "nbt"));
             if (!tag.hasNoTags()) base.setTagCompound(BqTypedNbtCodec.replacePlayerVariables(tag,

@@ -43,6 +43,9 @@ public final class BqProgressConflictAnalyzer {
     }
 
     private boolean dominates(BqImportedQuestProgress candidate, BqImportedQuestProgress baseline) {
+        // The completion timestamp also anchors BQ cooldown/reset state. Equal task vectors and flags
+        // do not make snapshots interchangeable when their completion/claim times differ.
+        if (candidate.getTimestamp() != baseline.getTimestamp()) return false;
         if (baseline.isCompleted() && !candidate.isCompleted()) return false;
         if (baseline.isClaimed() && !candidate.isClaimed()) return false;
         Map<String, BqImportedTaskProgress> candidateTasks = tasks(candidate);

@@ -21,6 +21,19 @@ public final class ConsumptionSubmissionService {
 
     public ConsumptionSubmission submit(final ConsumptionIntent intent, final ConsumptionRequestAuthorizer authorizer,
         final long now) {
+        return submit(intent, authorizer, now, null, null);
+    }
+
+    /** Submits one batch Task while pinning its participant/cycle before touching player inventory. */
+    public ConsumptionSubmission submit(final ConsumptionIntent intent, final ConsumptionRequestAuthorizer authorizer,
+        final long now, final ParticipantId expectedParticipant, final Integer expectedCycle) {
+        return submit(intent, authorizer, now, expectedParticipant, expectedCycle, null);
+    }
+
+    /** Submits a Task against the definition version pinned by its durable Detect batch. */
+    public ConsumptionSubmission submit(final ConsumptionIntent intent, final ConsumptionRequestAuthorizer authorizer,
+        final long now, final ParticipantId expectedParticipant, final Integer expectedCycle,
+        final Integer expectedDefinitionVersion) {
         if (intent == null || authorizer == null) throw new IllegalArgumentException("intent and authorizer are required");
         Authorized prepared = transaction.inTransaction(() -> {
             java.util.Optional<ConsumptionSubmission> existing = submissions.find(intent.getSubmissionKey());
@@ -32,12 +45,25 @@ public final class ConsumptionSubmissionService {
                     || !request.getTaskKey().equals(intent.getTaskKey())) {
                     throw new IllegalArgumentException("consumption submission key belongs to a different request");
                 }
+                requireExpectedContext(request, expectedParticipant, expectedCycle, expectedDefinitionVersion);
                 return new Authorized(request, existing.get());
             }
-            ConsumptionRequest request = authorizer.authorize(intent, now);
+            ConsumptionRequest request = authorizer.authorize(intent, now, expectedParticipant, expectedCycle,
+                expectedDefinitionVersion);
             return new Authorized(request, submissions.prepareIfAbsent(request));
         });
         return process(prepared.request, prepared.submission, now);
+    }
+
+    private void requireExpectedContext(ConsumptionRequest request, ParticipantId expectedParticipant,
+        Integer expectedCycle, Integer expectedDefinitionVersion) {
+        if (expectedParticipant != null && !expectedParticipant.equals(request.getParticipantId())) throw new IllegalArgumentException(
+            "persisted consumption operation belongs to a different participant than its Detect batch");
+        if (expectedCycle != null && expectedCycle.intValue() != request.getQuestCycle()) throw new IllegalArgumentException(
+            "persisted consumption operation belongs to a different cycle than its Detect batch");
+        if (expectedDefinitionVersion != null
+            && expectedDefinitionVersion.intValue() != request.getDefinitionVersion()) throw new IllegalArgumentException(
+                "persisted consumption operation belongs to a different definition than its Detect batch");
     }
 
     public ConsumptionSubmission resume(final String submissionKey, final long now) {

@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.Test;
 
@@ -48,6 +49,154 @@ public class QuestRuntimeServiceTest {
         assertFalse(duplicate.isAccepted());
         assertTrue(duplicate.getEvaluations().isEmpty());
         assertEquals(2, transaction.calls);
+    }
+
+    @Test
+    public void activeQuestDetectBatchDefersOrCompletionAndRewardsUntilFinalization() {
+        UUID player = UUID.randomUUID();
+        TaskDefinition consuming = new TaskDefinition("consume", "count", false,
+            map("target", "1", "factType", "galaxy:consumption_applied"));
+        TaskDefinition laterTask = new TaskDefinition("later", "count", false,
+            map("target", "1", "factType", "galaxy:never"));
+        RewardDefinition reward = new RewardDefinition("reward", "item", Collections.<String, String>emptyMap());
+        QuestDefinition quest = new QuestDefinition(UUID.randomUUID(), 1, "Detect batch", "", QuestLogic.AND,
+            QuestLogic.OR, Collections.<UUID>emptySet(), Arrays.asList(consuming, laterTask),
+            Collections.singletonList(reward), RepeatPolicy.never());
+        ParticipantId owner = ParticipantId.player(player);
+        ParticipantMembership membership = ParticipantMembership.player(player);
+        QuestEvaluationRequest request = new QuestEvaluationRequest(quest, membership,
+            Collections.<UUID>emptySet());
+        QuestEvaluationRequestProvider provider = new QuestEvaluationRequestProvider() {
+            @Override public List<QuestEvaluationRequest> requestsFor(GameplayFact ignored) {
+                return Collections.singletonList(request);
+            }
+            @Override public List<QuestEvaluationRequest> requestsForNewlyUnlockedLockedProgress(
+                ParticipantId participant, UUID completedQuestId) {
+                return Collections.emptyList();
+            }
+            @Override public List<QuestEvaluationRequest> requestsForLockedProgressReconciliation(
+                ParticipantId participant, Set<UUID> lockedQuestIds) {
+                return Collections.emptyList();
+            }
+        };
+        FakeRepository repository = new FakeRepository();
+        repository.activeConsumptionDetectBatches.add(repository.batchKey(owner, quest.getId(), quest.getVersion()));
+        TaskEvaluatorRegistry registry = new TaskEvaluatorRegistry();
+        registry.register(new FactCountTaskEvaluator("count"));
+        QuestRuntimeService service = new QuestRuntimeService(repository, new CountingTransaction(),
+            new QuestFactProjector(registry), new QuestEngine());
+
+        FactProcessingResult duringBatch = service.apply(new GameplayFact("s2", "detect-consume", player,
+            "galaxy:consumption_applied", 10L, map("amount", "1")), provider, 10L);
+        QuestProgressSnapshot held = repository.findProgress(owner, quest.getId(), quest.getVersion()).get();
+
+        assertEquals(QuestStatus.IN_PROGRESS, held.getStatus());
+        assertTrue(held.getTasks().get("consume").isComplete());
+        assertFalse(held.getTasks().get("later").isComplete());
+        assertTrue(repository.entitlements.isEmpty());
+        assertEquals(QuestStatus.IN_PROGRESS, duringBatch.getEvaluations().get(0).getProgress().getStatus());
+
+        repository.activeConsumptionDetectBatches.remove(repository.batchKey(owner, quest.getId(), quest.getVersion()));
+        FactProcessingResult finalized = service.reconcileAfterConsumptionDetectBatch(request, provider, 11L);
+        QuestProgressSnapshot completed = repository.findProgress(owner, quest.getId(), quest.getVersion()).get();
+
+        assertTrue(finalized.isAccepted());
+        assertEquals(QuestStatus.COMPLETED, completed.getStatus());
+        assertTrue(completed.getTasks().get("consume").isComplete());
+        assertFalse(completed.getTasks().get("later").isComplete());
+        assertEquals(1, repository.entitlements.size());
+    }
+
+    @Test
+    public void simultaneousDetectBatchResetsOnlyAfterASelectedTaskCompletes() {
+        UUID player = UUID.randomUUID();
+        TaskDefinition consuming = new TaskDefinition("consume", "count", false,
+            map("target", "1", "factType", "galaxy:consumption_applied"));
+        TaskDefinition previouslyComplete = new TaskDefinition("prior", "count", false,
+            map("target", "1", "factType", "galaxy:never"));
+        QuestBehavior behavior = QuestBehavior.builder().simultaneous(true).build();
+        QuestDefinition quest = new QuestDefinition(UUID.randomUUID(), 1, "Simultaneous Detect", "",
+            QuestLogic.AND, QuestLogic.XOR, Collections.<UUID>emptySet(), Arrays.asList(consuming, previouslyComplete),
+            Collections.<RewardDefinition>emptyList(), RepeatPolicy.never(), behavior);
+        ParticipantId owner = ParticipantId.player(player);
+        ParticipantMembership membership = ParticipantMembership.player(player);
+        QuestEvaluationRequest request = new QuestEvaluationRequest(quest, membership,
+            Collections.<UUID>emptySet());
+        QuestEvaluationRequestProvider provider = new QuestEvaluationRequestProvider() {
+            @Override public List<QuestEvaluationRequest> requestsFor(GameplayFact ignored) {
+                return Collections.singletonList(request);
+            }
+            @Override public List<QuestEvaluationRequest> requestsForNewlyUnlockedLockedProgress(
+                ParticipantId participant, UUID completedQuestId) {
+                return Collections.emptyList();
+            }
+            @Override public List<QuestEvaluationRequest> requestsForLockedProgressReconciliation(
+                ParticipantId participant, Set<UUID> lockedQuestIds) {
+                return Collections.emptyList();
+            }
+        };
+        FakeRepository repository = new FakeRepository();
+        Map<String, TaskProgress> initialTasks = new LinkedHashMap<String, TaskProgress>();
+        initialTasks.put("consume", TaskProgress.empty(consuming));
+        initialTasks.put("prior", new TaskProgress("prior", 1, 1, true));
+        repository.seed(new QuestProgressSnapshot(owner, quest.getId(), quest.getVersion(),
+            QuestStatus.IN_PROGRESS, initialTasks, 0L, 0));
+        repository.activeConsumptionDetectBatches.add(repository.batchKey(owner, quest.getId(), quest.getVersion()));
+        TaskEvaluatorRegistry registry = new TaskEvaluatorRegistry();
+        registry.register(new FactCountTaskEvaluator("count"));
+        QuestRuntimeService service = new QuestRuntimeService(repository, new CountingTransaction(),
+            new QuestFactProjector(registry), new QuestEngine());
+
+        service.apply(new GameplayFact("s2", "simultaneous-detect", player, "galaxy:consumption_applied", 10L,
+            map("amount", "1")), provider, 10L);
+        QuestProgressSnapshot duringBatch = repository.findProgress(owner, quest.getId(), quest.getVersion()).get();
+        assertTrue("Quest completion remains deferred while the ordered Detect batch is active",
+            duringBatch.getTasks().get("consume").isComplete());
+        assertTrue(duringBatch.getTasks().get("prior").isComplete());
+
+        repository.activeConsumptionDetectBatches.remove(repository.batchKey(owner, quest.getId(), quest.getVersion()));
+        service.reconcileAfterConsumptionDetectBatch(request, provider, 11L, 0,
+            Collections.singletonList("consume"));
+        QuestProgressSnapshot settled = repository.findProgress(owner, quest.getId(), quest.getVersion()).get();
+
+        assertEquals(QuestStatus.AVAILABLE, settled.getStatus());
+        assertFalse(settled.getTasks().get("consume").isComplete());
+        assertFalse(settled.getTasks().get("prior").isComplete());
+    }
+
+    @Test
+    public void detectSettlementStartsPinnedRepeatCycleWhenNoTaskFactWasPersisted() {
+        UUID player = UUID.randomUUID();
+        ParticipantId participant = ParticipantId.player(player);
+        TaskDefinition task = new TaskDefinition("consume", "count", false, map("target", "1"));
+        QuestDefinition quest = new QuestDefinition(UUID.randomUUID(), 1, "Repeatable Detect", "",
+            QuestLogic.AND, QuestLogic.AND, Collections.<UUID>emptySet(), Collections.singletonList(task),
+            Collections.<RewardDefinition>emptyList(), RepeatPolicy.after(100L));
+        QuestEvaluationRequest request = new QuestEvaluationRequest(quest, ParticipantMembership.player(player),
+            Collections.<UUID>emptySet());
+        QuestEvaluationRequestProvider provider = new QuestEvaluationRequestProvider() {
+            @Override public List<QuestEvaluationRequest> requestsFor(GameplayFact ignored) {
+                return Collections.singletonList(request);
+            }
+            @Override public List<QuestEvaluationRequest> requestsForNewlyUnlockedLockedProgress(
+                ParticipantId ignored, UUID completedQuestId) { return Collections.emptyList(); }
+            @Override public List<QuestEvaluationRequest> requestsForLockedProgressReconciliation(
+                ParticipantId ignored, Set<UUID> lockedQuestIds) { return Collections.emptyList(); }
+        };
+        FakeRepository repository = new FakeRepository();
+        repository.seed(new QuestProgressSnapshot(participant, quest.getId(), quest.getVersion(),
+            QuestStatus.COMPLETED, Collections.singletonMap("consume", new TaskProgress("consume", 1L, 1L, true)),
+            100L, 0));
+        QuestRuntimeService service = new QuestRuntimeService(repository, new CountingTransaction(),
+            new QuestFactProjector(new TaskEvaluatorRegistry()), new QuestEngine());
+
+        FactProcessingResult result = service.reconcileAfterConsumptionDetectBatch(request, provider, 200L, 1);
+
+        QuestProgressSnapshot nextCycle = repository.findProgress(participant, quest.getId(), quest.getVersion()).get();
+        assertTrue(result.isAccepted());
+        assertEquals(1, nextCycle.getCycle());
+        assertEquals(QuestStatus.AVAILABLE, nextCycle.getStatus());
+        assertFalse(nextCycle.getTasks().get("consume").isComplete());
     }
 
     @Test
@@ -425,8 +574,13 @@ public class QuestRuntimeServiceTest {
             QuestLogic.AND, QuestLogic.AND, Collections.<UUID>emptySet(), Collections.singletonList(location),
             Collections.singletonList(reward), RepeatPolicy.after(100L),
             QuestBehavior.builder().participantScope(QuestParticipantScope.PLAYER).build());
-        QuestEvaluationPlanner planner = new QuestEvaluationPlanner(() -> Collections.singletonList(
-            new StoredQuestDefinition(quest, QuestDefinitionLifecycle.PUBLISHED, "hash", 1L)),
+        AtomicInteger catalogLoads = new AtomicInteger();
+        PublishedQuestCatalog cachedCatalog = new RevisionAwarePublishedQuestCatalog(() -> {
+            catalogLoads.incrementAndGet();
+            return Collections.singletonList(new StoredQuestDefinition(quest,
+                QuestDefinitionLifecycle.PUBLISHED, "hash", 1L));
+        }, () -> 1L);
+        QuestEvaluationPlanner planner = new QuestEvaluationPlanner(cachedCatalog,
             participant -> Collections.<UUID>emptySet(),
             player -> java.util.Arrays.asList(ParticipantMembership.player(player), party),
             new BqHuntPartyAssignmentPolicy(), ACTIVE_PARTY_FOR_RUNTIME_TEST);
@@ -476,6 +630,8 @@ public class QuestRuntimeServiceTest {
             assertEquals(QuestStatus.COMPLETED, progress.getStatus());
         }
         assertEquals(4, repository.entitlements.size());
+        assertEquals("cooldown and repeat cycles reevaluate against one cached candidate plan", 1,
+            catalogLoads.get());
     }
 
     private static GameplayFact locationFact(String id, UUID visitor, long time) {
@@ -696,6 +852,7 @@ public class QuestRuntimeServiceTest {
         private final Map<String, QuestProgressSnapshot> progress = new LinkedHashMap<String, QuestProgressSnapshot>();
         private final List<RewardEntitlement> entitlements = new ArrayList<RewardEntitlement>();
         private final Set<String> pendingConsumptionCycles = new HashSet<String>();
+        private final Set<String> activeConsumptionDetectBatches = new HashSet<String>();
         private final Set<String> claimedRewardCycles = new HashSet<String>();
         private final Map<String, Long> rewardClaimTimes = new LinkedHashMap<String, Long>();
 
@@ -715,6 +872,10 @@ public class QuestRuntimeServiceTest {
         @Override public boolean hasPendingConsumptionSubmission(ParticipantId participant, UUID questId,
             int version, int cycle) {
             return pendingConsumptionCycles.contains(cycleKey(participant, questId, version, cycle));
+        }
+        @Override public boolean hasActiveConsumptionDetectBatch(ParticipantId participant, UUID questId,
+            int version) {
+            return activeConsumptionDetectBatches.contains(batchKey(participant, questId, version));
         }
         @Override public boolean hasClaimableRewardEntitlement(ParticipantId participant, UUID questId,
             int version, int cycle) {
@@ -741,6 +902,9 @@ public class QuestRuntimeServiceTest {
         }
         private String cycleKey(ParticipantId participant, UUID questId, int version, int cycle) {
             return participant + ":" + questId + ":" + version + ":" + cycle;
+        }
+        private String batchKey(ParticipantId participant, UUID questId, int version) {
+            return participant + ":" + questId + ":" + version;
         }
         @Override public boolean recordFactIfAbsent(GameplayFact fact) { return facts.add(fact.getFactKey()); }
         @Override public void saveProgress(QuestProgressSnapshot value) {

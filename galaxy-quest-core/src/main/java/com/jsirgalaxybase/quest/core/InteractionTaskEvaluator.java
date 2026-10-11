@@ -36,8 +36,11 @@ public final class InteractionTaskEvaluator implements TaskEvaluator {
 
     private boolean entityMatches(Map<String, String> required, Map<String, String> actual) {
         String subject = required.get("subject");
-        if (subject == null || subject.isEmpty()) return true;
-        if (subject.equals(actual.get("subject"))) return true;
+        String actualSubject = actual.get("subject");
+        // BQ resolves the configured target through EntityList and ignores the event if either
+        // the target ID or the interacted entity has no registered resource ID.
+        if (subject == null || subject.isEmpty() || actualSubject == null || actualSubject.isEmpty()) return false;
+        if (subject.equals(actualSubject)) return true;
         return bool(required.get("targetSubtypes"), true) && aliases(actual).contains(subject);
     }
 

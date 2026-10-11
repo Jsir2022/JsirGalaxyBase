@@ -43,6 +43,16 @@ public class BqProgressConflictAnalyzerTest {
         assertEquals(1, report.count(BqProgressRelation.RIGHT_ONLY));
     }
 
+    @Test
+    public void differentBqCompletionTimestampsAreNotClassifiedAsIdentical() {
+        UUID quest = UUID.randomUUID();
+        BqImportedQuestProgress earlier = questWithTimestamp(quest, true, true, 1000L, 4L, 2L);
+        BqImportedQuestProgress later = questWithTimestamp(quest, true, true, 2000L, 4L, 2L);
+
+        assertEquals("BqQuestInstance timestamp can distinguish completion/claim and cooldown state",
+            BqProgressRelation.DIVERGENT, analyzer.relation(earlier, later));
+    }
+
     private static BqImportedPlayerProgress player(UUID player, BqImportedQuestProgress... quests) {
         return new BqImportedPlayerProgress(player, Paths.get(player + ".json"), Arrays.asList(quests));
     }
@@ -51,6 +61,13 @@ public class BqProgressConflictAnalyzerTest {
         BqImportedTaskProgress task = new BqImportedTaskProgress("task", "bq_standard:retrieval", complete,
             longs(values), "{}");
         return new BqImportedQuestProgress(id, complete, claimed, 0L, Collections.singletonList(task), "{}");
+    }
+
+    private static BqImportedQuestProgress questWithTimestamp(UUID id, boolean complete, boolean claimed,
+        long timestamp, long... values) {
+        BqImportedTaskProgress task = new BqImportedTaskProgress("task", "bq_standard:retrieval", complete,
+            longs(values), "{}");
+        return new BqImportedQuestProgress(id, complete, claimed, timestamp, Collections.singletonList(task), "{}");
     }
 
     private static java.util.List<Long> longs(long... values) {

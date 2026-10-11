@@ -7,6 +7,8 @@ final class BqPartyTaskProgressScope {
     private static final String MEETING = "bq_standard:meeting";
     private static final String ITEM_PRODUCED = "galaxy:item_produced";
     private static final String NEARBY_ENTITIES_OBSERVED = "galaxy:nearby_entities_observed";
+    private static final ItemVectorTaskEvaluator CRAFTING_MATCHER = new ItemVectorTaskEvaluator(
+        "bq_standard:crafting", ITEM_PRODUCED);
 
     private BqPartyTaskProgressScope() { }
 
@@ -58,12 +60,7 @@ final class BqPartyTaskProgressScope {
         for (TaskDefinition task : definition.getTasks()) {
             if (!CRAFTING.equals(task.getTypeId()) || !task.getParameters().containsKey("bq.raw")
                 || !ITEM_PRODUCED.equals(task.getParameters().get("factType"))) continue;
-            boolean enabled = "craft".equals(channel)
-                ? QuestBooleanParameter.parse(task.getParameters().get("allowCraft"), true)
-                : "smelt".equals(channel)
-                    ? QuestBooleanParameter.parse(task.getParameters().get("allowSmelt"), true)
-                    : QuestBooleanParameter.parse(task.getParameters().get("allowAnvil"), false);
-            if (enabled) return true;
+            if (CRAFTING_MATCHER.matchesCraftingProgressEvent(task, fact.getAttributes())) return true;
         }
         return false;
     }

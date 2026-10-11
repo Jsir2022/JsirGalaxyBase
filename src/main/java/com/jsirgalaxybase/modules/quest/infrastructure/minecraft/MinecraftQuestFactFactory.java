@@ -8,7 +8,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import com.jsirgalaxybase.quest.core.GameplayFact;
-import com.jsirgalaxybase.quest.core.FluidObservationCanonicalizer;
+import com.jsirgalaxybase.quest.core.FluidObservationAttributeCodec;
 import com.jsirgalaxybase.quest.core.FluidObservationEntry;
 import com.jsirgalaxybase.quest.core.InventoryObservationEntry;
 import com.jsirgalaxybase.quest.core.InventoryObservationAttributeCodec;
@@ -24,6 +24,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTBase;
 import net.minecraft.tileentity.TileEntity;
+import net.minecraft.util.AxisAlignedBB;
 import net.minecraftforge.oredict.OreDictionary;
 import net.minecraftforge.fluids.FluidContainerRegistry;
 import net.minecraftforge.fluids.FluidStack;
@@ -49,8 +50,13 @@ public final class MinecraftQuestFactFactory {
     public String getSourceServer() { return sourceServer; }
 
     public GameplayFact itemProduced(EntityPlayer player, ItemStack stack, int amount, String channel) {
-        if (player == null || stack == null || stack.getItem() == null) throw new IllegalArgumentException(
-            "player and produced item are required");
+        if (player == null) throw new IllegalArgumentException("player is required");
+        return fact(player, "galaxy:item_produced", channel, itemProducedAttributes(stack, amount, channel));
+    }
+
+    public Map<String, String> itemProducedAttributes(ItemStack stack, int amount, String channel) {
+        if (stack == null || stack.getItem() == null) throw new IllegalArgumentException(
+            "produced item is required");
         Map<String, String> attributes = new LinkedHashMap<String, String>();
         Object registryName = Item.itemRegistry.getNameForObject(stack.getItem());
         attributes.put("registryName", registryName == null ? "minecraft:air" : registryName.toString());
@@ -60,7 +66,7 @@ public final class MinecraftQuestFactFactory {
         attributes.put("channel", channel);
         attributes.put("oreDictionary", oreNames(stack));
         if (stack.hasTagCompound()) appendNbt(attributes, "nbt", stack.getTagCompound());
-        return fact(player, "galaxy:item_produced", channel, attributes);
+        return Collections.unmodifiableMap(attributes);
     }
 
     public GameplayFact craftingStatisticObserved(EntityPlayer player, String registryName, int meta) {
@@ -69,6 +75,11 @@ public final class MinecraftQuestFactFactory {
 
     public GameplayFact craftingStatisticObserved(EntityPlayer player, String registryName, int meta,
         ItemStack trigger, String triggerChannel) {
+        return craftingStatisticObserved(player, registryName, meta, trigger, triggerChannel, false);
+    }
+
+    public GameplayFact craftingStatisticObserved(EntityPlayer player, String registryName, int meta,
+        ItemStack trigger, String triggerChannel, boolean bqPartyOnlineSnapshot) {
         if (player == null || registryName == null || registryName.trim().isEmpty()) {
             throw new IllegalArgumentException("player and registryName are required");
         }
@@ -88,6 +99,10 @@ public final class MinecraftQuestFactFactory {
         attributes.put("damageable", Boolean.toString(item != null && item.isDamageable()));
         attributes.put("amount", Integer.toString(amount));
         attributes.put("channel", "craft-statistics");
+        if (bqPartyOnlineSnapshot) {
+            attributes.put(com.jsirgalaxybase.quest.core.BqPartyCraftingStatisticsScope.PERSONAL_ONLINE_SNAPSHOT,
+                "true");
+        }
         if (trigger != null && trigger.getItem() != null && triggerChannel != null) {
             Object triggerName = Item.itemRegistry.getNameForObject(trigger.getItem());
             attributes.put("trigger.channel", triggerChannel);
@@ -105,12 +120,14 @@ public final class MinecraftQuestFactFactory {
         if (player == null || entity == null) throw new IllegalArgumentException("player and entity are required");
         Map<String, String> attributes = new LinkedHashMap<String, String>();
         String subject = EntityList.getEntityString(entity);
-        attributes.put("subject", subject == null ? entity.getClass().getName() : subject);
-        attributes.put("subjectAliases", entityAliases(entity.getClass()));
+        attributes.put("subject", subject == null ? "" : subject);
+        attributes.put("subjectAliases", subject == null ? "" : entityAliases(entity.getClass()));
         attributes.put("damageType", damageType == null ? "" : damageType);
         attributes.put("amount", "1");
-        NBTTagCompound nbt = new NBTTagCompound();
-        if (entity.writeToNBTOptional(nbt)) appendNbt(attributes, "entity.nbt", nbt);
+        if (subject != null) {
+            NBTTagCompound nbt = new NBTTagCompound();
+            if (entity.writeToNBTOptional(nbt)) appendNbt(attributes, "entity.nbt", nbt);
+        }
         return fact(player, "galaxy:entity_killed", "kill", attributes);
     }
 
@@ -118,12 +135,14 @@ public final class MinecraftQuestFactFactory {
         if (player == null || entity == null) throw new IllegalArgumentException("player and entity are required");
         Map<String, String> attributes = new LinkedHashMap<String, String>();
         String subject = EntityList.getEntityString(entity);
-        attributes.put("subject", subject == null ? entity.getClass().getName() : subject);
-        attributes.put("subjectAliases", entityAliases(entity.getClass()));
+        attributes.put("subject", subject == null ? "" : subject);
+        attributes.put("subjectAliases", subject == null ? "" : entityAliases(entity.getClass()));
         attributes.put("hit", Boolean.toString(hit));
         appendHeldItem(attributes, held);
-        NBTTagCompound nbt = new NBTTagCompound();
-        if (entity.writeToNBTOptional(nbt)) appendNbt(attributes, "entity.nbt", nbt);
+        if (subject != null) {
+            NBTTagCompound nbt = new NBTTagCompound();
+            if (entity.writeToNBTOptional(nbt)) appendNbt(attributes, "entity.nbt", nbt);
+        }
         return fact(player, "galaxy:entity_interacted", hit ? "entity-hit" : "entity-interact", attributes);
     }
 
@@ -168,6 +187,10 @@ public final class MinecraftQuestFactFactory {
 
     public GameplayFact inventoryObserved(EntityPlayer player, IInventory inventory) {
         if (player == null || inventory == null) throw new IllegalArgumentException("player and inventory are required");
+        return fact(player, "galaxy:inventory_observed", "inventory", inventoryAttributes(inventory));
+    }
+
+    private Map<String, String> inventoryAttributes(IInventory inventory) {
         List<InventoryObservationEntry> raw = new ArrayList<InventoryObservationEntry>();
         for (int slot = 0; slot < inventory.getSizeInventory(); slot++) {
             ItemStack stack = inventory.getStackInSlot(slot);
@@ -181,17 +204,22 @@ public final class MinecraftQuestFactFactory {
                 "", portable,
                 stack.getItem().isDamageable()));
         }
-        return fact(player, "galaxy:inventory_observed", "inventory",
-            new InventoryObservationAttributeCodec().encode(raw));
+        return new InventoryObservationAttributeCodec().encode(raw);
     }
 
     public GameplayFact inventoryObserved(EntityPlayer player, IInventory inventory, UUID sessionId) {
+        return inventoryObserved(player, inventory, sessionId, true, false);
+    }
+
+    public GameplayFact inventoryObserved(EntityPlayer player, IInventory inventory, UUID sessionId,
+        boolean includeItems, boolean includeFluids) {
+        if (player == null || inventory == null) throw new IllegalArgumentException("player and inventory are required");
         if (sessionId == null) throw new IllegalArgumentException("inventory session id is required");
-        GameplayFact fact = inventoryObserved(player, inventory);
-        Map<String, String> attributes = new LinkedHashMap<String, String>(fact.getAttributes());
+        Map<String, String> attributes = new LinkedHashMap<String, String>();
+        if (includeItems) attributes.putAll(inventoryAttributes(inventory));
+        if (includeFluids) attributes.putAll(fluidInventoryAttributes(inventory));
         attributes.put("inventory.sessionId", sessionId.toString());
-        return new GameplayFact(fact.getSourceServer(), fact.getEventId(), fact.getPlayerId(), fact.getTypeId(),
-            fact.getOccurredAt(), attributes);
+        return fact(player, "galaxy:inventory_observed", "inventory", attributes);
     }
 
     public GameplayFact bqPartyInventoryObserved(GameplayFact trigger, UUID partyId,
@@ -208,9 +236,39 @@ public final class MinecraftQuestFactFactory {
             trigger.getOccurredAt(), attributes);
     }
 
+    public GameplayFact fluidInventoryProjection(GameplayFact carrier) {
+        if (carrier == null || !"galaxy:inventory_observed".equals(carrier.getTypeId())
+            || !carrier.getAttributes().containsKey("fluidInventory.count")) return null;
+        Map<String, String> attributes = new LinkedHashMap<String, String>();
+        for (Map.Entry<String, String> entry : carrier.getAttributes().entrySet()) {
+            if (entry.getKey().startsWith("fluidInventory.")) attributes.put(entry.getKey(), entry.getValue());
+        }
+        return new GameplayFact(carrier.getSourceServer(), carrier.getEventId() + ":fluidInventory",
+            carrier.getPlayerId(), "galaxy:fluid_inventory_observed", carrier.getOccurredAt(), attributes);
+    }
+
+    public GameplayFact bqPartyFluidInventoryObserved(GameplayFact trigger, UUID partyId,
+        List<FluidObservationEntry> entries) {
+        if (trigger == null || !"galaxy:inventory_observed".equals(trigger.getTypeId())
+            || !trigger.getAttributes().containsKey("fluidInventory.count") || partyId == null) {
+            throw new IllegalArgumentException("fluid inventory trigger and party id are required");
+        }
+        Map<String, String> attributes = new LinkedHashMap<String, String>(
+            new FluidObservationAttributeCodec().encode(entries));
+        attributes.put("inventory.bqPartySnapshot", "true");
+        attributes.put("inventory.bqPartyId", partyId.toString());
+        String eventId = "bq-party-fluid-inventory:" + trigger.getEventId() + ":" + partyId;
+        return new GameplayFact(sourceServer, eventId, trigger.getPlayerId(), "galaxy:fluid_inventory_observed",
+            trigger.getOccurredAt(), attributes);
+    }
+
     public GameplayFact fluidInventoryObserved(EntityPlayer player, IInventory inventory) {
         if (player == null || inventory == null) throw new IllegalArgumentException("player and inventory are required");
-        Map<String, String> attributes = new LinkedHashMap<String, String>();
+        return fact(player, "galaxy:fluid_inventory_observed", "fluid-inventory",
+            fluidInventoryAttributes(inventory));
+    }
+
+    private Map<String, String> fluidInventoryAttributes(IInventory inventory) {
         List<FluidObservationEntry> raw = new ArrayList<FluidObservationEntry>();
         for (int slot = 0; slot < inventory.getSizeInventory(); slot++) {
             ItemStack stack = inventory.getStackInSlot(slot);
@@ -228,19 +286,7 @@ public final class MinecraftQuestFactFactory {
                 saturatingMultiply(fluid.amount, stack.stackSize), fluid.tag == null ? "" : fluid.tag.toString(),
                 fluid.tag == null ? "" : MinecraftPortableNbtCodec.encode(fluid.tag), fluid.tag != null));
         }
-        int entry = 0;
-        for (FluidObservationEntry observation : new FluidObservationCanonicalizer().canonicalize(raw)) {
-            String prefix = "fluidInventory." + entry + ".";
-            attributes.put(prefix + "name", observation.getName());
-            attributes.put(prefix + "amount", Long.toString(observation.getAmount()));
-            attributes.put(prefix + "nbtPresent", Boolean.toString(observation.isNbtPresent()));
-            if (!observation.getNbt().isEmpty()) attributes.put(prefix + "nbt", observation.getNbt());
-            if (!observation.getNbtPortable().isEmpty()) attributes.put(prefix + "nbtPortable",
-                observation.getNbtPortable());
-            entry++;
-        }
-        attributes.put("fluidInventory.count", Integer.toString(entry));
-        return fact(player, "galaxy:fluid_inventory_observed", "fluid-inventory", attributes);
+        return new FluidObservationAttributeCodec().encode(raw);
     }
 
     public GameplayFact locationObserved(EntityPlayer player) {
@@ -290,15 +336,18 @@ public final class MinecraftQuestFactFactory {
         if (player == null || player.worldObj == null) throw new IllegalArgumentException("player and world are required");
         int safeRadius = Math.max(0, radius);
         Map<String, String> attributes = new LinkedHashMap<String, String>();
+        appendBounds(attributes, "observer.", player.boundingBox);
         List<Entity> entities = player.worldObj.getEntitiesWithinAABBExcludingEntity(player,
             player.boundingBox.expand(safeRadius, safeRadius, safeRadius));
         int entry = 0;
         for (Entity entity : entities) {
             String subject = EntityList.getEntityString(entity);
-            if (subject == null) continue;
+            AxisAlignedBB bounds = entity.boundingBox;
+            if (subject == null || bounds == null) continue;
             String prefix = "nearbyEntity." + entry + ".";
             attributes.put(prefix + "subject", subject);
             attributes.put(prefix + "subjectAliases", entityAliases(entity.getClass()));
+            appendBounds(attributes, prefix, bounds);
             NBTTagCompound nbt = new NBTTagCompound();
             if (entity.writeToNBTOptional(nbt)) appendNbt(attributes, prefix + "nbt", nbt);
             entry++;
@@ -306,6 +355,16 @@ public final class MinecraftQuestFactFactory {
         attributes.put("nearbyEntity.count", Integer.toString(entry));
         attributes.put("observedRadius", Integer.toString(safeRadius));
         return fact(player, "galaxy:nearby_entities_observed", "nearby-entities", attributes);
+    }
+
+    private void appendBounds(Map<String, String> attributes, String prefix, AxisAlignedBB bounds) {
+        if (bounds == null) return;
+        attributes.put(prefix + "minX", Double.toString(bounds.minX));
+        attributes.put(prefix + "minY", Double.toString(bounds.minY));
+        attributes.put(prefix + "minZ", Double.toString(bounds.minZ));
+        attributes.put(prefix + "maxX", Double.toString(bounds.maxX));
+        attributes.put(prefix + "maxY", Double.toString(bounds.maxY));
+        attributes.put(prefix + "maxZ", Double.toString(bounds.maxZ));
     }
 
     private GameplayFact fact(EntityPlayer player, String factType, String eventType, Map<String, String> attributes) {

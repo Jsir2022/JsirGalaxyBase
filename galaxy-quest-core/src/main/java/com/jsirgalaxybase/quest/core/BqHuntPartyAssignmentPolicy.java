@@ -9,7 +9,7 @@ import java.util.UUID;
 
 /**
  * Mirrors BetterQuesting's per-player party fan-out for imported event-driven tasks and server-authored
- * aggregate non-consuming Retrieval snapshots. Party membership comes from the trusted server resolver.
+ * aggregate non-consuming item/fluid inventory snapshots. Party membership comes from the trusted resolver.
  */
 public final class BqHuntPartyAssignmentPolicy implements QuestAssignmentPolicy {
     private final ScopedQuestAssignmentPolicy scoped = new ScopedQuestAssignmentPolicy();
@@ -25,8 +25,8 @@ public final class BqHuntPartyAssignmentPolicy implements QuestAssignmentPolicy 
         List<ParticipantMembership> memberships, GameplayFact fact) {
         List<ParticipantMembership> selected = scoped.select(definition, memberships);
         boolean taskEvent = BqPartyTaskProgressScope.supports(definition, fact);
-        boolean retrieval = matchesBqPartyRetrievalSnapshot(definition, fact);
-        if ((!taskEvent && !retrieval)
+        boolean aggregateSnapshot = BqPartyInventorySnapshotScope.matchesBqPartySnapshot(definition, fact);
+        if ((!taskEvent && !aggregateSnapshot)
             || definition.getBehavior().getParticipantScope() != QuestParticipantScope.PLAYER
             || selected.isEmpty()) return selected;
 
@@ -36,7 +36,7 @@ public final class BqHuntPartyAssignmentPolicy implements QuestAssignmentPolicy 
         for (ParticipantMembership membership : memberships) {
             if (membership.getParticipantId().getType() != ParticipantType.PARTY
             || !membership.contains(fact.getPlayerId())) continue;
-            if (retrieval && !BqPartyInventorySnapshotScope.matches(fact, membership)) continue;
+            if (aggregateSnapshot && !BqPartyInventorySnapshotScope.matches(fact, membership)) continue;
             if (party != null) throw new IllegalArgumentException(
                 "multiple active PARTY memberships for BQ progress fact player");
             party = membership;
@@ -51,16 +51,4 @@ public final class BqHuntPartyAssignmentPolicy implements QuestAssignmentPolicy 
         return Collections.unmodifiableList(fanout);
     }
 
-    private static boolean matchesBqPartyRetrievalSnapshot(QuestDefinition definition, GameplayFact fact) {
-        if (!BqPartyInventorySnapshotScope.isPartySnapshot(fact)
-            || !"galaxy:inventory_observed".equals(fact.getTypeId())) return false;
-        for (TaskDefinition task : definition.getTasks()) {
-            if (("bq_standard:retrieval".equals(task.getTypeId())
-                || "bq_standard:optional_retrieval".equals(task.getTypeId()))
-                && "galaxy:inventory_observed".equals(task.getParameters().get("factType"))
-                && task.getParameters().containsKey("bq.raw")
-                && !QuestBooleanParameter.parse(task.getParameters().get("consume"), false)) return true;
-        }
-        return false;
-    }
 }

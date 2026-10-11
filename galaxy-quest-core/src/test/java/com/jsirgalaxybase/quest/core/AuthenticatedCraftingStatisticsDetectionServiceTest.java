@@ -39,7 +39,8 @@ public class AuthenticatedCraftingStatisticsDetectionServiceTest {
         assertEquals(FactProcessingStatus.ACCEPTED, results.get(0).getStatus());
         assertEquals(FactProcessingStatus.ACCEPTED, results.get(1).getStatus());
         QuestProgressSnapshot progress = fixture.runtime.progress(fixture.player, target.getId());
-        assertEquals(Arrays.asList(Long.valueOf(2L), Long.valueOf(3L)),
+        assertEquals("BQ keeps absolute crafting statistics even after the task target is exceeded",
+            Arrays.asList(Long.valueOf(7L), Long.valueOf(5L)),
             progress.getTasks().get("selected").getValues());
         assertEquals(Collections.singletonList(Long.valueOf(0L)), progress.getTasks().get("sibling").getValues());
         assertEquals(null, fixture.runtime.progress(fixture.player, other.getId()));
@@ -147,6 +148,64 @@ public class AuthenticatedCraftingStatisticsDetectionServiceTest {
         assertEquals(FactProcessingStatus.ACCEPTED,
             fixture.service().detect(fixture.player, definition.getId(), "craft", 101L).get(0).getStatus());
         assertTrue(fixture.runtime.progress(fixture.player, definition.getId()).getTasks().get("craft").isComplete());
+    }
+
+    @Test
+    public void automaticBqDetectReevaluatesCompletedLockedTaskAfterPrerequisiteUnlocks() {
+        Fixture fixture = new Fixture();
+        UUID prerequisite = UUID.randomUUID();
+        Map<String, String> parameters = new LinkedHashMap<String, String>();
+        parameters.put("item.count", "1");
+        parameters.put("item.0.registryName", "minecraft:iron_ingot");
+        parameters.put("item.0.meta", "0");
+        parameters.put("item.0.amount", "1");
+        parameters.put("progressMode", "item-vector");
+        parameters.put("allowCraft", "true");
+        parameters.put("allowSmelt", "true");
+        parameters.put("allowAnvil", "false");
+        parameters.put("allowCraftedFromStatistics", "true");
+        parameters.put("bq.raw", "{}");
+        TaskDefinition task = new TaskDefinition("craft", "bq_standard:crafting", false, parameters);
+        RewardDefinition reward = new RewardDefinition("reward", "bq_standard:item",
+            Collections.<String, String>emptyMap());
+        QuestDefinition definition = new QuestDefinition(UUID.randomUUID(), 1, "Locked BQ Crafting", "",
+            QuestLogic.AND, QuestLogic.AND, Collections.singleton(prerequisite), Collections.singletonList(task),
+            Collections.singletonList(reward));
+        fixture.publish(definition);
+        fixture.statistics.put("minecraft:iron_ingot", Long.valueOf(1L));
+        TaskProgress alreadyDetected = new TaskProgress("craft", Collections.singletonList(Long.valueOf(1L)),
+            Collections.singletonList(Long.valueOf(1L)), true);
+        fixture.runtime.saveProgress(new QuestProgressSnapshot(ParticipantId.player(fixture.player),
+            definition.getId(), definition.getVersion(), QuestStatus.LOCKED,
+            Collections.singletonMap("craft", alreadyDetected), 0L, 0));
+
+        assertTrue("periodic BQ Detect must not complete while this player is still locked",
+            fixture.service().detectAutomatically(fixture.player, definition.getId(), "craft", 100L).isEmpty());
+        assertTrue(fixture.runtime.entitlements.isEmpty());
+
+        fixture.completed.add(prerequisite);
+        Map<String, String> probeAttributes = new LinkedHashMap<String, String>();
+        probeAttributes.put("registryName", "minecraft:iron_ingot");
+        probeAttributes.put("channel", "craft-statistics");
+        probeAttributes.put("targetQuestId", definition.getId().toString());
+        probeAttributes.put("targetQuestVersion", "1");
+        probeAttributes.put("targetTaskKey", "craft");
+        probeAttributes.put(BqPartyCraftingStatisticsScope.PERSONAL_ONLINE_SNAPSHOT, "true");
+        probeAttributes.put(BqPartyCraftingStatisticsScope.AUTOMATIC_TASK_SNAPSHOT, "true");
+        assertEquals("the now-unlocked player has a targeted imported-BQ request", 1,
+            fixture.planner.requestsFor(new GameplayFact("s2", "unlock-probe", fixture.player,
+                "galaxy:item_produced", 160L, probeAttributes)).size());
+        List<FactProcessingResult> results = fixture.service().detectAutomatically(fixture.player,
+            definition.getId(), "craft", 160L);
+
+        assertEquals(1, results.size());
+        assertEquals(FactProcessingStatus.ACCEPTED, results.get(0).getStatus());
+        assertEquals(QuestStatus.COMPLETED, fixture.runtime.progress(fixture.player, definition.getId()).getStatus());
+        assertEquals("the unlocked reevaluation produces its reward once", 1, fixture.runtime.entitlements.size());
+        assertTrue("the later unlocked reevaluation uses its own stable idempotency key",
+            fixture.runtime.facts.iterator().next().startsWith("s2:craft-stat-auto-unlock:"));
+        assertTrue(fixture.service().detectAutomatically(fixture.player, definition.getId(), "craft", 220L).isEmpty());
+        assertEquals(1, fixture.runtime.facts.size());
     }
 
     private static QuestDefinition quest(String name, RepeatPolicy repeat, QuestBehavior behavior,

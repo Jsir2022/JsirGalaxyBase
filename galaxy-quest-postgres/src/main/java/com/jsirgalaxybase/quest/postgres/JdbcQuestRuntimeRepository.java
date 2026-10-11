@@ -15,6 +15,10 @@ import java.util.Set;
 import java.util.UUID;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.jsirgalaxybase.quest.core.GameplayFact;
 import com.jsirgalaxybase.quest.core.ParticipantId;
 import com.jsirgalaxybase.quest.core.QuestProgressSnapshot;
@@ -73,7 +77,7 @@ public final class JdbcQuestRuntimeRepository implements QuestRuntimeRepository 
             public List<QuestProgressSnapshot> execute(Connection connection) throws SQLException {
                 Map<String, LockedProgressAccumulator> locked = new LinkedHashMap<String, LockedProgressAccumulator>();
                 String sql = "SELECT p.quest_id,p.definition_version,p.completed_at,p.cycle,"
-                    + "t.task_key,t.progress_values,t.target_values,t.complete "
+                    + "t.task_key,t.progress_values,t.target_values,t.complete,t.source_progress_json "
                     + "FROM galaxy_quest_progress p LEFT JOIN galaxy_quest_task_progress t "
                     + "ON t.participant_type=p.participant_type AND t.participant_id=p.participant_id "
                     + "AND t.quest_id=p.quest_id AND t.definition_version=p.definition_version "
@@ -94,8 +98,8 @@ public final class JdbcQuestRuntimeRepository implements QuestRuntimeRepository 
                             }
                             String taskKey = rows.getString(5);
                             if (taskKey != null) {
-                                value.tasks.put(taskKey, new TaskProgress(taskKey, longs(rows.getArray(6)),
-                                    longs(rows.getArray(7)), rows.getBoolean(8)));
+                                value.tasks.put(taskKey, readTaskProgress(taskKey, rows.getArray(6),
+                                    rows.getArray(7), rows.getBoolean(8), rows.getString(9)));
                             }
                         }
                     }
@@ -157,6 +161,25 @@ public final class JdbcQuestRuntimeRepository implements QuestRuntimeRepository 
                         return Boolean.valueOf(rows.next());
                     }
                 }
+            }
+        }).booleanValue();
+    }
+
+    @Override
+    public boolean hasActiveConsumptionDetectBatch(final ParticipantId participantId, final UUID questId,
+        final int definitionVersion) {
+        requireTransaction();
+        if (participantId == null || questId == null || definitionVersion < 1) throw new IllegalArgumentException(
+            "valid progress identity is required");
+        return connections.withConnection(connection -> {
+            try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT 1 FROM galaxy_quest_consumption_detect_batch WHERE participant_type=? AND participant_id=? "
+                    + "AND quest_id=? AND definition_version=? AND batch_status='ACTIVE' LIMIT 1")) {
+                statement.setString(1, participantId.getType().name());
+                statement.setObject(2, participantId.getId());
+                statement.setObject(3, questId);
+                statement.setInt(4, definitionVersion);
+                try (ResultSet rows = statement.executeQuery()) { return Boolean.valueOf(rows.next()); }
             }
         }).booleanValue();
     }
@@ -336,13 +359,15 @@ public final class JdbcQuestRuntimeRepository implements QuestRuntimeRepository 
         int version) throws SQLException {
         Map<String, TaskProgress> tasks = new LinkedHashMap<String, TaskProgress>();
         try (PreparedStatement statement = connection.prepareStatement(
-            "SELECT task_key,progress_values,target_values,complete FROM galaxy_quest_task_progress "
+            "SELECT task_key,progress_values,target_values,complete,source_progress_json "
+                + "FROM galaxy_quest_task_progress "
                 + "WHERE participant_type=? AND participant_id=? AND quest_id=? AND definition_version=? ORDER BY task_key")) {
             bindIdentity(statement, participantId, questId, version);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
                     String key = rows.getString(1);
-                    tasks.put(key, new TaskProgress(key, longs(rows.getArray(2)), longs(rows.getArray(3)), rows.getBoolean(4)));
+                    tasks.put(key, readTaskProgress(key, rows.getArray(2), rows.getArray(3), rows.getBoolean(4),
+                        rows.getString(5)));
                 }
             }
         }
@@ -357,7 +382,7 @@ public final class JdbcQuestRuntimeRepository implements QuestRuntimeRepository 
         }
         try (PreparedStatement insert = connection.prepareStatement(
             "INSERT INTO galaxy_quest_task_progress(participant_type,participant_id,quest_id,definition_version,task_key,"
-                + "progress_values,target_values,complete) VALUES (?,?,?,?,?,?,?,?)")) {
+                + "progress_values,target_values,complete,source_progress_json) VALUES (?,?,?,?,?,?,?,?,?::jsonb)")) {
             List<Array> arrays = new ArrayList<Array>();
             try {
                 for (TaskProgress task : progress.getTasks().values()) {
@@ -370,6 +395,7 @@ public final class JdbcQuestRuntimeRepository implements QuestRuntimeRepository 
                     insert.setArray(6, values);
                     insert.setArray(7, targets);
                     insert.setBoolean(8, task.isComplete());
+                    insert.setString(9, encodeSourceProgress(task));
                     insert.addBatch();
                 }
                 insert.executeBatch();
@@ -377,6 +403,67 @@ public final class JdbcQuestRuntimeRepository implements QuestRuntimeRepository 
                 for (Array array : arrays) array.free();
             }
         }
+    }
+
+    private TaskProgress readTaskProgress(String taskKey, Array valuesArray, Array targetsArray, boolean complete,
+        String sourceProgressJson) throws SQLException {
+        List<Long> values = longs(valuesArray);
+        List<Long> targets = longs(targetsArray);
+        if (sourceProgressJson == null || sourceProgressJson.trim().isEmpty()) {
+            return new TaskProgress(taskKey, values, targets, complete);
+        }
+        try {
+            JsonObject state = new JsonParser().parse(sourceProgressJson).getAsJsonObject();
+            if (!state.has("legacyBaseline") || !state.has("sources")) {
+                return new TaskProgress(taskKey, values, targets, complete);
+            }
+            List<Long> baseline = jsonLongs(state.getAsJsonArray("legacyBaseline"));
+            JsonObject sources = state.getAsJsonObject("sources");
+            Map<String, TaskProgress.SourceContribution> contributions = new LinkedHashMap<String,
+                TaskProgress.SourceContribution>();
+            for (Map.Entry<String, JsonElement> entry : sources.entrySet()) {
+                JsonObject source = entry.getValue().getAsJsonObject();
+                contributions.put(entry.getKey(), new TaskProgress.SourceContribution(
+                    jsonLongs(source.getAsJsonArray("events")), jsonLongs(source.getAsJsonArray("observed"))));
+            }
+            TaskProgress restored = TaskProgress.restoreSourceScoped(taskKey, targets, complete, baseline,
+                contributions);
+            if (!values.equals(restored.getValues())) {
+                throw new SQLException("persisted aggregate does not match source-scoped progress for task "
+                    + taskKey);
+            }
+            return restored;
+        } catch (RuntimeException invalid) {
+            throw new SQLException("invalid source-scoped progress JSON for task " + taskKey, invalid);
+        }
+    }
+
+    private String encodeSourceProgress(TaskProgress task) {
+        if (!task.isSourceScoped()) return "{}";
+        JsonObject state = new JsonObject();
+        state.add("legacyBaseline", jsonLongs(task.getSourceBaselineValues()));
+        JsonObject sources = new JsonObject();
+        for (Map.Entry<String, TaskProgress.SourceContribution> entry : task.getSourceContributions().entrySet()) {
+            JsonObject source = new JsonObject();
+            source.add("events", jsonLongs(entry.getValue().getEventValues()));
+            source.add("observed", jsonLongs(entry.getValue().getObservedValues()));
+            sources.add(entry.getKey(), source);
+        }
+        state.add("sources", sources);
+        return gson.toJson(state);
+    }
+
+    private static JsonArray jsonLongs(List<Long> values) {
+        JsonArray result = new JsonArray();
+        for (Long value : values) result.add(value);
+        return result;
+    }
+
+    private static List<Long> jsonLongs(JsonArray values) {
+        if (values == null) throw new IllegalArgumentException("progress vector is missing");
+        List<Long> result = new ArrayList<Long>(values.size());
+        for (JsonElement value : values) result.add(Long.valueOf(value.getAsLong()));
+        return result;
     }
 
     private static final class LockedProgressAccumulator {

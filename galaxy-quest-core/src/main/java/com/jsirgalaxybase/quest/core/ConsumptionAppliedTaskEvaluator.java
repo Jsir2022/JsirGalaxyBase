@@ -26,7 +26,9 @@ public final class ConsumptionAppliedTaskEvaluator implements TaskEvaluator {
         if (count != current.getValues().size()) throw new IllegalArgumentException("consumption vector width mismatch");
         List<Long> deltas = new ArrayList<Long>(count);
         for (int i = 0; i < count; i++) deltas.add(positive(fact.getAttributes().get("value." + i)));
-        return current.advance(deltas);
+        // BQ fluid detection credits the complete amount returned by a container. Registered, indivisible
+        // containers can therefore take a task past its target; item and XP submissions remain target-capped.
+        return "fluid".equals(kind) ? current.advanceMeasuredAmounts(deltas) : current.advance(deltas);
     }
 
     private static boolean bool(String raw, boolean fallback) {

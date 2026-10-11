@@ -42,6 +42,7 @@ public final class JdbcQuestCenterQuery implements AuthenticatedQuestCenterQuery
     public void validateSchema() {
         connections.withConnection(connection -> {
             requireTable(connection,"galaxy_quest_definition");
+            requireCatalogRevision(connection);
             requireTable(connection,"galaxy_quest_chapter_definition");
             requireTable(connection,"galaxy_quest_chapter_catalog");
             requireTable(connection,"galaxy_quest_progress");
@@ -52,6 +53,7 @@ public final class JdbcQuestCenterQuery implements AuthenticatedQuestCenterQuery
             requireTable(connection,"galaxy_quest_participant");
             requireTable(connection,"galaxy_quest_participant_membership");
             requireTable(connection,"galaxy_quest_active_inventory_snapshot");
+            requireTable(connection,"galaxy_quest_consumption_detect_batch");
             requireTable(connection,"galaxy_quest_content_migration_batch");
             requireTable(connection,"galaxy_quest_content_migration_item");
             return null;
@@ -262,6 +264,17 @@ public final class JdbcQuestCenterQuery implements AuthenticatedQuestCenterQuery
             statement.setString(1,table);try(ResultSet rows=statement.executeQuery()){
                 if(!rows.next()||rows.getString(1)==null)throw new SQLException("required quest table is missing: "+table);
             }
+        }
+    }
+    private static void requireCatalogRevision(Connection connection)throws SQLException{
+        String migration="quest catalog revision migration 20261009_001_add_quest_definition_catalog_revision.sql is required";
+        try(PreparedStatement statement=connection.prepareStatement(
+            "SELECT revision FROM galaxy_quest_definition_catalog_revision WHERE singleton=TRUE");
+            ResultSet rows=statement.executeQuery()){
+            if(!rows.next())throw new SQLException(migration);
+        }catch(SQLException missing){
+            if(migration.equals(missing.getMessage()))throw missing;
+            throw new SQLException(migration,missing);
         }
     }
     private static String versionKey(UUID quest,int version){return quest+":"+version;}

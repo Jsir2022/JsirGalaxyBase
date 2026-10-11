@@ -111,8 +111,9 @@ public final class JdbcConsumptionSubmissionRepository implements ConsumptionSub
             }
             for (int i = 0; i < appliedAmounts.size(); i++) {
                 long value = appliedAmounts.get(i) == null ? -1L : appliedAmounts.get(i);
-                if (value < 0 || value > current.getRequest().getAmounts().get(i)) throw new QuestPersistenceException(
-                    "invalid applied consumption amount");
+                if (value < 0 || (value > current.getRequest().getAmounts().get(i)
+                    && !"fluid".equals(current.getRequest().getKind()))) throw new QuestPersistenceException(
+                        "invalid applied consumption amount");
             }
             try (PreparedStatement statement = connection.prepareStatement(
                 "UPDATE galaxy_quest_consumption_submission SET submission_status='APPLIED',evidence=?,"

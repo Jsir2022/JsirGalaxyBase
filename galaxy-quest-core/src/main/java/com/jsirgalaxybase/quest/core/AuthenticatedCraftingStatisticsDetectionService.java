@@ -43,6 +43,17 @@ public final class AuthenticatedCraftingStatisticsDetectionService {
      * participant UUID fan-out can be represented by authenticated cross-server statistics.
      */
     public List<FactProcessingResult> detect(UUID authenticatedPlayerId, UUID questId, String taskKey, long now) {
+        return detect(authenticatedPlayerId, questId, taskKey, now, false);
+    }
+
+    /** Automatically rechecks an imported BQ task from that online player's own local lifetime statistics. */
+    public List<FactProcessingResult> detectAutomatically(UUID authenticatedPlayerId, UUID questId, String taskKey,
+        long now) {
+        return detect(authenticatedPlayerId, questId, taskKey, now, true);
+    }
+
+    private List<FactProcessingResult> detect(UUID authenticatedPlayerId, UUID questId, String taskKey, long now,
+        boolean automaticBqSnapshot) {
         if (authenticatedPlayerId == null || questId == null || taskKey == null || taskKey.trim().isEmpty()
             || now < 0L) throw new IllegalArgumentException("player, quest, task and time are required");
         Optional<StoredQuestDefinition> stored = definitions.findPublished(questId);
@@ -56,6 +67,7 @@ public final class AuthenticatedCraftingStatisticsDetectionService {
         for (TaskDefinition task : definition.getTasks()) {
             if (taskKey.equals(task.getKey()) && CRAFTING.equals(task.getTypeId())
                 && QuestBooleanParameter.parse(task.getParameters().get("allowCraftedFromStatistics"), false)) {
+                if (automaticBqSnapshot && !task.getParameters().containsKey("bq.raw")) continue;
                 selected = task;
                 break;
             }
@@ -66,8 +78,9 @@ public final class AuthenticatedCraftingStatisticsDetectionService {
         QuestProgressSnapshot previous = progress.findProgress(participant, questId, definition.getVersion())
             .orElse(null);
         int cycle = 0;
+        boolean lockedTaskNeedsUnlockReevaluation = false;
         if (previous != null) {
-            if (previous.getStatus() == QuestStatus.LOCKED) return Collections.emptyList();
+            if (previous.getStatus() == QuestStatus.LOCKED && !automaticBqSnapshot) return Collections.emptyList();
             if (previous.getStatus() == QuestStatus.COMPLETED) {
                 if (!definition.getRepeatPolicy().isRepeatable()) return Collections.emptyList();
                 if (previous.getCycle() == Integer.MAX_VALUE) throw new IllegalStateException(
@@ -75,7 +88,12 @@ public final class AuthenticatedCraftingStatisticsDetectionService {
                 cycle = previous.getCycle() + 1;
             } else {
                 TaskProgress current = previous.getTasks().get(taskKey);
-                if (current != null && current.isComplete()) return Collections.emptyList();
+                if (current != null && current.isComplete()) {
+                    if (!automaticBqSnapshot || previous.getStatus() != QuestStatus.LOCKED) {
+                        return Collections.emptyList();
+                    }
+                    lockedTaskNeedsUnlockReevaluation = true;
+                }
                 cycle = previous.getCycle();
             }
         }
@@ -93,14 +111,34 @@ public final class AuthenticatedCraftingStatisticsDetectionService {
             attributes.put("targetQuestId", questId.toString());
             attributes.put("targetQuestVersion", Integer.toString(definition.getVersion()));
             attributes.put("targetTaskKey", taskKey);
-            String eventId = "craft-stat-detect:" + authenticatedPlayerId + ':' + questId + ':'
+            if (automaticBqSnapshot) {
+                attributes.put(BqPartyCraftingStatisticsScope.PERSONAL_ONLINE_SNAPSHOT, "true");
+                attributes.put(BqPartyCraftingStatisticsScope.AUTOMATIC_TASK_SNAPSHOT, "true");
+            }
+            String eventId = (automaticBqSnapshot ? "craft-stat-auto:" : "craft-stat-detect:")
+                + authenticatedPlayerId + ':' + questId + ':'
                 + definition.getVersion() + ':' + cycle + ':' + taskKey + ':' + registryName + ':'
                 + value.getAsLong();
             GameplayFact fact = new GameplayFact(sourceServer, eventId, authenticatedPlayerId, FACT_TYPE, now,
                 attributes);
+            boolean unlockReevaluation = lockedTaskNeedsUnlockReevaluation
+                && unlockedTarget(definition, requests.requestsFor(fact));
+            if (lockedTaskNeedsUnlockReevaluation && !unlockReevaluation) continue;
+            if (unlockReevaluation) {
+                fact = new GameplayFact(sourceServer, "craft-stat-auto-unlock:" + authenticatedPlayerId + ':'
+                    + questId + ':' + definition.getVersion() + ':' + cycle + ':' + taskKey + ':' + registryName
+                    + ':' + value.getAsLong(), authenticatedPlayerId, FACT_TYPE, now, attributes);
+            }
+            final boolean reevaluateLockedCompletion = unlockReevaluation;
             final int expectedCycle = cycle;
-            FactProcessingResult result = runtime.applyIf(fact, requests, planned -> unlockedTarget(definition, planned)
-                && isDetectionEligible(authenticatedPlayerId, definition, taskKey, expectedCycle, now), now);
+            FactProcessingResult result = runtime.applyIf(fact, requests, planned -> {
+                boolean partyOnline = automaticBqSnapshot
+                    && hasAutomaticPartyRequest(planned, definition, authenticatedPlayerId);
+                boolean unlocked = unlockedTarget(definition, planned);
+                return (unlocked || partyOnline) && (!reevaluateLockedCompletion || unlocked)
+                    && isDetectionEligible(authenticatedPlayerId, definition, taskKey, expectedCycle, now,
+                        partyOnline, reevaluateLockedCompletion);
+            }, now);
             if (result.getStatus() != FactProcessingStatus.IGNORED) results.add(result);
         }
         return Collections.unmodifiableList(results);
@@ -108,16 +146,18 @@ public final class AuthenticatedCraftingStatisticsDetectionService {
 
     /** Rechecks cycle and reward state inside the same transaction that records the stable fact key. */
     private boolean isDetectionEligible(UUID playerId, QuestDefinition definition, String taskKey, int expectedCycle,
-        long now) {
+        long now, boolean allowLockedPartyProgress, boolean allowLockedCompletionReevaluation) {
         ParticipantId participant = ParticipantId.player(playerId);
         QuestProgressSnapshot current = progress.findProgress(participant, definition.getId(), definition.getVersion())
             .orElse(null);
         if (current == null) return expectedCycle == 0;
-        if (current.getStatus() == QuestStatus.LOCKED) return false;
+        if (current.getStatus() == QuestStatus.LOCKED
+            && !allowLockedPartyProgress && !allowLockedCompletionReevaluation) return false;
         if (current.getStatus() != QuestStatus.COMPLETED) {
             if (expectedCycle != current.getCycle()) return false;
             TaskProgress taskProgress = current.getTasks().get(taskKey);
-            return taskProgress == null || !taskProgress.isComplete();
+            return taskProgress == null || !taskProgress.isComplete()
+                || (allowLockedCompletionReevaluation && current.getStatus() == QuestStatus.LOCKED);
         }
         if (!definition.getRepeatPolicy().isRepeatable() || current.getCycle() == Integer.MAX_VALUE
             || expectedCycle != current.getCycle() + 1) return false;
@@ -129,6 +169,21 @@ public final class AuthenticatedCraftingStatisticsDetectionService {
         long repeatAnchor = progress.findRepeatCycleAnchorMillis(participant, definition.getId(),
             definition.getVersion(), completedCycle, current.getCompletedAt());
         return definition.getRepeatPolicy().isAvailable(repeatAnchor, now);
+    }
+
+    private static boolean hasAutomaticPartyRequest(List<QuestEvaluationRequest> planned,
+        QuestDefinition definition, UUID playerId) {
+        if (planned == null) return false;
+        for (QuestEvaluationRequest request : planned) {
+            if (!definition.getId().equals(request.getDefinition().getId())
+                || definition.getVersion() != request.getDefinition().getVersion()
+                || request.getMembership().getParticipantId().getType() != ParticipantType.PLAYER
+                || !playerId.equals(request.getMembership().getParticipantId().getId())
+                || request.getFactMembership().getParticipantId().getType() != ParticipantType.PARTY
+                || !request.getFactMembership().contains(playerId)) continue;
+            return true;
+        }
+        return false;
     }
 
     private static Set<String> requiredItems(TaskDefinition task) {

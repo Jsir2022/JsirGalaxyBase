@@ -13,12 +13,14 @@ import com.jsirgalaxybase.quest.core.QuestDefinition;
 import com.jsirgalaxybase.quest.core.QuestDefinitionConflictException;
 import com.jsirgalaxybase.quest.core.QuestDefinitionLifecycle;
 import com.jsirgalaxybase.quest.core.QuestDefinitionRepository;
+import com.jsirgalaxybase.quest.core.PublishedQuestCatalogRevisionProvider;
 import com.jsirgalaxybase.quest.core.QuestDefinitionManagementPage;
 import com.jsirgalaxybase.quest.core.QuestDefinitionManagementQuery;
 import com.jsirgalaxybase.quest.core.QuestDefinitionManagementRequest;
 import com.jsirgalaxybase.quest.core.StoredQuestDefinition;
 
-public final class JdbcQuestDefinitionRepository implements QuestDefinitionRepository, QuestDefinitionManagementQuery {
+public final class JdbcQuestDefinitionRepository implements QuestDefinitionRepository, QuestDefinitionManagementQuery,
+    PublishedQuestCatalogRevisionProvider {
     private final JdbcQuestConnectionManager connections;
     private final QuestDefinitionJsonCodec codec = new QuestDefinitionJsonCodec();
 
@@ -117,6 +119,15 @@ public final class JdbcQuestDefinitionRepository implements QuestDefinitionRepos
     }
 
     @Override
+    public Optional<StoredQuestDefinition> findPublished(final UUID questId, final int version) {
+        if (questId == null || version < 1) return Optional.empty();
+        return connections.withConnection(connection -> select(connection,
+            "SELECT lifecycle,content_json::text,content_hash,COALESCE(EXTRACT(EPOCH FROM published_at)*1000,0)::bigint "
+                + "FROM galaxy_quest_definition WHERE quest_id=? AND definition_version=? AND lifecycle='PUBLISHED'",
+            questId, version));
+    }
+
+    @Override
     public List<StoredQuestDefinition> findAllPublished() {
         return connections.withConnection(connection -> {
             String sql = "SELECT lifecycle,content_json::text,content_hash,"
@@ -130,6 +141,19 @@ public final class JdbcQuestDefinitionRepository implements QuestDefinitionRepos
                     QuestDefinitionLifecycle.valueOf(rows.getString(1)), rows.getString(3), rows.getLong(4)));
             }
             return result;
+        });
+    }
+
+    @Override
+    public long currentRevision() {
+        return connections.withConnection(connection -> {
+            try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT revision FROM galaxy_quest_definition_catalog_revision WHERE singleton=TRUE");
+                ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) throw new QuestPersistenceException(
+                    "quest definition catalog revision migration 20261009_001 is required");
+                return rows.getLong(1);
+            }
         });
     }
 

@@ -16,8 +16,12 @@ public class QuestSchemaContractTest {
     public void schemaContainsEveryAuthorityAndIdempotencyBoundary() throws Exception {
         String ddl = resource("/com/jsirgalaxybase/quest/postgres/quest-postgresql-ddl.sql");
         assertTrue(ddl.contains("PRIMARY KEY (source_server, event_id)"));
+        assertTrue(ddl.contains("CREATE TABLE IF NOT EXISTS galaxy_quest_definition_catalog_revision"));
+        assertTrue(ddl.contains("galaxy_quest_bump_definition_catalog_revision"));
+        assertTrue(ddl.contains("CREATE TRIGGER galaxy_quest_definition_catalog_revision_trg"));
         assertTrue(ddl.contains("PRIMARY KEY (participant_type, participant_id, quest_id, definition_version)"));
         assertTrue(ddl.contains("progress_values BIGINT[] NOT NULL"));
+        assertTrue(ddl.contains("source_progress_json JSONB NOT NULL DEFAULT '{}'::jsonb"));
         assertTrue(ddl.contains("entitlement_key VARCHAR(512) PRIMARY KEY"));
         assertTrue(ddl.contains("'DELIVERED', 'SUPPRESSED', 'FAILED'"));
         assertTrue(ddl.contains("UNIQUE (participant_type, participant_id, recipient_player_id, quest_id, definition_version, cycle, reward_key)"));
@@ -34,6 +38,11 @@ public class QuestSchemaContractTest {
         assertTrue(ddl.contains("galaxy_quest_reward_choice_selection"));
         assertTrue(ddl.contains("choice_index INTEGER NOT NULL CHECK (choice_index >= 0)"));
         assertTrue(ddl.contains("galaxy_quest_consumption_submission"));
+        assertTrue(ddl.contains("galaxy_quest_consumption_detect_batch"));
+        assertTrue(ddl.contains("task_keys TEXT[] NOT NULL"));
+        assertTrue(ddl.contains("next_task_index INTEGER NOT NULL DEFAULT 0"));
+        assertTrue(ddl.contains("galaxy_quest_consumption_detect_batch_active_subject_uq"));
+        assertTrue(ddl.contains("participant_type, participant_id, quest_id)"));
         assertTrue(ddl.contains("applied_values BIGINT[]"));
         assertTrue(ddl.contains("'item', 'fluid', 'xp'"));
         assertTrue(ddl.contains("submission_status IN ('PREPARED', 'APPLIED', 'CONFIRMED', 'REJECTED')"));
@@ -44,6 +53,33 @@ public class QuestSchemaContractTest {
         assertTrue(ddl.contains("action IN ('CREATED', 'VERSIONED', 'UNCHANGED')"));
         assertTrue(ddl.contains("error_count INTEGER NOT NULL DEFAULT 0"));
         assertTrue(ddl.contains("warning_count INTEGER NOT NULL DEFAULT 0"));
+    }
+
+    @Test public void reviewedConsumptionDetectBatchMigrationIsAdditiveAndRecoverable() throws Exception {
+        Path migration=Paths.get("ops/sql/migrations/20261010_002_add_quest_consumption_detect_batch.sql");
+        if(!Files.exists(migration))migration=Paths.get("../ops/sql/migrations/20261010_002_add_quest_consumption_detect_batch.sql");
+        assertTrue("consumption Detect batch migration must exist",Files.exists(migration));
+        String reviewed=new String(Files.readAllBytes(migration),StandardCharsets.UTF_8);
+        assertTrue(reviewed.contains("BEGIN;"));
+        assertTrue(reviewed.contains("CREATE TABLE IF NOT EXISTS galaxy_quest_consumption_detect_batch"));
+        assertTrue(reviewed.contains("task_keys TEXT[] NOT NULL"));
+        assertTrue(reviewed.contains("next_task_index INTEGER NOT NULL DEFAULT 0"));
+        assertTrue(reviewed.contains("WHERE batch_status='ACTIVE'"));
+        assertTrue(reviewed.contains("FOREIGN KEY (quest_id, definition_version)"));
+        assertTrue(reviewed.contains("COMMIT;"));
+    }
+
+    @Test public void reviewedDetectVersionPinMigrationFencesOneActiveBatchAcrossPublications() throws Exception {
+        Path migration=Paths.get("ops/sql/migrations/20261011_001_pin_consumption_detect_batch_across_versions.sql");
+        if(!Files.exists(migration))migration=Paths.get("../ops/sql/migrations/20261011_001_pin_consumption_detect_batch_across_versions.sql");
+        assertTrue("version-pinned Detect migration must exist",Files.exists(migration));
+        String reviewed=new String(Files.readAllBytes(migration),StandardCharsets.UTF_8);
+        assertTrue(reviewed.contains("GROUP BY participant_type,participant_id,quest_id"));
+        assertTrue(reviewed.contains("HAVING COUNT(*) > 1"));
+        assertTrue(reviewed.contains("CREATE UNIQUE INDEX IF NOT EXISTS galaxy_quest_consumption_detect_batch_active_subject_uq"));
+        assertTrue(reviewed.contains("(participant_type,participant_id,quest_id)"));
+        assertTrue(reviewed.contains("RAISE EXCEPTION"));
+        assertTrue(reviewed.contains("COMMIT;"));
     }
 
     @Test public void reviewedContentMigrationAuditIsTransactionalAndIdempotent() throws Exception {
@@ -81,6 +117,17 @@ public class QuestSchemaContractTest {
         assertTrue(reviewed.contains("COMMIT;"));
     }
 
+    @Test public void reviewedCraftingSourceProgressMigrationIsIdempotentAndPreservesLegacyRows() throws Exception {
+        Path migration=Paths.get("ops/sql/migrations/20261010_001_add_quest_task_source_progress.sql");
+        if(!Files.exists(migration))migration=Paths.get("../ops/sql/migrations/20261010_001_add_quest_task_source_progress.sql");
+        assertTrue("reviewed crafting progress migration must exist",Files.exists(migration));
+        String reviewed=new String(Files.readAllBytes(migration),StandardCharsets.UTF_8);
+        assertTrue(reviewed.contains("BEGIN;"));
+        assertTrue(reviewed.contains("ADD COLUMN IF NOT EXISTS source_progress_json JSONB NOT NULL DEFAULT '{}'::jsonb"));
+        assertTrue(reviewed.contains("first source-aware update preserves their aggregate as a legacy baseline"));
+        assertTrue(reviewed.contains("COMMIT;"));
+    }
+
     @Test public void reviewedBqPartyInventoryLeaseMigrationIsAdditiveAndExpiring() throws Exception {
         Path migration=Paths.get("ops/sql/migrations/20260930_001_add_bq_party_inventory_snapshot_leases.sql");
         if(!Files.exists(migration))migration=Paths.get("../ops/sql/migrations/20260930_001_add_bq_party_inventory_snapshot_leases.sql");
@@ -91,6 +138,20 @@ public class QuestSchemaContractTest {
         assertTrue(reviewed.contains("session_id UUID NOT NULL"));
         assertTrue(reviewed.contains("expires_at TIMESTAMPTZ NOT NULL"));
         assertTrue(reviewed.contains("galaxy_quest_active_inventory_snapshot_expiry_idx"));
+        assertTrue(reviewed.contains("COMMIT;"));
+    }
+
+    @Test public void reviewedCatalogRevisionMigrationIsAdditiveAndInvalidatesPublishedDefinitions() throws Exception {
+        Path migration=Paths.get("ops/sql/migrations/20261009_001_add_quest_definition_catalog_revision.sql");
+        if(!Files.exists(migration))migration=Paths.get("../ops/sql/migrations/20261009_001_add_quest_definition_catalog_revision.sql");
+        assertTrue("reviewed quest catalog revision migration must exist",Files.exists(migration));
+        String reviewed=new String(Files.readAllBytes(migration),StandardCharsets.UTF_8);
+        assertTrue(reviewed.contains("BEGIN;"));
+        assertTrue(reviewed.contains("CREATE TABLE IF NOT EXISTS galaxy_quest_definition_catalog_revision"));
+        assertTrue(reviewed.contains("INSERT INTO galaxy_quest_definition_catalog_revision"));
+        assertTrue(reviewed.contains("OLD.lifecycle = 'PUBLISHED' OR NEW.lifecycle = 'PUBLISHED'"));
+        assertTrue(reviewed.contains("OLD.content_json IS DISTINCT FROM NEW.content_json"));
+        assertTrue(reviewed.contains("AFTER INSERT OR UPDATE OR DELETE ON galaxy_quest_definition"));
         assertTrue(reviewed.contains("COMMIT;"));
     }
 

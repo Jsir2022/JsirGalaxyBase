@@ -5,9 +5,20 @@ import static org.junit.Assert.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
 
 import org.junit.Test;
+
+import com.jsirgalaxybase.quest.core.GameplayFact;
+import com.jsirgalaxybase.quest.core.InventorySnapshotTaskEvaluator;
+import com.jsirgalaxybase.quest.core.QuestEngine;
+import com.jsirgalaxybase.quest.core.QuestStatus;
+import com.jsirgalaxybase.quest.core.TaskDefinition;
+import com.jsirgalaxybase.quest.core.TaskProgress;
 
 public class BqQuestDefinitionImporterTest {
     @Test
@@ -57,6 +68,47 @@ public class BqQuestDefinitionImporterTest {
     }
 
     @Test
+    public void optionalRetrievalImportStaysOptionalThroughInventoryProgressAndQuestCompletion() throws Exception {
+        Path file = Files.createTempFile("bq-optional-retrieval", ".json");
+        String json = "{\"questIDHigh:4\":0,\"questIDLow:4\":23,"
+            + "\"properties:10\":{\"betterquesting:10\":{\"name:8\":\"Optional retrieval\"}},"
+            + "\"preRequisites:9\":{},\"tasks:9\":{"
+            + "\"0:10\":{\"index:3\":0,\"taskID:8\":\"bq_standard:checkbox\"},"
+            + "\"1:10\":{\"index:3\":1,\"taskID:8\":\"bq_standard:optional_retrieval\","
+            + "\"requiredItems:9\":{\"0:10\":{\"id:8\":\"minecraft:iron_ingot\","
+            + "\"Damage:2\":0,\"Count:3\":5}}}},\"rewards:9\":{}}";
+        Files.write(file, json.getBytes(StandardCharsets.UTF_8));
+
+        com.jsirgalaxybase.quest.core.QuestDefinition definition =
+            new BqQuestDefinitionImporter().read(file).getDefinition();
+        TaskDefinition optional = definition.getTasks().get(1);
+        assertEquals("bq_standard:optional_retrieval", optional.getTypeId());
+        assertTrue("BQ Optional Retrieval is ignored by Quest completion", optional.isOptional());
+
+        Map<String, String> attributes = new LinkedHashMap<String, String>();
+        attributes.put("inventory.count", "1");
+        attributes.put("inventory.0.registryName", "minecraft:iron_ingot");
+        attributes.put("inventory.0.meta", "0");
+        attributes.put("inventory.0.amount", "3");
+        attributes.put("inventory.0.damageable", "false");
+        GameplayFact inventory = new GameplayFact("test", "optional-retrieval", UUID.randomUUID(),
+            "galaxy:inventory_observed", 1L, attributes);
+        TaskProgress optionalProgress = new InventorySnapshotTaskEvaluator(optional.getTypeId(),
+            "galaxy:inventory_observed").evaluate(optional, TaskProgress.empty(optional), inventory);
+        assertEquals(Arrays.asList(3L), optionalProgress.getValues());
+        assertFalse(optionalProgress.isComplete());
+
+        Map<String, TaskProgress> observations = new LinkedHashMap<String, TaskProgress>();
+        observations.put(definition.getTasks().get(0).getKey(), new TaskProgress(
+            definition.getTasks().get(0).getKey(), 1L, 1L, true));
+        observations.put(optional.getKey(), optionalProgress);
+        com.jsirgalaxybase.quest.core.QuestEvaluation result = new QuestEngine().evaluate(
+            UUID.randomUUID(), definition, null, observations, Collections.<UUID>emptySet(), 10L);
+        assertEquals(QuestStatus.COMPLETED, result.getProgress().getStatus());
+        assertFalse(result.getProgress().getTasks().get(optional.getKey()).isComplete());
+    }
+
+    @Test
     public void canonicalizesNumericBetterQuestingBooleanOptionsButPreservesRawSource() throws Exception {
         Path file = Files.createTempFile("bq-boolean-options", ".json");
         String json = "{\"questIDHigh:4\":0,\"questIDLow:4\":19,"
@@ -80,13 +132,20 @@ public class BqQuestDefinitionImporterTest {
         Path questDir = Files.createDirectories(root.resolve("Quests/line"));
         Files.write(questDir.resolve("quest.json"), ("{\"questIDHigh:4\":0,\"questIDLow:4\":7,"
             + "\"properties:10\":{\"betterquesting:10\":{\"name:8\":\"Q\"}},\"tasks:9\":{"
-            + "\"0:10\":{\"index:3\":0,\"taskID:8\":\"addon:special\"}},\"rewards:9\":{}}")
+            + "\"0:10\":{\"index:3\":0,\"taskID:8\":\"addon:optional_special\"}},\"rewards:9\":{}}")
                 .getBytes(StandardCharsets.UTF_8));
-        BqCompatibilityReport report = BqCompatibilityReport.create(new BqQuestDefinitionImporter().readDirectory(root),
+        BqImportedQuest imported = new BqQuestDefinitionImporter().readDirectory(root).get(0);
+        assertFalse("unknown task names must not grant optional completion semantics",
+            imported.getDefinition().getTasks().get(0).isOptional());
+        assertEquals("an unsupported required task must keep the imported quest incomplete", QuestStatus.AVAILABLE,
+            new QuestEngine().evaluate(UUID.randomUUID(), imported.getDefinition(), null,
+                Collections.<String, TaskProgress>emptyMap(), Collections.<UUID>emptySet(), 10L)
+                .getProgress().getStatus());
+        BqCompatibilityReport report = BqCompatibilityReport.create(Collections.singletonList(imported),
             Collections.singleton("bq_standard:retrieval"), Collections.<String>emptySet());
         assertEquals(1, report.getQuestCount());
-        assertTrue(report.getUnknownTaskTypes().contains("addon:special"));
-        assertEquals(BqCompatibilityStatus.UNKNOWN, report.getTaskCompatibility().get("addon:special"));
+        assertTrue(report.getUnknownTaskTypes().contains("addon:optional_special"));
+        assertEquals(BqCompatibilityStatus.UNKNOWN, report.getTaskCompatibility().get("addon:optional_special"));
     }
 
     @Test public void importsExclusivePrerequisitesWithoutSilentlyChangingThemToAnd() throws Exception {

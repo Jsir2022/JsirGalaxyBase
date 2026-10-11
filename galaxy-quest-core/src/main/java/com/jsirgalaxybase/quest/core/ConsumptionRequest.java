@@ -97,7 +97,9 @@ public final class ConsumptionRequest {
         attributes.put("value.count", Integer.toString(appliedAmounts.size()));
         for (int i = 0; i < appliedAmounts.size(); i++) {
             long value = appliedAmounts.get(i);
-            if (value < 0 || value > amounts.get(i)) throw new IllegalArgumentException("invalid applied consumption amount");
+            if (value < 0 || (value > amounts.get(i) && !"fluid".equals(kind))) {
+                throw new IllegalArgumentException("invalid applied consumption amount");
+            }
             attributes.put("value." + i, Long.toString(value));
         }
         return new GameplayFact(sourceServer, "consumption:" + submissionKey, playerId,

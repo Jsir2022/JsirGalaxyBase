@@ -50,23 +50,8 @@ public final class AuthenticatedCheckboxConfirmationService {
             }
         }
         if (checkbox == null) return FactProcessingResult.ignored();
-        Optional<QuestProgressSnapshot> current = progress.findProgress(ParticipantId.player(authenticatedPlayerId),
-            questId, definition.getVersion());
-        int cycle = 0;
-        if (current.isPresent()) {
-            QuestProgressSnapshot snapshot = current.get();
-            cycle = snapshot.getCycle();
-            if (snapshot.getStatus() == QuestStatus.COMPLETED) {
-                if (!definition.getRepeatPolicy().isAvailable(snapshot.getCompletedAt(), now)) {
-                    return FactProcessingResult.ignored();
-                }
-                if (cycle == Integer.MAX_VALUE) throw new IllegalStateException("checkbox cycle exhausted");
-                cycle++;
-            } else {
-                TaskProgress taskProgress = snapshot.getTasks().get(taskKey);
-                if (taskProgress != null && taskProgress.isComplete()) return FactProcessingResult.ignored();
-            }
-        }
+        final int cycle = confirmationCycle(authenticatedPlayerId, definition, taskKey, now, false);
+        if (cycle < 0) return FactProcessingResult.ignored();
         Map<String, String> attributes = new LinkedHashMap<String, String>();
         attributes.put("questId", questId.toString());
         attributes.put("definitionVersion", Integer.toString(definition.getVersion()));
@@ -75,7 +60,37 @@ public final class AuthenticatedCheckboxConfirmationService {
             + ':' + cycle + ':' + taskKey;
         GameplayFact fact = new GameplayFact(sourceServer, eventId, authenticatedPlayerId, FACT_TYPE, now,
             attributes);
-        return runtime.applyIf(fact, requests, values -> mayConfirm(values, authenticatedPlayerId, definition), now);
+        return runtime.applyIf(fact, requests, values -> mayConfirm(values, authenticatedPlayerId, definition)
+            && confirmationCycle(authenticatedPlayerId, definition, taskKey, now, true) == cycle, now);
+    }
+
+    /** The first pass chooses a provisional key; authoritative fences run inside Runtime's transaction. */
+    private int confirmationCycle(UUID playerId, QuestDefinition definition, String taskKey, long now,
+        boolean authoritative) {
+        ParticipantId participant = ParticipantId.player(playerId);
+        Optional<QuestProgressSnapshot> current = progress.findProgress(participant,
+            definition.getId(), definition.getVersion());
+        int cycle = 0;
+        if (current.isPresent()) {
+            QuestProgressSnapshot snapshot = current.get();
+            cycle = snapshot.getCycle();
+            if (snapshot.getStatus() == QuestStatus.COMPLETED) {
+                if (!definition.getRepeatPolicy().isRepeatable()) return -1;
+                if (authoritative && (progress.hasPendingConsumptionSubmission(participant, definition.getId(),
+                        definition.getVersion(), cycle)
+                    || progress.hasClaimableRewardEntitlement(participant, definition.getId(),
+                        definition.getVersion(), cycle))) return -1;
+                long anchor = authoritative ? progress.findRepeatCycleAnchorMillis(participant, definition.getId(),
+                    definition.getVersion(), cycle, snapshot.getCompletedAt()) : snapshot.getCompletedAt();
+                if (!definition.getRepeatPolicy().isAvailable(anchor, now)) return -1;
+                if (cycle == Integer.MAX_VALUE) throw new IllegalStateException("checkbox cycle exhausted");
+                cycle++;
+            } else {
+                TaskProgress taskProgress = snapshot.getTasks().get(taskKey);
+                if (taskProgress != null && taskProgress.isComplete()) return -1;
+            }
+        }
+        return cycle;
     }
 
     private static boolean mayConfirm(List<QuestEvaluationRequest> requests, UUID playerId,

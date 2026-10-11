@@ -11,6 +11,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.Test;
 
@@ -33,6 +36,88 @@ public class QuestEvaluationPlannerTest {
         assertEquals(relevant.getId(), result.get(0).getDefinition().getId());
         assertEquals(ParticipantId.player(player), result.get(0).getMembership().getParticipantId());
         assertTrue(result.get(0).getCompletedPrerequisites().contains(completed));
+    }
+
+    @Test
+    public void cachedCandidatesStillResolveMembershipAndCompletionStateForEachFact() {
+        UUID player = UUID.randomUUID();
+        UUID member = UUID.randomUUID();
+        UUID prerequisite = UUID.randomUUID();
+        ParticipantId firstTeam = ParticipantId.team(UUID.randomUUID());
+        ParticipantId secondTeam = ParticipantId.team(UUID.randomUUID());
+        AtomicReference<ParticipantMembership> active = new AtomicReference<ParticipantMembership>(
+            new ParticipantMembership(firstTeam, new LinkedHashSet<UUID>(Arrays.asList(player, member))));
+        AtomicReference<Set<UUID>> completed = new AtomicReference<Set<UUID>>(Collections.<UUID>emptySet());
+        AtomicInteger catalogLoads = new AtomicInteger();
+        AtomicInteger membershipResolutions = new AtomicInteger();
+        AtomicInteger completionReads = new AtomicInteger();
+        AtomicLong revision = new AtomicLong(1L);
+        QuestBehavior teamBehavior = QuestBehavior.builder().participantScope(QuestParticipantScope.TEAM).build();
+        QuestDefinition definition = new QuestDefinition(UUID.randomUUID(), 1, "Scoped event", "", QuestLogic.AND,
+            QuestLogic.AND, Collections.singleton(prerequisite), Collections.singletonList(new TaskDefinition("task",
+                "count", false, Collections.singletonMap("factType", "galaxy:entity_killed"))),
+            Collections.<RewardDefinition>emptyList(), RepeatPolicy.never(), teamBehavior);
+        PublishedQuestCatalog cached = new RevisionAwarePublishedQuestCatalog(() -> {
+            catalogLoads.incrementAndGet();
+            return Collections.singletonList(stored(definition));
+        }, revision::get);
+        ParticipantMembershipResolver resolver = ignored -> {
+            membershipResolutions.incrementAndGet();
+            return Collections.singletonList(active.get());
+        };
+        QuestEvaluationPlanner planner = new QuestEvaluationPlanner(cached, participant -> {
+            completionReads.incrementAndGet();
+            return completed.get();
+        }, resolver, new ScopedQuestAssignmentPolicy());
+
+        List<QuestEvaluationRequest> first = planner.requestsFor(new GameplayFact("s2", "first", player,
+            "galaxy:entity_killed", 1L, Collections.<String, String>emptyMap()));
+        active.set(new ParticipantMembership(secondTeam, new LinkedHashSet<UUID>(Arrays.asList(player, member))));
+        completed.set(Collections.singleton(prerequisite));
+        List<QuestEvaluationRequest> second = planner.requestsFor(new GameplayFact("s2", "second", player,
+            "galaxy:entity_killed", 2L, Collections.<String, String>emptyMap()));
+
+        assertEquals(1, first.size());
+        assertEquals(firstTeam, first.get(0).getMembership().getParticipantId());
+        assertTrue(first.get(0).getCompletedPrerequisites().isEmpty());
+        assertEquals(1, second.size());
+        assertEquals(secondTeam, second.get(0).getMembership().getParticipantId());
+        assertTrue(second.get(0).getCompletedPrerequisites().contains(prerequisite));
+        assertEquals("one full definition decode for one revision", 1, catalogLoads.get());
+        assertEquals("memberships remain live per fact", 2, membershipResolutions.get());
+        assertEquals("completion state remains live per fact", 2, completionReads.get());
+    }
+
+    @Test
+    public void publishingChangedPrerequisitesInvalidatesTheDependentCandidatePlan() {
+        UUID player = UUID.randomUUID();
+        UUID firstPrerequisite = UUID.randomUUID();
+        UUID secondPrerequisite = UUID.randomUUID();
+        UUID questId = UUID.randomUUID();
+        AtomicReference<QuestDefinition> currentDefinition = new AtomicReference<QuestDefinition>(
+            lockedProgressQuest(questId, 1, firstPrerequisite));
+        AtomicLong revision = new AtomicLong(1L);
+        AtomicInteger catalogLoads = new AtomicInteger();
+        PublishedQuestCatalog cached = new RevisionAwarePublishedQuestCatalog(() -> {
+            catalogLoads.incrementAndGet();
+            return Collections.singletonList(stored(currentDefinition.get()));
+        }, revision::get);
+        QuestEvaluationPlanner planner = new QuestEvaluationPlanner(cached,
+            ignored -> new LinkedHashSet<UUID>(Arrays.asList(firstPrerequisite, secondPrerequisite)),
+            new PlayerOnlyMembershipResolver(), new PlayerQuestAssignmentPolicy());
+
+        assertEquals(questId, planner.requestsForNewlyUnlockedLockedProgress(ParticipantId.player(player),
+            firstPrerequisite).get(0).getDefinition().getId());
+        currentDefinition.set(lockedProgressQuest(questId, 2, secondPrerequisite));
+        revision.incrementAndGet();
+        assertTrue(planner.requestsForNewlyUnlockedLockedProgress(ParticipantId.player(player),
+            firstPrerequisite).isEmpty());
+        List<QuestEvaluationRequest> updated = planner.requestsForNewlyUnlockedLockedProgress(
+            ParticipantId.player(player), secondPrerequisite);
+
+        assertEquals(1, updated.size());
+        assertEquals(2, updated.get(0).getDefinition().getVersion());
+        assertEquals("a published prerequisite change rebuilds candidates once", 2, catalogLoads.get());
     }
 
     @Test
@@ -172,6 +257,35 @@ public class QuestEvaluationPlannerTest {
             request.getFactMembership().getParticipantId());
         assertTrue(requests.get(0).getCompletedPrerequisites().isEmpty());
         assertTrue(requests.get(1).getCompletedPrerequisites().contains(prerequisite));
+    }
+
+    @Test
+    public void unrelatedCraftingOutputDoesNotTriggerPartyEligibilityOrFanOut() {
+        UUID source = UUID.randomUUID();
+        UUID member = UUID.randomUUID();
+        ParticipantMembership party = new ParticipantMembership(ParticipantId.party(UUID.randomUUID()),
+            new LinkedHashSet<UUID>(Arrays.asList(source, member)));
+        QuestDefinition crafting = bqCrafting(QuestParticipantScope.PLAYER, true, true, false);
+        QuestCompletionQuery completions = ignored -> Collections.<UUID>emptySet();
+        java.util.concurrent.atomic.AtomicInteger activityChecks = new java.util.concurrent.atomic.AtomicInteger();
+        QuestEvaluationPlanner planner = new QuestEvaluationPlanner(() -> Collections.singletonList(stored(crafting)),
+            completions, ignored -> Arrays.asList(ParticipantMembership.player(source), party),
+            new BqHuntPartyAssignmentPolicy(), (definition, fact, activeParty) -> {
+                activityChecks.incrementAndGet();
+                return true;
+            });
+        Map<String, String> attributes = new LinkedHashMap<String, String>(craftingFact(
+            "unrelated-craft", source, "craft").getAttributes());
+        attributes.put("registryName", "minecraft:gold_ingot");
+        GameplayFact unrelated = new GameplayFact("s2", "unrelated-craft", source, "galaxy:item_produced",
+            10L, attributes);
+
+        List<QuestEvaluationRequest> requests = planner.requestsFor(unrelated);
+
+        assertEquals(1, requests.size());
+        assertEquals(ParticipantId.player(source), requests.get(0).getMembership().getParticipantId());
+        assertEquals(ParticipantId.player(source), requests.get(0).getFactMembership().getParticipantId());
+        assertEquals(0, activityChecks.get());
     }
 
     @Test
@@ -560,6 +674,13 @@ public class QuestEvaluationPlannerTest {
         return new QuestDefinition(UUID.randomUUID(), 1, "Q", "", QuestLogic.AND, QuestLogic.AND,
             Collections.<UUID>emptySet(), Collections.singletonList(new TaskDefinition("task", "count", false, parameters)),
             Collections.<RewardDefinition>emptyList(), RepeatPolicy.never());
+    }
+
+    private static QuestDefinition lockedProgressQuest(UUID id, int version, UUID prerequisite) {
+        return new QuestDefinition(id, version, "Locked progress", "", QuestLogic.AND, QuestLogic.AND,
+            Collections.singleton(prerequisite), Collections.<TaskDefinition>emptyList(),
+            Collections.<RewardDefinition>emptyList(), RepeatPolicy.never(),
+            QuestBehavior.builder().progressWhileLocked(true).build());
     }
 
     private static QuestDefinition consumingQuest() {

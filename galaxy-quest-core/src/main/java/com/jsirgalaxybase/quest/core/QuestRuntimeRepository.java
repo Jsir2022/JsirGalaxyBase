@@ -27,6 +27,12 @@ public interface QuestRuntimeRepository {
     boolean hasPendingConsumptionSubmission(ParticipantId participantId, UUID questId, int definitionVersion,
         int cycle);
 
+    /** True while the quest-level consuming Detect batch is active and Quest settlement must be deferred. */
+    default boolean hasActiveConsumptionDetectBatch(ParticipantId participantId, UUID questId,
+        int definitionVersion) {
+        return false;
+    }
+
     /** True while the completed cycle still has an explicit, unclaimed reward entitlement. */
     boolean hasClaimableRewardEntitlement(ParticipantId participantId, UUID questId, int definitionVersion, int cycle);
 

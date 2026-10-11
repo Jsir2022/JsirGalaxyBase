@@ -41,6 +41,41 @@ public class BqCompatibleTaskEvaluatorsTest {
             map("subject", "SpecialZombie", "subjectAliases", "Zombie", "damageType", "lava"))).getValue());
     }
 
+    @Test
+    public void huntCapsNewEventProgressAtRequiredValueLikeBq() {
+        SubjectCountTaskEvaluator evaluator = new SubjectCountTaskEvaluator("bq_standard:hunt", "galaxy:entity_killed");
+        TaskDefinition task = new TaskDefinition("hunt", "bq_standard:hunt", false,
+            map("target", "2", "subject", "Zombie", "subtypes", "true"));
+        TaskProgress observed = evaluator.evaluate(task, TaskProgress.empty(task), fact("galaxy:entity_killed",
+            map("subject", "Zombie", "amount", "7")));
+
+        assertEquals("BQ TaskHunt clamps progress to the configured requirement", 2L, observed.getValue());
+        assertTrue(observed.isComplete());
+
+        TaskProgress historical = new TaskProgress("hunt", 5L, 2L, false);
+        assertEquals("an already-persisted overshoot is not rewritten downward", 5L,
+            evaluator.evaluate(task, historical, fact("galaxy:entity_killed", map("subject", "Zombie",
+                "amount", "1"))).getValue());
+    }
+
+    @Test
+    public void huntRejectsMissingTargetAndUnregisteredEntitySubject() {
+        SubjectCountTaskEvaluator evaluator = new SubjectCountTaskEvaluator("bq_standard:hunt", "galaxy:entity_killed");
+        GameplayFact registeredZombie = fact("galaxy:entity_killed", map("subject", "Zombie",
+            "subjectAliases", "Zombie", "damageType", "player", "amount", "1"));
+        TaskDefinition missingTarget = new TaskDefinition("hunt", "bq_standard:hunt", false,
+            map("target", "1", "subtypes", "true"));
+        assertEquals("BQ cannot resolve a missing target through EntityList", 0L,
+            evaluator.evaluate(missingTarget, TaskProgress.empty(missingTarget), registeredZombie).getValue());
+
+        TaskDefinition zombieHunt = new TaskDefinition("hunt", "bq_standard:hunt", false,
+            map("target", "1", "subject", "Zombie", "subtypes", "true"));
+        GameplayFact unregisteredEntity = fact("galaxy:entity_killed", map("subject", "",
+            "subjectAliases", "Zombie|Mob", "damageType", "player", "amount", "1"));
+        assertEquals("BQ rejects an entity without an EntityList name even if its class has a registered parent",
+            0L, evaluator.evaluate(zombieHunt, TaskProgress.empty(zombieHunt), unregisteredEntity).getValue());
+    }
+
     @Test public void huntAppliesCanonicalPartialEntityNbtWhenRequired() {
         SubjectCountTaskEvaluator evaluator = new SubjectCountTaskEvaluator("bq_standard:hunt", "galaxy:entity_killed");
         Map<String, PortableNbt> required = new LinkedHashMap<String, PortableNbt>();
@@ -111,6 +146,81 @@ public class BqCompatibleTaskEvaluatorsTest {
     }
 
     @Test
+    public void craftingUsesPerSourceMaximumThenSumsAcrossServers() {
+        ItemVectorTaskEvaluator evaluator = new ItemVectorTaskEvaluator("bq_standard:crafting",
+            "galaxy:item_produced");
+        TaskDefinition task = new TaskDefinition("craft", "bq_standard:crafting", false,
+            map("progressMode", "item-vector", "item.count", "1", "item.0.registryName",
+                "minecraft:iron_ingot", "item.0.meta", "0", "item.0.amount", "20",
+                "allowCraft", "true", "allowCraftedFromStatistics", "true"));
+        UUID player = UUID.randomUUID();
+        TaskProgress progress = TaskProgress.empty(task);
+
+        progress = evaluator.evaluate(task, progress, sourceFact("alpha", player, "alpha-craft",
+            map("registryName", "minecraft:iron_ingot", "meta", "0", "amount", "2", "channel", "craft")));
+        progress = evaluator.evaluate(task, progress, sourceFact("alpha", player, "alpha-statistics",
+            map("registryName", "minecraft:iron_ingot", "meta", "0", "amount", "3",
+                "channel", "craft-statistics")));
+        assertEquals("event and absolute statistics from one server must not count the same output twice",
+            Arrays.asList(3L), progress.getValues());
+
+        progress = evaluator.evaluate(task, progress, sourceFact("beta", player, "beta-statistics",
+            map("registryName", "minecraft:iron_ingot", "meta", "0", "amount", "4",
+                "channel", "craft-statistics")));
+        assertEquals("each server's local maximum contributes to the player's total",
+            Arrays.asList(7L), progress.getValues());
+
+        progress = evaluator.evaluate(task, progress, sourceFact("alpha", player, "alpha-stale-statistics",
+            map("registryName", "minecraft:iron_ingot", "meta", "0", "amount", "1",
+                "channel", "craft-statistics")));
+        assertEquals("a lower snapshot cannot reduce that source's lifetime count", Arrays.asList(7L),
+            progress.getValues());
+
+        progress = evaluator.evaluate(task, progress, sourceFact("beta", player, "beta-craft-1",
+            map("registryName", "minecraft:iron_ingot", "meta", "0", "amount", "2", "channel", "craft")));
+        assertEquals("source events and source statistics use max while different sources add",
+            Arrays.asList(7L), progress.getValues());
+        progress = evaluator.evaluate(task, progress, sourceFact("beta", player, "beta-craft-2",
+            map("registryName", "minecraft:iron_ingot", "meta", "0", "amount", "3", "channel", "craft")));
+        assertEquals(Arrays.asList(8L), progress.getValues());
+    }
+
+    @Test
+    public void craftingStatisticsOnlyRefreshRequirementsBelowTargetOnThatSource() {
+        ItemVectorTaskEvaluator evaluator = new ItemVectorTaskEvaluator("bq_standard:crafting",
+            "galaxy:item_produced");
+        TaskDefinition task = new TaskDefinition("craft", "bq_standard:crafting", false,
+            map("progressMode", "item-vector", "item.count", "2",
+                "item.0.registryName", "minecraft:iron_ingot", "item.0.meta", "0", "item.0.amount", "2",
+                "item.1.registryName", "minecraft:gold_ingot", "item.1.meta", "0", "item.1.amount", "4",
+                "allowCraft", "true", "allowCraftedFromStatistics", "true"));
+        UUID player = UUID.randomUUID();
+        TaskProgress progress = evaluator.evaluate(task, TaskProgress.empty(task), sourceFact("alpha", player,
+            "alpha-iron-craft", map("registryName", "minecraft:iron_ingot", "meta", "0", "amount", "2",
+                "channel", "craft")));
+
+        progress = evaluator.evaluate(task, progress, sourceFact("alpha", player, "alpha-iron-statistics",
+            map("registryName", "minecraft:iron_ingot", "meta", "0", "amount", "9",
+                "channel", "craft-statistics")));
+        assertEquals("BQ skips the absolute statistic for a requirement already completed by this source's event",
+            Arrays.asList(2L, 0L), progress.getValues());
+        assertEquals(Arrays.asList(0L, 0L), progress.getSourceContributions().get("alpha").getObservedValues());
+
+        progress = evaluator.evaluate(task, progress, sourceFact("beta", player, "beta-iron-statistics",
+            map("registryName", "minecraft:iron_ingot", "meta", "0", "amount", "6",
+                "channel", "craft-statistics")));
+        assertEquals("another source's under-target requirement is still independently observed",
+            Arrays.asList(8L, 0L), progress.getValues());
+
+        progress = evaluator.evaluate(task, progress, sourceFact("alpha", player, "alpha-gold-statistics",
+            map("registryName", "minecraft:gold_ingot", "meta", "0", "amount", "7",
+                "channel", "craft-statistics")));
+        assertEquals("unfinished components retain BQ's unbounded absolute statistic value",
+            Arrays.asList(8L, 7L), progress.getValues());
+        assertTrue(progress.isComplete());
+    }
+
+    @Test
     public void craftingStatisticsUsesBqItemIdCounterWithoutMetaOrNbtFiltering() {
         ItemVectorTaskEvaluator evaluator = new ItemVectorTaskEvaluator("bq_standard:crafting", "galaxy:item_produced");
         Map<String, PortableNbt> requiredNbt = new LinkedHashMap<String, PortableNbt>();
@@ -150,6 +260,52 @@ public class BqCompatibleTaskEvaluatorsTest {
             "channel", "craft-statistics", "trigger.channel", "craft",
             "trigger.registryName", "minecraft:iron_ingot", "trigger.meta", "0");
         assertTrue(evaluator.evaluate(task, start, fact("galaxy:item_produced", matchingCraft)).isComplete());
+    }
+
+    @Test
+    public void craftingStatisticsFromOneTaskDoNotRefreshAnotherTaskWithoutMatchingTrigger() {
+        ItemVectorTaskEvaluator evaluator = new ItemVectorTaskEvaluator("bq_standard:crafting",
+            "galaxy:item_produced");
+        TaskDefinition triggeredTask = new TaskDefinition("triggered", "bq_standard:crafting", false,
+            map("progressMode", "item-vector", "target", "8", "item.count", "2",
+                "item.0.registryName", "minecraft:iron_ingot", "item.0.meta", "0", "item.0.amount", "4",
+                "item.1.registryName", "minecraft:gold_ingot", "item.1.meta", "0", "item.1.amount", "4",
+                "allowCraft", "true", "allowCraftedFromStatistics", "true"));
+        TaskDefinition otherTask = new TaskDefinition("other", "bq_standard:crafting", false,
+            map("progressMode", "item-vector", "target", "4", "item.count", "1",
+                "item.0.registryName", "minecraft:gold_ingot", "item.0.meta", "0", "item.0.amount", "4",
+                "allowCraft", "true", "allowCraftedFromStatistics", "true"));
+        GameplayFact goldStatisticsTriggeredByIron = fact("galaxy:item_produced", map(
+            "registryName", "minecraft:gold_ingot", "meta", "0", "amount", "3",
+            "channel", "craft-statistics", "trigger.channel", "craft",
+            "trigger.registryName", "minecraft:iron_ingot", "trigger.meta", "0"));
+
+        assertEquals("the Task whose iron output triggered BQ Detect refreshes its gold requirement",
+            Arrays.asList(0L, 3L), evaluator.evaluate(triggeredTask, TaskProgress.empty(triggeredTask),
+                goldStatisticsTriggeredByIron).getValues());
+        assertEquals("another Task requiring only gold must not receive the iron-triggered Detect",
+            Arrays.asList(0L), evaluator.evaluate(otherTask, TaskProgress.empty(otherTask),
+                goldStatisticsTriggeredByIron).getValues());
+    }
+
+    @Test
+    public void craftingStatisticsRefreshOtherRequirementsAfterMatchingOutputInSameTask() {
+        ItemVectorTaskEvaluator evaluator = new ItemVectorTaskEvaluator("bq_standard:crafting",
+            "galaxy:item_produced");
+        TaskDefinition task = new TaskDefinition("craft", "bq_standard:crafting", false,
+            map("progressMode", "item-vector", "target", "8", "item.count", "2",
+                "item.0.registryName", "minecraft:iron_ingot",
+                "item.0.meta", "0", "item.0.amount", "4", "item.1.registryName", "minecraft:gold_ingot",
+                "item.1.meta", "0", "item.1.amount", "4", "allowCraft", "true", "allowSmelt", "true",
+                "allowAnvil", "true", "allowCraftedFromStatistics", "true"));
+
+        for (String triggerChannel : Arrays.asList("craft", "smelt", "anvil")) {
+            GameplayFact goldStatistics = fact("galaxy:item_produced", map("registryName", "minecraft:gold_ingot",
+                "meta", "0", "amount", "3", "channel", "craft-statistics", "trigger.channel",
+                triggerChannel, "trigger.registryName", "minecraft:iron_ingot", "trigger.meta", "0"));
+            TaskProgress refreshed = evaluator.evaluate(task, TaskProgress.empty(task), goldStatistics);
+            assertEquals(triggerChannel, Arrays.asList(0L, 3L), refreshed.getValues());
+        }
     }
 
     @Test
@@ -430,6 +586,33 @@ public class BqCompatibleTaskEvaluatorsTest {
     }
 
     @Test
+    public void retrievalKeepsBqSlotOrderWhenOverlappingNbtRequirementsCompeteForStacks() {
+        InventorySnapshotTaskEvaluator evaluator = new InventorySnapshotTaskEvaluator("bq_standard:retrieval",
+            "galaxy:inventory_observed");
+        String broadNbt = PortableNbt.compound(withNbt("grade", "2")).encode();
+        String narrowNbt = PortableNbt.compound(withNbt("grade", "2", "variant", "special")).encode();
+        TaskDefinition task = new TaskDefinition("retrieve", "bq_standard:retrieval", false,
+            map("progressMode", "item-vector", "target", "2", "item.count", "2",
+                "item.0.registryName", "gtnh:quest_ingot",
+                "item.0.meta", "0", "item.0.amount", "1", "item.0.nbtPortable", broadNbt,
+                "item.1.registryName", "gtnh:quest_ingot", "item.1.meta", "0", "item.1.amount", "1",
+                "item.1.nbtPortable", narrowNbt, "ignoreNBT", "false", "partialMatch", "false",
+                "consume", "false"));
+        InventoryObservationAttributeCodec codec = new InventoryObservationAttributeCodec();
+        InventoryObservationEntry special = new InventoryObservationEntry("gtnh:quest_ingot", 0, 1L,
+            "", "", PortableNbt.compound(withNbt("grade", "2", "variant", "special")).encode());
+        InventoryObservationEntry plain = new InventoryObservationEntry("gtnh:quest_ingot", 0, 1L,
+            "", "", broadNbt);
+
+        // BQ TaskRetrieval.Detector visits slots first and requirements in definition order within each slot.
+        // The first requirement can consume the special stack before the narrower requirement sees it.
+        assertEquals(Arrays.asList(1L, 0L), evaluator.evaluate(task, TaskProgress.empty(task),
+            fact("galaxy:inventory_observed", codec.encode(Arrays.asList(special, plain)))).getValues());
+        assertEquals(Arrays.asList(1L, 1L), evaluator.evaluate(task, TaskProgress.empty(task),
+            fact("galaxy:inventory_observed", codec.encode(Arrays.asList(plain, special)))).getValues());
+    }
+
+    @Test
     public void retrievalKeepsSatisfiedComponentAndReallocatesInventoryToLaterRequirements() {
         InventorySnapshotTaskEvaluator evaluator = new InventorySnapshotTaskEvaluator("bq_standard:retrieval",
             "galaxy:inventory_observed");
@@ -523,7 +706,8 @@ public class BqCompatibleTaskEvaluatorsTest {
         TaskDefinition task = new TaskDefinition("fluid", "bq_standard:fluid", false, params);
         GameplayFact snapshot = fact("galaxy:fluid_inventory_observed", map("fluidInventory.count", "1",
             "fluidInventory.0.name", "water", "fluidInventory.0.amount", "2500"));
-        assertEquals(Arrays.asList(1000L, 1500L),
+        assertEquals("BQ non-consuming detection may reuse one observed fluid stack for another requirement",
+            Arrays.asList(1000L, 2000L),
             evaluator.evaluate(task, TaskProgress.empty(task), snapshot).getValues());
         params.put("consume", "true");
         TaskDefinition consuming = new TaskDefinition("fluid", "bq_standard:fluid", false, params);
@@ -552,6 +736,47 @@ public class BqCompatibleTaskEvaluatorsTest {
         TaskDefinition emptyTag = new TaskDefinition("fluid-empty-tag", "bq_standard:fluid", false, params);
         assertTrue(evaluator.evaluate(emptyTag, TaskProgress.empty(emptyTag), explicitlyEmpty).isComplete());
         assertFalse(evaluator.evaluate(emptyTag, TaskProgress.empty(emptyTag), untagged).isComplete());
+    }
+
+    @Test
+    public void fluidGroupDetectReplacesEveryComponentButNormalDetectKeepsSatisfiedComponents() {
+        FluidSnapshotTaskEvaluator evaluator = new FluidSnapshotTaskEvaluator("bq_standard:fluid",
+            "galaxy:fluid_inventory_observed");
+        Map<String, String> groupParameters = map("progressMode", "fluid-vector", "target", "2000",
+            "fluid.count", "2", "fluid.0.name", "water", "fluid.0.amount", "1000",
+            "fluid.1.name", "lava", "fluid.1.amount", "1000", "consume", "false",
+            "ignoreNBT", "true", "groupDetect", "true");
+        TaskDefinition groupTask = new TaskDefinition("fluid", "bq_standard:fluid", false, groupParameters);
+        TaskProgress previous = new TaskProgress("fluid", Arrays.asList(1000L, 500L),
+            Arrays.asList(1000L, 1000L), false);
+        GameplayFact lavaOnly = fact("galaxy:fluid_inventory_observed", map("fluidInventory.count", "1",
+            "fluidInventory.0.name", "lava", "fluidInventory.0.amount", "500"));
+
+        assertEquals(Arrays.asList(0L, 500L), evaluator.evaluate(groupTask, previous, lavaOnly).getValues());
+
+        groupParameters.put("groupDetect", "false");
+        TaskDefinition normalTask = new TaskDefinition("fluid", "bq_standard:fluid", false, groupParameters);
+        assertEquals(Arrays.asList(1000L, 500L), evaluator.evaluate(normalTask, previous, lavaOnly).getValues());
+    }
+
+    @Test
+    public void partyFluidSnapshotIsRestrictedToImportedBqFluidTasks() {
+        FluidSnapshotTaskEvaluator evaluator = new FluidSnapshotTaskEvaluator("bq_standard:fluid",
+            "galaxy:fluid_inventory_observed");
+        Map<String, String> parameters = map("factType", "galaxy:fluid_inventory_observed",
+            "progressMode", "fluid-vector", "target", "1000",
+            "fluid.count", "1", "fluid.0.name", "water", "fluid.0.amount", "1000",
+            "consume", "false", "ignoreNBT", "true");
+        TaskDefinition authored = new TaskDefinition("fluid", "bq_standard:fluid", false, parameters);
+        parameters.put("bq.raw", "{}");
+        TaskDefinition imported = new TaskDefinition("fluid", "bq_standard:fluid", false, parameters);
+        TaskProgress previous = new TaskProgress("fluid", 250L, 1000L, false);
+        GameplayFact partySnapshot = fact("galaxy:fluid_inventory_observed", map(
+            "fluidInventory.count", "1", "fluidInventory.0.name", "water", "fluidInventory.0.amount", "1000",
+            "inventory.bqPartySnapshot", "true", "inventory.bqPartyId", UUID.randomUUID().toString()));
+
+        assertSame(previous, evaluator.evaluate(authored, previous, partySnapshot));
+        assertTrue(evaluator.evaluate(imported, previous, partySnapshot).isComplete());
     }
 
     @Test
@@ -637,6 +862,52 @@ public class BqCompatibleTaskEvaluatorsTest {
     }
 
     @Test
+    public void meetingFiltersLargestSharedSnapshotByEachTasksBqExpandedPlayerAabb() {
+        MeetingTaskEvaluator evaluator = new MeetingTaskEvaluator("bq_standard:meeting",
+            "galaxy:nearby_entities_observed");
+        TaskDefinition task = new TaskDefinition("meet", "bq_standard:meeting", false,
+            map("target", "1", "subject", "Villager", "range", "4", "amount", "1",
+                "subtypes", "true", "ignoreNBT", "true"));
+
+        Map<String, String> outsideSmallRange = meetingSnapshot("5", "5.4");
+        assertFalse("a matching entity found by the merged radius must not satisfy a smaller BQ query",
+            evaluator.evaluate(task, TaskProgress.empty(task), fact("galaxy:nearby_entities_observed",
+                outsideSmallRange)).isComplete());
+
+        Map<String, String> intersectsSmallRange = meetingSnapshot("4.2", "4.6");
+        assertTrue("BQ tests entity-box intersection with player.boundingBox.expand(range), not center distance",
+            evaluator.evaluate(task, TaskProgress.empty(task), fact("galaxy:nearby_entities_observed",
+                intersectsSmallRange)).isComplete());
+
+        Map<String, String> boundaryOnly = meetingSnapshot("4.3", "4.8");
+        assertFalse("touching the query face without overlap does not intersect the BQ AABB",
+            evaluator.evaluate(task, TaskProgress.empty(task), fact("galaxy:nearby_entities_observed",
+                boundaryOnly)).isComplete());
+
+        Map<String, String> missingGeometry = map("observedRadius", "8", "nearbyEntity.count", "1",
+            "nearbyEntity.0.subject", "Villager");
+        assertFalse("an oversized snapshot without per-entity bounds cannot prove task-range membership",
+            evaluator.evaluate(task, TaskProgress.empty(task), fact("galaxy:nearby_entities_observed",
+                missingGeometry)).isComplete());
+
+        Map<String, String> malformedGeometry = meetingSnapshot("4.2", "4.6");
+        malformedGeometry.put("nearbyEntity.0.maxX", "not-a-number");
+        assertFalse("malformed geometry fails closed instead of escaping the evaluator",
+            evaluator.evaluate(task, TaskProgress.empty(task), fact("galaxy:nearby_entities_observed",
+                malformedGeometry)).isComplete());
+    }
+
+    private static Map<String, String> meetingSnapshot(String entityMinX, String entityMaxX) {
+        return map("observedRadius", "8", "nearbyEntity.count", "1",
+            "observer.minX", "-0.3", "observer.minY", "0", "observer.minZ", "-0.3",
+            "observer.maxX", "0.3", "observer.maxY", "1.8", "observer.maxZ", "0.3",
+            "nearbyEntity.0.subject", "Villager", "nearbyEntity.0.subjectAliases", "Villager",
+            "nearbyEntity.0.minX", entityMinX, "nearbyEntity.0.minY", "0.1",
+            "nearbyEntity.0.minZ", "-0.2", "nearbyEntity.0.maxX", entityMaxX,
+            "nearbyEntity.0.maxY", "1.9", "nearbyEntity.0.maxZ", "0.2");
+    }
+
+    @Test
     public void committedConsumptionAdvancesOnlyBoundConsumingTaskAndSaturates() {
         ConsumptionAppliedTaskEvaluator evaluator = new ConsumptionAppliedTaskEvaluator(
             "bq_standard:retrieval", "item");
@@ -656,6 +927,23 @@ public class BqCompatibleTaskEvaluatorsTest {
         TaskDefinition observation = new TaskDefinition("submit", "bq_standard:retrieval", false, params);
         assertEquals(Arrays.asList(0L, 0L), evaluator.evaluate(observation, TaskProgress.empty(observation), applied)
             .getValues());
+    }
+
+    @Test
+    public void consumingFluidCreditsTheWholeIndivisibleContainerAmount() {
+        Map<String, String> parameters = map("progressMode", "fluid-vector", "fluid.count", "1",
+            "fluid.0.amount", "1000", "target", "1000", "consume", "true");
+        TaskDefinition task = new TaskDefinition("fluid", "bq_standard:fluid", false, parameters);
+        TaskProgress current = new TaskProgress("fluid", 400L, 1000L, false);
+        GameplayFact applied = fact("galaxy:consumption_applied", map("taskKey", "fluid", "kind", "fluid",
+            "value.count", "1", "value.0", "750"));
+
+        TaskProgress result = new ConsumptionAppliedTaskEvaluator("bq_standard:fluid", "fluid")
+            .evaluate(task, current, applied);
+
+        assertEquals("BQ adds the full amount drained, even when it exceeds the remaining 600 mB",
+            Arrays.asList(1150L), result.getValues());
+        assertTrue(result.isComplete());
     }
 
     @Test public void scoreboardSupportsEveryBqComparisonAndLatchesCompletion() {
@@ -705,6 +993,14 @@ public class BqCompatibleTaskEvaluatorsTest {
         TaskProgress first = entity.evaluate(entityTask, TaskProgress.empty(entityTask), talk);
         assertEquals(1L, first.getValue());
         assertTrue(entity.evaluate(entityTask, first, talk).isComplete());
+        assertEquals("BQ ignores entity types absent from EntityList even if a registered superclass alias exists",
+            0L, entity.evaluate(entityTask, TaskProgress.empty(entityTask), fact("galaxy:entity_interacted",
+                map("subject", "", "subjectAliases", "Villager|Creature", "hit", "false",
+                    "heldItem.registryName", "minecraft:emerald", "heldItem.meta", "0"))).getValue());
+        TaskDefinition missingTarget = new TaskDefinition("talk-missing", "bq_standard:interact_entity", false,
+            map("target", "1", "onInteract", "true", "ignoreTargetNBT", "true", "ignoreItemNBT", "true"));
+        assertEquals("BQ cannot resolve an empty target ID", 0L,
+            entity.evaluate(missingTarget, TaskProgress.empty(missingTarget), talk).getValue());
         assertEquals(0L, entity.evaluate(entityTask, TaskProgress.empty(entityTask),
             fact("galaxy:entity_interacted", map("subject", "Villager", "hit", "true",
                 "heldItem.registryName", "minecraft:emerald", "heldItem.meta", "0"))).getValue());
@@ -739,6 +1035,11 @@ public class BqCompatibleTaskEvaluatorsTest {
 
     private static GameplayFact fact(String type, Map<String, String> attributes) {
         return new GameplayFact("s2", UUID.randomUUID().toString(), UUID.randomUUID(), type, 1L, attributes);
+    }
+
+    private static GameplayFact sourceFact(String sourceServer, UUID playerId, String eventId,
+        Map<String, String> attributes) {
+        return new GameplayFact(sourceServer, eventId, playerId, "galaxy:item_produced", 1L, attributes);
     }
 
     private static Map<String, PortableNbt> withNbt(String... values) {

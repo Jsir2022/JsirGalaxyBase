@@ -5,6 +5,8 @@ import static org.junit.Assert.*;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -34,11 +36,13 @@ import com.jsirgalaxybase.quest.core.GameplayFact;
 import com.jsirgalaxybase.quest.core.ConsumptionRequest;
 import com.jsirgalaxybase.quest.core.ConsumptionSubmission;
 import com.jsirgalaxybase.quest.core.ConsumptionSubmissionStatus;
+import com.jsirgalaxybase.quest.core.ConsumptionDetectBatch;
 import com.jsirgalaxybase.quest.core.AuthenticatedQuestClaimService;
 import com.jsirgalaxybase.quest.core.ParticipantId;
 import com.jsirgalaxybase.quest.core.QuestDefinition;
 import com.jsirgalaxybase.quest.core.QuestCompletionRewardPort;
 import com.jsirgalaxybase.quest.core.QuestCompletionRewardDeliveryHandler;
+import com.jsirgalaxybase.quest.core.QuestCompletionQuery;
 import com.jsirgalaxybase.quest.core.QuestDefinitionConflictException;
 import com.jsirgalaxybase.quest.core.QuestDefinitionLifecycle;
 import com.jsirgalaxybase.quest.core.QuestLogic;
@@ -48,6 +52,8 @@ import com.jsirgalaxybase.quest.core.QuestEvaluationPlanner;
 import com.jsirgalaxybase.quest.core.QuestEngine;
 import com.jsirgalaxybase.quest.core.QuestFactProjector;
 import com.jsirgalaxybase.quest.core.BqHuntPartyAssignmentPolicy;
+import com.jsirgalaxybase.quest.core.BqPartyActiveQuestQuery;
+import com.jsirgalaxybase.quest.core.BqPartyCraftingStatisticsScope;
 import com.jsirgalaxybase.quest.core.BqCompatibleTaskEvaluatorRegistry;
 import com.jsirgalaxybase.quest.core.QuestStatus;
 import com.jsirgalaxybase.quest.core.QuestRuntimeService;
@@ -60,6 +66,7 @@ import com.jsirgalaxybase.quest.core.ParticipantMutationStatus;
 import com.jsirgalaxybase.quest.core.ParticipantType;
 import com.jsirgalaxybase.quest.core.QuestBehavior;
 import com.jsirgalaxybase.quest.core.QuestParticipantScope;
+import com.jsirgalaxybase.quest.core.QuestOnlinePlayerDirectory;
 import com.jsirgalaxybase.quest.core.RepeatPolicy;
 import com.jsirgalaxybase.quest.core.RewardDefinition;
 import com.jsirgalaxybase.quest.core.RewardDeliveryLease;
@@ -74,6 +81,7 @@ import com.jsirgalaxybase.quest.core.TaskDefinition;
 import com.jsirgalaxybase.quest.core.TaskEvaluatorRegistry;
 import com.jsirgalaxybase.quest.core.QuestChapterCatalogEntry;
 import com.jsirgalaxybase.quest.core.StoredQuestDefinition;
+import com.jsirgalaxybase.quest.core.RevisionAwarePublishedQuestCatalog;
 
 public class QuestPostgresIntegrationTest {
     private DriverManagerQuestDataSource root;
@@ -84,13 +92,17 @@ public class QuestPostgresIntegrationTest {
     public void setUp() throws Exception {
         String user = System.getenv("POSTGRES_USER");
         String password = System.getenv("POSTGRES_PASSWORD");
-        String database = System.getenv("POSTGRES_DB");
-        Assume.assumeTrue(user != null && password != null && database != null);
         Class.forName("org.postgresql.Driver");
         String baseUrl = System.getenv("QUEST_TEST_POSTGRES_URL");
         if (baseUrl == null || baseUrl.trim().isEmpty()) {
-            baseUrl = "jdbc:postgresql://galaxy-base:5432/" + database;
+            Assume.assumeTrue("QUEST_TEST_POSTGRES_URL is required for schema-writing integration tests", false);
         }
+        if (!QuestTestDatabaseUrl.isExplicitlyIsolated(baseUrl,
+            System.getenv("QUEST_TEST_POSTGRES_ISOLATED"))) {
+            throw new IllegalStateException("Quest integration tests require an explicitly acknowledged *_test or *_it database URL");
+        }
+        if (user == null || password == null) throw new IllegalStateException(
+            "POSTGRES_USER and POSTGRES_PASSWORD are required when QUEST_TEST_POSTGRES_URL is configured");
         root = new DriverManagerQuestDataSource(baseUrl, user, password);
         schema = "quest_it_" + UUID.randomUUID().toString().replace("-", "");
         try {
@@ -99,7 +111,7 @@ public class QuestPostgresIntegrationTest {
             }
         } catch (SQLException unavailable) {
             schema = null;
-            Assume.assumeNoException("configured PostgreSQL is unavailable", unavailable);
+            throw new IllegalStateException("configured isolated Quest test PostgreSQL is unavailable", unavailable);
         }
         scoped = new DriverManagerQuestDataSource(baseUrl + "?currentSchema=" + schema, user, password);
         try (Connection connection = scoped.getConnection(); Statement statement = connection.createStatement()) {
@@ -118,6 +130,126 @@ public class QuestPostgresIntegrationTest {
     @Test
     public void currentSchemaSupportsSuppressedRewardStatus() {
         new JdbcQuestCenterQuery(new JdbcQuestConnectionManager(scoped)).validateSuppressedRewardStatus();
+    }
+
+    @Test
+    public void consumingDetectBatchCursorIsDurableIdempotentAndFencesQuestSettlement() {
+        JdbcQuestConnectionManager manager = new JdbcQuestConnectionManager(scoped);
+        JdbcQuestTransaction transaction = new JdbcQuestTransaction(manager);
+        JdbcQuestDefinitionRepository definitions = new JdbcQuestDefinitionRepository(manager);
+        JdbcQuestRuntimeRepository runtime = new JdbcQuestRuntimeRepository(manager);
+        JdbcConsumptionDetectBatchRepository batches = new JdbcConsumptionDetectBatchRepository(manager);
+        try (Connection connection = scoped.getConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("DROP TABLE galaxy_quest_consumption_detect_batch");
+            statement.execute(consumptionDetectBatchMigration());
+            statement.execute(consumptionDetectBatchMigration());
+            statement.execute(consumptionDetectBatchVersionPinMigration());
+            statement.execute(consumptionDetectBatchVersionPinMigration());
+        } catch (Exception failure) {
+            throw new AssertionError("consumption Detect migration must apply idempotently", failure);
+        }
+        new JdbcQuestCenterQuery(manager).validateSchema();
+        QuestDefinition quest = definition(UUID.randomUUID(), 1, "Detect batch cursor");
+        StoredQuestDefinition draft = transaction.inTransaction(() -> definitions.createDraft(quest));
+        assertTrue(transaction.inTransaction(() -> definitions.publish(quest.getId(), 1, draft.getContentHash(), 1L)));
+        UUID player = UUID.randomUUID();
+        List<String> orderedTasks = Arrays.asList("retrieval-first", "fluid-second", "retrieval-third");
+        ConsumptionDetectBatch first = new ConsumptionDetectBatch(UUID.randomUUID().toString(), "s2", player,
+            ParticipantId.player(player), quest.getId(), 1, 0, orderedTasks, 0, 100L);
+        ConsumptionDetectBatch created = transaction.inTransaction(() -> batches.createIfAbsent(first));
+        assertEquals(first.getBatchId(), created.getBatchId());
+        assertEquals("task keys retain the published definition order", orderedTasks, created.getTaskKeys());
+        assertEquals("first task remains the initial cursor", orderedTasks.get(0), created.getCurrentTaskKey());
+        assertTrue(transaction.inTransaction(() -> runtime.hasActiveConsumptionDetectBatch(
+            ParticipantId.player(player), quest.getId(), 1)));
+
+        QuestDefinition replacement = definition(quest.getId(), 2, "Detect batch cursor replacement");
+        StoredQuestDefinition replacementDraft = transaction.inTransaction(() -> definitions.createDraft(replacement));
+        assertTrue(transaction.inTransaction(() -> definitions.publish(quest.getId(), 2,
+            replacementDraft.getContentHash(), 2L)));
+        ConsumptionDetectBatch newerVersionCandidate = new ConsumptionDetectBatch(UUID.randomUUID().toString(), "s2",
+            player, ParticipantId.player(player), quest.getId(), 2, 0,
+            Collections.singletonList("new-definition-task"), 0, 101L);
+        ConsumptionDetectBatch adopted = transaction.inTransaction(() -> batches.createIfAbsent(newerVersionCandidate));
+        assertEquals("one active Quest batch is fenced across definition versions", first.getBatchId(),
+            adopted.getBatchId());
+        assertEquals("the active operation keeps its original version", 1, adopted.getDefinitionVersion());
+        assertTrue(transaction.inTransaction(() -> definitions.findPublished(quest.getId(), 1).isPresent()));
+        assertEquals(2, transaction.inTransaction(() -> definitions.findPublished(quest.getId(), 2).get()
+            .getDefinition().getVersion()).intValue());
+
+        ConsumptionDetectBatch concurrent = new ConsumptionDetectBatch(UUID.randomUUID().toString(), "s2", player,
+            ParticipantId.player(player), quest.getId(), 1, 0, Collections.singletonList("tampered-task-order"), 0, 101L);
+        ConsumptionDetectBatch resumed = transaction.inTransaction(() -> batches.createIfAbsent(concurrent));
+        assertEquals("duplicate Detect entry resumes the original journal", first.getBatchId(), resumed.getBatchId());
+        assertEquals("a retry cannot replace the original task order", orderedTasks, resumed.getTaskKeys());
+        assertEquals(0, resumed.getNextTaskIndex());
+        ConsumptionDetectBatch afterFirst = transaction.inTransaction(() -> batches.advance(first.getBatchId(), 0, 102L));
+        assertEquals(1, afterFirst.getNextTaskIndex());
+        assertEquals("cursor advances to the second definition task", orderedTasks.get(1), afterFirst.getCurrentTaskKey());
+        assertEquals("retrying the same cursor advance is idempotent", 1,
+            transaction.inTransaction(() -> batches.advance(first.getBatchId(), 0, 103L)).getNextTaskIndex());
+        ConsumptionDetectBatch afterSecond = transaction.inTransaction(() -> batches.advance(first.getBatchId(), 1, 104L));
+        assertEquals(2, afterSecond.getNextTaskIndex());
+        assertEquals("cursor advances to the final definition task", orderedTasks.get(2), afterSecond.getCurrentTaskKey());
+        ConsumptionDetectBatch completed = transaction.inTransaction(() -> batches.advance(first.getBatchId(), 2, 105L));
+        assertTrue(completed.isComplete());
+        transaction.inTransaction(() -> { batches.deleteCompleted(first.getBatchId(), 3, 106L); return null; });
+        assertFalse(transaction.inTransaction(() -> runtime.hasActiveConsumptionDetectBatch(
+            ParticipantId.player(player), quest.getId(), 1)));
+    }
+
+    @Test
+    public void publishedCatalogRevisionChangesAtomicallyOnPublishAndRetire() {
+        JdbcQuestConnectionManager manager = new JdbcQuestConnectionManager(scoped);
+        JdbcQuestTransaction transaction = new JdbcQuestTransaction(manager);
+        JdbcQuestDefinitionRepository definitions = new JdbcQuestDefinitionRepository(manager);
+        long initial = definitions.currentRevision();
+        QuestDefinition definition = new QuestDefinition(UUID.randomUUID(), 1, "Catalog revision", "",
+            QuestLogic.AND, QuestLogic.AND, Collections.<UUID>emptySet(),
+            Collections.<TaskDefinition>emptyList(), Collections.<RewardDefinition>emptyList());
+
+        StoredQuestDefinition draft = transaction.inTransaction(() -> definitions.createDraft(definition));
+        assertEquals("draft writes do not invalidate the published catalog", initial, definitions.currentRevision());
+        assertTrue(transaction.inTransaction(() -> definitions.publish(definition.getId(), 1,
+            draft.getContentHash(), 100L)));
+        long published = definitions.currentRevision();
+        assertTrue("publish trigger advances the shared revision", published > initial);
+
+        RevisionAwarePublishedQuestCatalog cached = new RevisionAwarePublishedQuestCatalog(definitions, definitions);
+        assertEquals(1, cached.findAllPublished().size());
+        assertTrue(transaction.inTransaction(() -> definitions.retire(definition.getId(), 1)));
+        assertTrue("retire trigger advances the shared revision", definitions.currentRevision() > published);
+        assertTrue("cached definitions are refreshed after a cross-process revision", cached.findAllPublished().isEmpty());
+    }
+
+    @Test
+    public void reviewedCatalogRevisionMigrationUpgradesExistingPublishedDefinitions() throws Exception {
+        JdbcQuestConnectionManager manager = new JdbcQuestConnectionManager(scoped);
+        JdbcQuestTransaction transaction = new JdbcQuestTransaction(manager);
+        JdbcQuestDefinitionRepository definitions = new JdbcQuestDefinitionRepository(manager);
+        QuestDefinition existing = definition(UUID.randomUUID(), 1, "Published before cache migration");
+        StoredQuestDefinition existingDraft = transaction.inTransaction(() -> definitions.createDraft(existing));
+        assertTrue(transaction.inTransaction(() -> definitions.publish(existing.getId(), 1,
+            existingDraft.getContentHash(), 10L)));
+
+        try (Connection connection = scoped.getConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("DROP TRIGGER IF EXISTS galaxy_quest_definition_catalog_revision_trg ON galaxy_quest_definition");
+            statement.execute("DROP FUNCTION IF EXISTS galaxy_quest_bump_definition_catalog_revision()");
+            statement.execute("DROP TABLE IF EXISTS galaxy_quest_definition_catalog_revision");
+            statement.execute(catalogRevisionMigration());
+        }
+
+        long initialRevision = definitions.currentRevision();
+        RevisionAwarePublishedQuestCatalog cached = new RevisionAwarePublishedQuestCatalog(definitions, definitions);
+        assertEquals("migration preserves already-published definitions", 1, cached.findAllPublished().size());
+        QuestDefinition added = definition(UUID.randomUUID(), 1, "Published after cache migration");
+        StoredQuestDefinition addedDraft = transaction.inTransaction(() -> definitions.createDraft(added));
+        assertTrue(transaction.inTransaction(() -> definitions.publish(added.getId(), 1,
+            addedDraft.getContentHash(), 20L)));
+        assertTrue(definitions.currentRevision() > initialRevision);
+        assertEquals("a second server's cache observes the committed publish revision", 2,
+            cached.findAllPublished().size());
     }
 
     @Test
@@ -143,6 +275,93 @@ public class QuestPostgresIntegrationTest {
         });
         assertTrue("BQ isComplete remains true after a repeat-cycle reset",
             completions.findCompletedQuestIds(player).contains(questId));
+    }
+
+    @Test
+    public void craftingSourceEventLedgerIsReplacedWhenRepeatCycleIsPersisted() {
+        JdbcQuestConnectionManager manager = new JdbcQuestConnectionManager(scoped);
+        JdbcQuestTransaction transaction = new JdbcQuestTransaction(manager);
+        JdbcQuestRuntimeRepository runtime = new JdbcQuestRuntimeRepository(manager);
+        ParticipantId player = ParticipantId.player(UUID.randomUUID());
+        UUID questId = UUID.randomUUID();
+        Map<String, String> parameters = new LinkedHashMap<String, String>();
+        parameters.put("progressMode", "item-vector");
+        parameters.put("item.count", "1");
+        parameters.put("item.0.amount", "3");
+        TaskDefinition crafting = new TaskDefinition("craft", "bq_standard:crafting", false, parameters);
+
+        TaskProgress completedCycle = TaskProgress.empty(crafting)
+            .advanceFromSource("s2", Collections.singletonList(3L)).markComplete();
+        transaction.inTransaction(() -> {
+            runtime.saveProgress(new QuestProgressSnapshot(player, questId, 1, QuestStatus.COMPLETED,
+                Collections.singletonMap("craft", completedCycle), 100L, 0));
+            return null;
+        });
+        assertTrue(runtime.findProgress(player, questId, 1).get().getTasks().get("craft")
+            .getSourceContributions().containsKey("s2"));
+
+        TaskProgress nextCycle = TaskProgress.empty(crafting).advanceFromSource("lobby",
+            Collections.singletonList(1L));
+        transaction.inTransaction(() -> {
+            runtime.saveProgress(new QuestProgressSnapshot(player, questId, 1, QuestStatus.IN_PROGRESS,
+                Collections.singletonMap("craft", nextCycle), 0L, 1));
+            return null;
+        });
+
+        QuestProgressSnapshot reloaded = runtime.findProgress(player, questId, 1).get();
+        TaskProgress reloadedTask = reloaded.getTasks().get("craft");
+        assertEquals(1, reloaded.getCycle());
+        assertEquals(Collections.singletonList(1L), reloadedTask.getValues());
+        assertTrue(reloadedTask.isSourceScoped());
+        assertTrue(reloadedTask.getSourceContributions().containsKey("lobby"));
+        assertFalse("previous-cycle event ledger must not be reloaded", reloadedTask.getSourceContributions()
+            .containsKey("s2"));
+
+        TaskProgress afterFreshStatistics = reloadedTask.observeFromSource("s2", Collections.singletonList(3L));
+        transaction.inTransaction(() -> {
+            runtime.saveProgress(new QuestProgressSnapshot(player, questId, 1, QuestStatus.COMPLETED,
+                Collections.singletonMap("craft", afterFreshStatistics.markComplete()), 200L, 1));
+            return null;
+        });
+        TaskProgress finalTask = runtime.findProgress(player, questId, 1).get().getTasks().get("craft");
+        assertEquals(Collections.singletonList(4L), finalTask.getValues());
+        assertEquals(Collections.singletonList(0L), finalTask.getSourceContributions().get("s2").getEventValues());
+        assertEquals(Collections.singletonList(3L), finalTask.getSourceContributions().get("s2").getObservedValues());
+    }
+
+    @Test
+    public void craftingSourceContributionsPersistMaxWithinSourceAndSumAcrossSources() {
+        JdbcQuestConnectionManager manager = new JdbcQuestConnectionManager(scoped);
+        JdbcQuestTransaction transaction = new JdbcQuestTransaction(manager);
+        JdbcQuestRuntimeRepository runtime = new JdbcQuestRuntimeRepository(manager);
+        ParticipantId player = ParticipantId.player(UUID.randomUUID());
+        UUID questId = UUID.randomUUID();
+        Map<String, String> parameters = new LinkedHashMap<String, String>();
+        parameters.put("progressMode", "item-vector");
+        parameters.put("item.count", "1");
+        parameters.put("item.0.amount", "10");
+        TaskDefinition crafting = new TaskDefinition("craft", "bq_standard:crafting", false, parameters);
+
+        TaskProgress progress = TaskProgress.empty(crafting)
+            .advanceFromSource("lobby", Collections.singletonList(3L))
+            .observeFromSource("lobby", Collections.singletonList(5L))
+            .advanceFromSource("s2", Collections.singletonList(4L))
+            .observeFromSource("s2", Collections.singletonList(2L));
+        assertEquals("each source contributes max(event, absolute snapshot), not their sum",
+            Collections.singletonList(9L), progress.getValues());
+
+        transaction.inTransaction(() -> {
+            runtime.saveProgress(new QuestProgressSnapshot(player, questId, 1, QuestStatus.IN_PROGRESS,
+                Collections.singletonMap("craft", progress), 0L, 0));
+            return null;
+        });
+
+        TaskProgress reloaded = runtime.findProgress(player, questId, 1).get().getTasks().get("craft");
+        assertEquals(Collections.singletonList(9L), reloaded.getValues());
+        assertEquals(Collections.singletonList(3L), reloaded.getSourceContributions().get("lobby").getEventValues());
+        assertEquals(Collections.singletonList(5L), reloaded.getSourceContributions().get("lobby").getObservedValues());
+        assertEquals(Collections.singletonList(4L), reloaded.getSourceContributions().get("s2").getEventValues());
+        assertEquals(Collections.singletonList(2L), reloaded.getSourceContributions().get("s2").getObservedValues());
     }
 
     @Test
@@ -293,6 +512,175 @@ public class QuestPostgresIntegrationTest {
     }
 
     @Test
+    public void bqCraftingEventsUseDatabasePartyEligibilityAndPersistPersonalProgress() throws Exception {
+        JdbcQuestConnectionManager manager = new JdbcQuestConnectionManager(scoped);
+        JdbcQuestTransaction transaction = new JdbcQuestTransaction(manager);
+        JdbcParticipantAdministrationRepository administration = new JdbcParticipantAdministrationRepository(manager);
+        JdbcParticipantMembershipResolver memberships = new JdbcParticipantMembershipResolver(manager);
+        JdbcQuestRuntimeRepository runtimeRepository = new JdbcQuestRuntimeRepository(manager);
+        UUID source = UUID.randomUUID(), unlockedMember = UUID.randomUUID(), partyUuid = UUID.randomUUID();
+        UUID prerequisiteId = UUID.randomUUID();
+        ParticipantId partyId = ParticipantId.party(partyUuid);
+        assertEquals(ParticipantMutationStatus.APPLIED, transaction.inTransaction(() -> administration.create(
+            partyId, "Crafting party", source, 1000L)));
+        assertEquals(ParticipantMutationStatus.APPLIED, transaction.inTransaction(() -> administration.addMember(
+            partyId, source, unlockedMember, ParticipantMemberRole.MEMBER, 0L, 1100L)));
+
+        transaction.inTransaction(() -> {
+            runtimeRepository.saveProgress(new QuestProgressSnapshot(ParticipantId.player(unlockedMember),
+                prerequisiteId, 1, QuestStatus.COMPLETED, Collections.<String, TaskProgress>emptyMap(), 900L, 0));
+            return null;
+        });
+
+        Map<String, String> taskParameters = new LinkedHashMap<String, String>();
+        taskParameters.put("factType", "galaxy:item_produced");
+        taskParameters.put("progressMode", "item-vector");
+        taskParameters.put("item.count", "1");
+        taskParameters.put("item.0.registryName", "minecraft:iron_ingot");
+        taskParameters.put("item.0.meta", "0");
+        taskParameters.put("item.0.amount", "2");
+        taskParameters.put("target", "2");
+        taskParameters.put("allowCraft", "1");
+        taskParameters.put("allowSmelt", "1");
+        taskParameters.put("allowAnvil", "0");
+        taskParameters.put("allowCraftedFromStatistics", "0");
+        taskParameters.put("bq.raw", "{}");
+        TaskDefinition crafting = new TaskDefinition("craft", "bq_standard:crafting", false, taskParameters);
+        RewardDefinition reward = new RewardDefinition("reward", "bq_standard:item",
+            Collections.<String, String>emptyMap());
+        QuestDefinition quest = new QuestDefinition(UUID.randomUUID(), 1, "BQ Crafting", "", QuestLogic.AND,
+            QuestLogic.AND, Collections.singleton(prerequisiteId), Collections.singletonList(crafting),
+            Collections.singletonList(reward), RepeatPolicy.never(),
+            QuestBehavior.builder().participantScope(QuestParticipantScope.PLAYER).build());
+        StoredQuestDefinition published = new StoredQuestDefinition(quest, QuestDefinitionLifecycle.PUBLISHED,
+            "crafting-party-hash", 1L);
+        QuestCompletionQuery completions = new JdbcQuestCompletionQuery(manager);
+        QuestOnlinePlayerDirectory onlinePlayers = player -> source.equals(player) || unlockedMember.equals(player);
+        QuestEvaluationPlanner planner = new QuestEvaluationPlanner(() -> Collections.singletonList(published),
+            completions, memberships, new BqHuntPartyAssignmentPolicy(),
+            new BqPartyActiveQuestQuery("s2", completions, runtimeRepository, onlinePlayers));
+        QuestRuntimeService runtime = new QuestRuntimeService(runtimeRepository, transaction,
+            new QuestFactProjector(BqCompatibleTaskEvaluatorRegistry.firstEventDrivenBatch()), new QuestEngine());
+        Map<String, String> output = new LinkedHashMap<String, String>();
+        output.put("registryName", "minecraft:iron_ingot");
+        output.put("meta", "0");
+        output.put("damageable", "false");
+        output.put("amount", "1");
+        output.put("channel", "craft");
+        GameplayFact firstCraft = new GameplayFact("s2", "craft-party:" + UUID.randomUUID(), source,
+            "galaxy:item_produced", 1200L, output);
+
+        FactProcessingResult firstResult = runtime.apply(firstCraft, planner, 1200L);
+
+        assertEquals(FactProcessingStatus.ACCEPTED, firstResult.getStatus());
+        assertEquals(2, firstResult.getEvaluations().size());
+        QuestProgressSnapshot lockedSource = runtimeRepository.findProgress(ParticipantId.player(source),
+            quest.getId(), quest.getVersion()).get();
+        QuestProgressSnapshot eligibleMember = runtimeRepository.findProgress(ParticipantId.player(unlockedMember),
+            quest.getId(), quest.getVersion()).get();
+        assertEquals(QuestStatus.LOCKED, lockedSource.getStatus());
+        assertEquals(1L, lockedSource.getTasks().get("craft").getValue());
+        assertEquals(QuestStatus.IN_PROGRESS, eligibleMember.getStatus());
+        assertEquals(1L, eligibleMember.getTasks().get("craft").getValue());
+        assertEquals(FactProcessingStatus.DUPLICATE, runtime.apply(firstCraft, planner, 1250L).getStatus());
+        assertEquals(1L, runtimeRepository.findProgress(ParticipantId.player(unlockedMember),
+            quest.getId(), quest.getVersion()).get().getTasks().get("craft").getValue());
+
+        GameplayFact secondCraft = new GameplayFact("s2", "craft-party:" + UUID.randomUUID(), source,
+            "galaxy:item_produced", 1300L, output);
+        assertEquals(FactProcessingStatus.ACCEPTED, runtime.apply(secondCraft, planner, 1300L).getStatus());
+        assertEquals(QuestStatus.LOCKED, runtimeRepository.findProgress(ParticipantId.player(source),
+            quest.getId(), quest.getVersion()).get().getStatus());
+        QuestProgressSnapshot completedMember = runtimeRepository.findProgress(ParticipantId.player(unlockedMember),
+            quest.getId(), quest.getVersion()).get();
+        assertEquals(QuestStatus.COMPLETED, completedMember.getStatus());
+        assertEquals(2L, completedMember.getTasks().get("craft").getValue());
+        assertEquals("only the unlocked member receives a claimable reward", 1L,
+            scalar("SELECT COUNT(*) FROM galaxy_quest_reward_entitlement WHERE quest_id='" + quest.getId() + "'"));
+    }
+
+    @Test
+    public void bqCraftingStatisticsPersistEachOnlinePartyMembersPersonalSnapshot() throws Exception {
+        JdbcQuestConnectionManager manager = new JdbcQuestConnectionManager(scoped);
+        JdbcQuestTransaction transaction = new JdbcQuestTransaction(manager);
+        JdbcParticipantAdministrationRepository administration = new JdbcParticipantAdministrationRepository(manager);
+        JdbcParticipantMembershipResolver memberships = new JdbcParticipantMembershipResolver(manager);
+        JdbcQuestRuntimeRepository runtimeRepository = new JdbcQuestRuntimeRepository(manager);
+        UUID firstPlayer = UUID.randomUUID(), secondPlayer = UUID.randomUUID(), partyUuid = UUID.randomUUID();
+        ParticipantId partyId = ParticipantId.party(partyUuid);
+        assertEquals(ParticipantMutationStatus.APPLIED, transaction.inTransaction(() -> administration.create(
+            partyId, "Crafting statistics party", firstPlayer, 1000L)));
+        assertEquals(ParticipantMutationStatus.APPLIED, transaction.inTransaction(() -> administration.addMember(
+            partyId, firstPlayer, secondPlayer, ParticipantMemberRole.MEMBER, 0L, 1100L)));
+
+        Map<String, String> taskParameters = new LinkedHashMap<String, String>();
+        taskParameters.put("factType", "galaxy:item_produced");
+        taskParameters.put("progressMode", "item-vector");
+        taskParameters.put("item.count", "2");
+        taskParameters.put("item.0.registryName", "minecraft:iron_ingot");
+        taskParameters.put("item.0.meta", "0");
+        taskParameters.put("item.0.amount", "4");
+        taskParameters.put("item.1.registryName", "minecraft:gold_ingot");
+        taskParameters.put("item.1.meta", "0");
+        taskParameters.put("item.1.amount", "10");
+        taskParameters.put("target", "20");
+        taskParameters.put("allowCraft", "true");
+        taskParameters.put("allowSmelt", "true");
+        taskParameters.put("allowAnvil", "true");
+        taskParameters.put("allowCraftedFromStatistics", "true");
+        taskParameters.put("bq.raw", "{}");
+        TaskDefinition crafting = new TaskDefinition("craft", "bq_standard:crafting", false, taskParameters);
+        QuestDefinition quest = new QuestDefinition(UUID.randomUUID(), 1, "BQ Crafting Statistics", "",
+            QuestLogic.AND, QuestLogic.AND, Collections.<UUID>emptySet(), Collections.singletonList(crafting),
+            Collections.<RewardDefinition>emptyList(), RepeatPolicy.never(),
+            QuestBehavior.builder().participantScope(QuestParticipantScope.PLAYER).build());
+        StoredQuestDefinition published = new StoredQuestDefinition(quest, QuestDefinitionLifecycle.PUBLISHED,
+            "crafting-statistics-party-hash", 1L);
+        QuestCompletionQuery completions = new JdbcQuestCompletionQuery(manager);
+        QuestOnlinePlayerDirectory onlinePlayers = player -> firstPlayer.equals(player) || secondPlayer.equals(player);
+        QuestEvaluationPlanner planner = new QuestEvaluationPlanner(() -> Collections.singletonList(published),
+            completions, memberships, new BqHuntPartyAssignmentPolicy(),
+            new BqPartyActiveQuestQuery("s2", completions, runtimeRepository, onlinePlayers));
+        QuestRuntimeService runtime = new QuestRuntimeService(runtimeRepository, transaction,
+            new QuestFactProjector(BqCompatibleTaskEvaluatorRegistry.firstEventDrivenBatch()), new QuestEngine());
+
+        GameplayFact firstIron = craftingStatisticsFact(firstPlayer, "first-iron", "minecraft:iron_ingot", 5L);
+        GameplayFact firstGold = craftingStatisticsFact(firstPlayer, "first-gold", "minecraft:gold_ingot", 2L);
+        GameplayFact secondIron = craftingStatisticsFact(secondPlayer, "second-iron", "minecraft:iron_ingot", 1L);
+        GameplayFact secondGold = craftingStatisticsFact(secondPlayer, "second-gold", "minecraft:gold_ingot", 4L);
+        assertEquals(FactProcessingStatus.ACCEPTED, runtime.apply(firstIron, planner, 1200L).getStatus());
+        assertEquals(FactProcessingStatus.ACCEPTED, runtime.apply(firstGold, planner, 1201L).getStatus());
+        assertEquals(FactProcessingStatus.ACCEPTED, runtime.apply(secondIron, planner, 1202L).getStatus());
+        assertEquals(FactProcessingStatus.ACCEPTED, runtime.apply(secondGold, planner, 1203L).getStatus());
+
+        QuestProgressSnapshot firstProgress = runtimeRepository.findProgress(ParticipantId.player(firstPlayer),
+            quest.getId(), quest.getVersion()).get();
+        QuestProgressSnapshot secondProgress = runtimeRepository.findProgress(ParticipantId.player(secondPlayer),
+            quest.getId(), quest.getVersion()).get();
+        assertEquals("first member keeps only their own counters", Arrays.asList(5L, 2L),
+            firstProgress.getTasks().get("craft").getValues());
+        assertEquals("second member keeps only their own counters", Arrays.asList(1L, 4L),
+            secondProgress.getTasks().get("craft").getValues());
+        assertEquals("replaying one personal statistics fact preserves its original idempotency key",
+            FactProcessingStatus.DUPLICATE, runtime.apply(firstIron, planner, 1250L).getStatus());
+    }
+
+    private GameplayFact craftingStatisticsFact(UUID playerId, String eventId, String item, long amount) {
+        Map<String, String> attributes = new LinkedHashMap<String, String>();
+        attributes.put("registryName", item);
+        attributes.put("meta", "0");
+        attributes.put("damageable", "false");
+        attributes.put("amount", Long.toString(amount));
+        attributes.put("channel", "craft-statistics");
+        attributes.put("trigger.channel", "craft");
+        attributes.put("trigger.registryName", "minecraft:iron_ingot");
+        attributes.put("trigger.meta", "0");
+        attributes.put(BqPartyCraftingStatisticsScope.PERSONAL_ONLINE_SNAPSHOT, "true");
+        return new GameplayFact("s2", "craft-statistics:" + eventId, playerId, "galaxy:item_produced", 1200L,
+            attributes);
+    }
+
+    @Test
     public void bqMeetingObservationUsesDatabasePartyMembershipForPersonalProgress() throws Exception {
         JdbcQuestConnectionManager manager = new JdbcQuestConnectionManager(scoped);
         JdbcQuestTransaction transaction = new JdbcQuestTransaction(manager);
@@ -306,19 +694,12 @@ public class QuestPostgresIntegrationTest {
         assertEquals(ParticipantMutationStatus.APPLIED, transaction.inTransaction(() -> administration.addMember(
             partyId, observer, partyMember, ParticipantMemberRole.MEMBER, 0L, 1100L)));
 
-        Map<String, String> taskParameters = new LinkedHashMap<String, String>();
-        taskParameters.put("factType", "galaxy:nearby_entities_observed");
-        taskParameters.put("subject", "Villager");
-        taskParameters.put("range", "4");
-        taskParameters.put("amount", "1");
-        taskParameters.put("subtypes", "true");
-        taskParameters.put("ignoreNBT", "true");
-        taskParameters.put("bq.raw", "{}");
-        TaskDefinition meeting = new TaskDefinition("meeting", "bq_standard:meeting", false, taskParameters);
+        TaskDefinition smallRangeMeeting = bqMeetingTask("meeting-small", 4);
+        TaskDefinition largeRangeMeeting = bqMeetingTask("meeting-large", 8);
         RewardDefinition reward = new RewardDefinition("reward", "bq_standard:item",
             Collections.<String, String>emptyMap());
         QuestDefinition quest = new QuestDefinition(UUID.randomUUID(), 1, "BQ Meeting", "", QuestLogic.AND,
-            QuestLogic.AND, Collections.<UUID>emptySet(), Collections.singletonList(meeting),
+            QuestLogic.AND, Collections.<UUID>emptySet(), Arrays.asList(smallRangeMeeting, largeRangeMeeting),
             Collections.singletonList(reward), RepeatPolicy.never(),
             QuestBehavior.builder().participantScope(QuestParticipantScope.PLAYER).build());
         StoredQuestDefinition published = new StoredQuestDefinition(quest, QuestDefinitionLifecycle.PUBLISHED,
@@ -328,28 +709,79 @@ public class QuestPostgresIntegrationTest {
             (definition, fact, partyMembership) -> true);
         QuestRuntimeService runtime = new QuestRuntimeService(runtimeRepository, transaction,
             new QuestFactProjector(BqCompatibleTaskEvaluatorRegistry.firstEventDrivenBatch()), new QuestEngine());
-        Map<String, String> observationAttributes = new LinkedHashMap<String, String>();
-        observationAttributes.put("observedRadius", "4");
-        observationAttributes.put("nearbyEntity.count", "1");
-        observationAttributes.put("nearbyEntity.0.subject", "Villager");
-        GameplayFact observation = new GameplayFact("s2", "bq-meeting-party:" + UUID.randomUUID(), observer,
-            "galaxy:nearby_entities_observed", 1200L, observationAttributes);
+        GameplayFact oversizedSnapshot = bqMeetingSnapshot(observer, "outside-small-range", 1200L,
+            new String[][] { { "5", "5.4" } });
+        FactProcessingResult partial = runtime.apply(oversizedSnapshot, planner, 1200L);
 
-        FactProcessingResult result = runtime.apply(observation, planner, 1200L);
+        assertEquals(FactProcessingStatus.ACCEPTED, partial.getStatus());
+        assertEquals(2, partial.getEvaluations().size());
+        for (UUID player : Arrays.asList(observer, partyMember)) {
+            QuestProgressSnapshot progress = runtimeRepository.findProgress(ParticipantId.player(player),
+                quest.getId(), quest.getVersion()).get();
+            assertFalse("the merged radius must not complete the smaller-range Task",
+                progress.getTasks().get("meeting-small").isComplete());
+            assertTrue(progress.getTasks().get("meeting-large").isComplete());
+            assertFalse(QuestStatus.COMPLETED == progress.getStatus());
+        }
+        assertEquals("no reward is created while the smaller range task is still incomplete", 0L,
+            scalar("SELECT COUNT(*) FROM galaxy_quest_reward_entitlement WHERE quest_id='" + quest.getId() + "'"));
+        assertEquals(FactProcessingStatus.DUPLICATE, runtime.apply(oversizedSnapshot, planner, 1250L).getStatus());
 
+        GameplayFact taskRangeIntersection = bqMeetingSnapshot(observer, "intersects-small-range", 1300L,
+            new String[][] { { "5", "5.4" }, { "4.2", "4.6" } });
+        FactProcessingResult result = runtime.apply(taskRangeIntersection, planner, 1300L);
         assertEquals(FactProcessingStatus.ACCEPTED, result.getStatus());
-        assertEquals(2, result.getEvaluations().size());
         for (UUID player : Arrays.asList(observer, partyMember)) {
             QuestProgressSnapshot progress = runtimeRepository.findProgress(ParticipantId.player(player),
                 quest.getId(), quest.getVersion()).get();
             assertEquals(QuestStatus.COMPLETED, progress.getStatus());
-            assertTrue(progress.getTasks().get("meeting").isComplete());
+            assertTrue(progress.getTasks().get("meeting-small").isComplete());
+            assertTrue(progress.getTasks().get("meeting-large").isComplete());
         }
         assertEquals(2L, scalar("SELECT COUNT(*) FROM galaxy_quest_reward_entitlement WHERE quest_id='"
             + quest.getId() + "'"));
-        assertEquals(FactProcessingStatus.DUPLICATE, runtime.apply(observation, planner, 1300L).getStatus());
+        assertEquals(FactProcessingStatus.DUPLICATE,
+            runtime.apply(taskRangeIntersection, planner, 1400L).getStatus());
         assertEquals(2L, scalar("SELECT COUNT(*) FROM galaxy_quest_reward_entitlement WHERE quest_id='"
             + quest.getId() + "'"));
+    }
+
+    private static TaskDefinition bqMeetingTask(String key, int range) {
+        Map<String, String> parameters = new LinkedHashMap<String, String>();
+        parameters.put("factType", "galaxy:nearby_entities_observed");
+        parameters.put("subject", "Villager");
+        parameters.put("range", Integer.toString(range));
+        parameters.put("amount", "1");
+        parameters.put("subtypes", "true");
+        parameters.put("ignoreNBT", "true");
+        parameters.put("bq.raw", "{}");
+        return new TaskDefinition(key, "bq_standard:meeting", false, parameters);
+    }
+
+    private static GameplayFact bqMeetingSnapshot(UUID observer, String eventId, long occurredAt,
+        String[][] entityXBounds) {
+        Map<String, String> attributes = new LinkedHashMap<String, String>();
+        attributes.put("observedRadius", "8");
+        attributes.put("nearbyEntity.count", Integer.toString(entityXBounds.length));
+        attributes.put("observer.minX", "-0.3");
+        attributes.put("observer.minY", "0");
+        attributes.put("observer.minZ", "-0.3");
+        attributes.put("observer.maxX", "0.3");
+        attributes.put("observer.maxY", "1.8");
+        attributes.put("observer.maxZ", "0.3");
+        for (int i = 0; i < entityXBounds.length; i++) {
+            String prefix = "nearbyEntity." + i + ".";
+            attributes.put(prefix + "subject", "Villager");
+            attributes.put(prefix + "subjectAliases", "Villager");
+            attributes.put(prefix + "minX", entityXBounds[i][0]);
+            attributes.put(prefix + "minY", "0.1");
+            attributes.put(prefix + "minZ", "-0.2");
+            attributes.put(prefix + "maxX", entityXBounds[i][1]);
+            attributes.put(prefix + "maxY", "1.9");
+            attributes.put(prefix + "maxZ", "0.2");
+        }
+        return new GameplayFact("s2", "bq-meeting-party:" + eventId, observer,
+            "galaxy:nearby_entities_observed", occurredAt, attributes);
     }
 
     @Test
@@ -1510,4 +1942,28 @@ public class QuestPostgresIntegrationTest {
             return new String(output.toByteArray(), StandardCharsets.UTF_8);
         }
     }
+
+    private static String catalogRevisionMigration() throws Exception {
+        java.nio.file.Path migration = Paths.get("ops/sql/migrations/20261009_001_add_quest_definition_catalog_revision.sql");
+        if (!Files.exists(migration)) migration = Paths.get("../ops/sql/migrations/20261009_001_add_quest_definition_catalog_revision.sql");
+        assertTrue("reviewed quest catalog revision migration must exist", Files.exists(migration));
+        return new String(Files.readAllBytes(migration), StandardCharsets.UTF_8);
+    }
+
+    private static String consumptionDetectBatchMigration() throws Exception {
+        java.nio.file.Path migration = Paths.get("ops/sql/migrations/20261010_002_add_quest_consumption_detect_batch.sql");
+        if (!Files.exists(migration)) migration = Paths.get("../ops/sql/migrations/20261010_002_add_quest_consumption_detect_batch.sql");
+        assertTrue("reviewed consumption Detect batch migration must exist", Files.exists(migration));
+        return new String(Files.readAllBytes(migration), StandardCharsets.UTF_8);
+    }
+
+    private static String consumptionDetectBatchVersionPinMigration() throws Exception {
+        java.nio.file.Path migration = Paths.get(
+            "ops/sql/migrations/20261011_001_pin_consumption_detect_batch_across_versions.sql");
+        if (!Files.exists(migration)) migration = Paths.get(
+            "../ops/sql/migrations/20261011_001_pin_consumption_detect_batch_across_versions.sql");
+        assertTrue("Detect version pin migration must exist", Files.exists(migration));
+        return new String(Files.readAllBytes(migration), StandardCharsets.UTF_8);
+    }
+
 }

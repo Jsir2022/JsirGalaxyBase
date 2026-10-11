@@ -25,7 +25,9 @@ public final class QuestCompletionRewardDeliveryHandler implements RewardDeliver
         QuestCompletionRewardPort.Result result = completion.complete(lease.getEntitlementKey(),
             lease.getParticipantId().getId(), target, clock.currentTimeMillis());
         if (result == QuestCompletionRewardPort.Result.TARGET_NOT_FOUND) {
-            return RewardDeliveryOutcome.failed("target-quest-not-published:" + target, false);
+            // BetterQuesting's RewardQuestCompletion is a no-op when the target is absent.
+            // Confirm the entitlement so an absent target does not become a permanent recovery item.
+            return RewardDeliveryOutcome.delivered();
         }
         if (result == QuestCompletionRewardPort.Result.TARGET_SCOPE_UNAVAILABLE) {
             return RewardDeliveryOutcome.failed("target-scope-unavailable:" + target, false);

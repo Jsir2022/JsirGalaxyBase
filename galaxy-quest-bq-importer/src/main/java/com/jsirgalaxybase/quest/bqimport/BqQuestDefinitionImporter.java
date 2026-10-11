@@ -50,7 +50,7 @@ public final class BqQuestDefinitionImporter {
             taskSpecs.add(spec);
             String type = spec.getTypeId();
             Map<String, String> parameters = standardCodec.taskParameters(spec, gson.toJson(task));
-            tasks.add(new TaskDefinition(spec.getKey(), type, type.contains("optional"), parameters));
+            tasks.add(new TaskDefinition(spec.getKey(), type, BqStandardCodec.isOptionalTaskType(type), parameters));
         }
 
         List<RewardDefinition> rewards = new ArrayList<RewardDefinition>();

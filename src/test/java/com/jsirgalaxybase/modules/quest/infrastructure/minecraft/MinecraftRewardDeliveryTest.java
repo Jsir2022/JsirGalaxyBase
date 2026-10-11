@@ -23,13 +23,17 @@ import org.junit.Test;
 
 import com.jsirgalaxybase.quest.core.CommandRewardInvocation;
 import com.jsirgalaxybase.quest.core.ParticipantId;
+import com.jsirgalaxybase.quest.core.QuestDefinition;
+import com.jsirgalaxybase.quest.core.QuestLogic;
+import com.jsirgalaxybase.quest.core.QuestTransaction;
+import com.jsirgalaxybase.quest.core.RepeatPolicy;
 import com.jsirgalaxybase.quest.core.RewardDefinition;
-import com.jsirgalaxybase.quest.core.RewardDeliveryLease;
 import com.jsirgalaxybase.quest.core.RewardDeliveryBatchResult;
+import com.jsirgalaxybase.quest.core.RewardDeliveryLease;
 import com.jsirgalaxybase.quest.core.RewardDeliveryOutcome;
 import com.jsirgalaxybase.quest.core.RewardDeliveryRepository;
 import com.jsirgalaxybase.quest.core.RewardDeliveryWorker;
-import com.jsirgalaxybase.quest.core.QuestTransaction;
+import com.jsirgalaxybase.quest.core.RewardEntitlement;
 
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.InventoryPlayer;
@@ -231,6 +235,45 @@ public class MinecraftRewardDeliveryTest {
         assertEquals(1, negativeCount.get(0).stackSize);
     }
 
+    @Test public void nonPositiveChoiceRewardIsNoOpAndCompletesItsDeliveryMarker() {
+        Item item = new Item();
+        UUID playerId = UUID.randomUUID();
+        FakePlayerState player = new FakePlayerState(2);
+        RewardDefinition reward = new RewardDefinition("choice", "bq_standard:choice", choiceParameters(0));
+        RewardDeliveryLease negativeLease = new RewardDeliveryLease("negative-choice", ParticipantId.player(playerId),
+            new RewardDefinition("choice", "bq_standard:choice", choiceParameters(-3)), 1, "worker", 10L);
+        RewardDeliveryLease lease = new RewardDeliveryLease("zero-choice", ParticipantId.player(playerId), reward,
+            1, "worker", 10L);
+        MinecraftItemRewardDeliveryHandler handler = MinecraftItemRewardDeliveryHandler.forTest(
+            "bq_standard:choice", ignored -> player, name -> "test:choice".equals(name) ? item : null);
+
+        assertTrue(handler.rewardStacks(lease, null).isEmpty());
+        assertTrue(handler.rewardStacks(negativeLease, null).isEmpty());
+        RewardDeliveryOutcome first = handler.deliver(lease);
+
+        assertTrue(first.getError(), first.isDelivered());
+        assertEquals(0, countItem(player.inventory, item));
+        assertTrue(player.persisted.getCompoundTag(QuestRewardMarker.ROOT)
+            .getBoolean(QuestRewardMarker.key("zero-choice")));
+        assertEquals(1, player.flushCount);
+
+        RewardDeliveryOutcome replay = handler.deliver(lease);
+
+        assertTrue(replay.isDelivered());
+        assertEquals(0, countItem(player.inventory, item));
+        assertEquals(1, player.flushCount);
+    }
+
+    private static Map<String, String> choiceParameters(int amount) {
+        Map<String, String> parameters = new LinkedHashMap<String, String>();
+        parameters.put("item.count", "1");
+        parameters.put("choice.index", "0");
+        parameters.put("item.0.registryName", "test:choice");
+        parameters.put("item.0.amount", Integer.toString(amount));
+        parameters.put("item.0.meta", "0");
+        return parameters;
+    }
+
     @Test public void rewardOverflowUsesBqItemSpecificMaximumStackSize() {
         Item item = new Item().setMaxStackSize(128);
         UUID playerId = UUID.randomUUID();
@@ -358,6 +401,56 @@ public class MinecraftRewardDeliveryTest {
         assertEquals(Collections.singletonList(6), stackSizes(afterRestart.dropped));
         assertTrue(afterRestart.persisted.getCompoundTag(QuestRewardMarker.ROOT).getBoolean(marker));
         assertFalse(afterRestart.persisted.hasKey(QuestRewardMarker.PROGRESS_ROOT, 10));
+    }
+
+    @Test public void delayedPreviousCycleItemRewardRecoveryDoesNotReuseNextCycleMarker()
+        throws IOException, ReflectiveOperationException {
+        Item item = registerTestItemForNbtRoundTrip();
+        Item filler = registerTestItemForNbtRoundTrip();
+        UUID playerId = UUID.randomUUID();
+        Map<String, String> parameters = new LinkedHashMap<String, String>();
+        parameters.put("item.count", "1");
+        parameters.put("item.0.registryName", "test:repeat-reward");
+        parameters.put("item.0.amount", "70");
+        parameters.put("item.0.meta", "0");
+        RewardDefinition reward = new RewardDefinition("repeat-item", "bq_standard:item", parameters);
+        QuestDefinition quest = new QuestDefinition(UUID.randomUUID(), 1, "Repeated item reward", "",
+            QuestLogic.AND, QuestLogic.AND, Collections.<UUID>emptySet(), Collections.emptyList(),
+            Collections.singletonList(reward), RepeatPolicy.after(1000L, true));
+        RewardEntitlement previousCycle = new RewardEntitlement(ParticipantId.player(playerId), quest, reward, 0);
+        RewardEntitlement currentCycle = new RewardEntitlement(ParticipantId.player(playerId), quest, reward, 1);
+        RewardDeliveryLease previousLease = itemLease(previousCycle, 1, "server-a");
+        RewardDeliveryLease currentLease = itemLease(currentCycle, 1, "server-b");
+        assertFalse(previousLease.getEntitlementKey().equals(currentLease.getEntitlementKey()));
+
+        FakePlayerState beforeRestart = new FakePlayerState(36);
+        for (int slot = 0; slot < 35; slot++) beforeRestart.inventory.set(slot, new ItemStack(filler, 64));
+        beforeRestart.failNextDrop = true;
+        RewardDeliveryOutcome partial = itemHandler(playerId, beforeRestart, "test:repeat-reward", item)
+            .deliver(previousLease);
+        assertTrue(partial.isRetryable());
+        FakePlayerState afterRestart = reloadFromCompressedPlayerNbt(beforeRestart);
+
+        MinecraftItemRewardDeliveryHandler restartedHandler = itemHandler(
+            playerId, afterRestart, "test:repeat-reward", item);
+        RewardDeliveryOutcome currentDelivered = restartedHandler.deliver(currentLease);
+        String previousMarker = QuestRewardMarker.key(previousCycle.getEntitlementKey());
+        String currentMarker = QuestRewardMarker.key(currentCycle.getEntitlementKey());
+        assertTrue(currentDelivered.getError(), currentDelivered.isDelivered());
+        assertTrue(afterRestart.persisted.getCompoundTag(QuestRewardMarker.ROOT).getBoolean(currentMarker));
+        assertFalse(afterRestart.persisted.getCompoundTag(QuestRewardMarker.ROOT).getBoolean(previousMarker));
+        assertEquals(64, QuestRewardMarker.granted(afterRestart.persisted
+            .getCompoundTag(QuestRewardMarker.PROGRESS_ROOT).getCompoundTag(previousMarker), 0));
+
+        RewardDeliveryOutcome previousRecovered = restartedHandler.deliver(itemLease(previousCycle, 2, "server-c"));
+
+        assertTrue(previousRecovered.getError(), previousRecovered.isDelivered());
+        assertTrue(afterRestart.persisted.getCompoundTag(QuestRewardMarker.ROOT).getBoolean(currentMarker));
+        assertTrue(afterRestart.persisted.getCompoundTag(QuestRewardMarker.ROOT).getBoolean(previousMarker));
+        assertFalse(afterRestart.persisted.hasKey(QuestRewardMarker.PROGRESS_ROOT, 10));
+        assertEquals(64, countItem(afterRestart.inventory, item));
+        assertEquals(Arrays.asList(64, 6, 6), stackSizes(afterRestart.dropped));
+        assertEquals(140, countItem(afterRestart.inventory, item) + totalStackSize(afterRestart.dropped));
     }
 
     @Test public void failedPlayerSaveRollsBackInventoryAndMarkerThenCanRetry() {
@@ -541,6 +634,11 @@ public class MinecraftRewardDeliveryTest {
         return itemLease(entitlement, playerId, registryName, amount, 1, "worker");
     }
 
+    private static RewardDeliveryLease itemLease(RewardEntitlement entitlement, int attempt, String workerId) {
+        return new RewardDeliveryLease(entitlement.getEntitlementKey(), entitlement.getParticipantId(),
+            entitlement.getReward(), attempt, workerId, 10L);
+    }
+
     private static RewardDeliveryLease xpLease(String entitlement, UUID playerId, int amount, String unit) {
         Map<String, String> parameters = new LinkedHashMap<String, String>();
         parameters.put("amount", Integer.toString(amount));
@@ -620,6 +718,12 @@ public class MinecraftRewardDeliveryTest {
     private static int countItem(List<ItemStack> inventory, Item item) {
         int count = 0;
         for (ItemStack stack : inventory) if (stack != null && stack.getItem() == item) count += stack.stackSize;
+        return count;
+    }
+
+    private static int totalStackSize(List<ItemStack> stacks) {
+        int count = 0;
+        for (ItemStack stack : stacks) count += stack.stackSize;
         return count;
     }
 

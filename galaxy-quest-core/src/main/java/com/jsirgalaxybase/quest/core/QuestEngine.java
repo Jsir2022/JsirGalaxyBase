@@ -51,6 +51,31 @@ public final class QuestEngine {
     public QuestEvaluation evaluate(ParticipantMembership membership, QuestDefinition definition,
         QuestProgressSnapshot previous, Map<String, TaskProgress> observations, Set<UUID> completedPrerequisites,
         long now, boolean holdCompletedCycle, boolean bqPartyProgressFanout, long repeatAnchorMillis) {
+        return evaluate(membership, definition, previous, observations, completedPrerequisites, now,
+            holdCompletedCycle, bqPartyProgressFanout, repeatAnchorMillis, false);
+    }
+
+    /**
+     * Applies Task progress during a quest-level Detect batch without settling Quest completion or rewards until
+     * the batch has reached its final task.
+     */
+    public QuestEvaluation evaluate(ParticipantMembership membership, QuestDefinition definition,
+        QuestProgressSnapshot previous, Map<String, TaskProgress> observations, Set<UUID> completedPrerequisites,
+        long now, boolean holdCompletedCycle, boolean bqPartyProgressFanout, long repeatAnchorMillis,
+        boolean deferQuestCompletion) {
+        return evaluate(membership, definition, previous, observations, completedPrerequisites, now,
+            holdCompletedCycle, bqPartyProgressFanout, repeatAnchorMillis, deferQuestCompletion, false);
+    }
+
+    /**
+     * The final Detect-batch settlement supplies whether a task selected as incomplete at batch start has since
+     * completed. Its progress was intentionally applied while Quest completion was deferred, so it is no longer a
+     * transition in the settlement snapshot itself.
+     */
+    public QuestEvaluation evaluate(ParticipantMembership membership, QuestDefinition definition,
+        QuestProgressSnapshot previous, Map<String, TaskProgress> observations, Set<UUID> completedPrerequisites,
+        long now, boolean holdCompletedCycle, boolean bqPartyProgressFanout, long repeatAnchorMillis,
+        boolean deferQuestCompletion, boolean simultaneousDetectTaskCompleted) {
         ParticipantId participantId = membership.getParticipantId();
         if (previous != null && !previous.getParticipantId().equals(participantId)) {
             throw new IllegalArgumentException("progress participant does not match evaluation participant");
@@ -74,15 +99,17 @@ public final class QuestEngine {
         Map<String, TaskProgress> merged = new LinkedHashMap<String, TaskProgress>();
         int requiredCount = 0;
         int completeCount = 0;
+        boolean taskCompletedDuringEvaluation = false;
         for (TaskDefinition task : definition.getTasks()) {
             TaskProgress old = progressBase == null ? null : progressBase.getTasks().get(task.getKey());
             TaskProgress observed = observations == null ? null : observations.get(task.getKey());
             TaskProgress value = old == null ? TaskProgress.empty(task) : old;
+            boolean wasComplete = value.isComplete();
             if (acceptsProgress && observed != null && !frozenCompletedCycle) {
-                if (isNonConsumingRetrievalSnapshot(task)) {
-                    // BQ groupDetect resets every item component before a party-wide scan. Without it,
-                    // individually satisfied requirements remain latched while partial requirements are
-                    // recomputed from the current inventory. Task completion itself is always latched.
+                if (isNonConsumingSnapshotTask(task)) {
+                    // BQ groupDetect resets every component before a party-wide item/fluid scan. Without
+                    // it, individually satisfied requirements remain latched while partial requirements
+                    // are recomputed from the current inventory. Task completion itself is always latched.
                     boolean groupDetect = QuestBooleanParameter.parse(
                         task.getParameters().get("groupDetect"), false);
                     value = groupDetect
@@ -93,6 +120,7 @@ public final class QuestEngine {
                     value = value.merge(observed);
                 }
             }
+            if (!wasComplete && value.isComplete()) taskCompletedDuringEvaluation = true;
             merged.put(task.getKey(), value);
             if (!task.isOptional()) {
                 requiredCount++;
@@ -102,9 +130,11 @@ public final class QuestEngine {
 
         QuestStatus priorStatus = progressBase == null ? null : progressBase.getStatus();
         boolean alreadyComplete = priorStatus == QuestStatus.COMPLETED;
-        boolean completed = alreadyComplete || acceptsQuestCompletion
+        boolean completed = alreadyComplete || !deferQuestCompletion && acceptsQuestCompletion
             && definition.getTaskLogic().satisfied(completeCount, requiredCount);
-        if (!completed && acceptsQuestCompletion && definition.getBehavior().isSimultaneous() && completeCount > 0) {
+        if (!completed && !deferQuestCompletion && acceptsQuestCompletion
+            && definition.getBehavior().isSimultaneous()
+            && (taskCompletedDuringEvaluation || simultaneousDetectTaskCompleted)) {
             merged.clear();
             for (TaskDefinition task : definition.getTasks()) merged.put(task.getKey(), TaskProgress.empty(task));
         }
@@ -147,9 +177,13 @@ public final class QuestEngine {
         return count;
     }
 
-    private static boolean isNonConsumingRetrievalSnapshot(TaskDefinition task) {
+    private static boolean isNonConsumingSnapshotTask(TaskDefinition task) {
         String type = task.getTypeId();
-        return ("bq_standard:retrieval".equals(type) || "bq_standard:optional_retrieval".equals(type))
+        boolean inventorySnapshot = "bq_standard:retrieval".equals(type)
+            || "bq_standard:optional_retrieval".equals(type);
+        boolean fluidSnapshot = "bq_standard:fluid".equals(type)
+            && "galaxy:fluid_inventory_observed".equals(task.getParameters().get("factType"));
+        return (inventorySnapshot || fluidSnapshot)
             && !QuestBooleanParameter.parse(task.getParameters().get("consume"), false);
     }
 

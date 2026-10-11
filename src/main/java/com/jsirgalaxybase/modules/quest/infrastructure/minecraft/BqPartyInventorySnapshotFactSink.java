@@ -12,6 +12,9 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import com.jsirgalaxybase.GalaxyBase;
 import com.jsirgalaxybase.quest.core.BqPartyInventorySnapshotAggregator;
+import com.jsirgalaxybase.quest.core.BqPartyFluidInventorySnapshotAggregator;
+import com.jsirgalaxybase.quest.core.FluidObservationAttributeCodec;
+import com.jsirgalaxybase.quest.core.FluidObservationEntry;
 import com.jsirgalaxybase.quest.core.GameplayFact;
 import com.jsirgalaxybase.quest.core.InventoryObservationAttributeCodec;
 import com.jsirgalaxybase.quest.core.InventoryObservationEntry;
@@ -20,6 +23,7 @@ import com.jsirgalaxybase.quest.core.ParticipantMembership;
 import com.jsirgalaxybase.quest.core.ParticipantMembershipResolver;
 import com.jsirgalaxybase.quest.core.ParticipantType;
 import com.jsirgalaxybase.quest.core.QuestClock;
+import com.jsirgalaxybase.quest.core.QuestEvaluationRequest;
 import com.jsirgalaxybase.quest.core.QuestObservationPlan;
 import com.jsirgalaxybase.quest.core.QuestObservationPlanProvider;
 import com.jsirgalaxybase.quest.core.QuestTransaction;
@@ -87,20 +91,31 @@ public final class BqPartyInventorySnapshotFactSink implements QuestFactSink {
 
     @Override public void accept(final GameplayFact fact) {
         if (!isPartyInventoryObservation(fact) || !observesBqPartyInventory()) {
-            delegate.accept(fact);
+            acceptPersonalFacts(fact);
             return;
         }
         final UUID sessionId = sessionId(fact);
         if (sessionId == null) {
-            delegate.accept(fact);
+            acceptPersonalFacts(fact);
             return;
         }
         transaction.inTransaction(() -> process(fact, sessionId, false));
     }
 
+    @Override public void accept(final GameplayFact fact, final List<QuestEvaluationRequest> eventTimeRequests) {
+        if (!isPartyInventoryObservation(fact) || !observesBqPartyInventory()) {
+            acceptPersonalFacts(fact, eventTimeRequests);
+            return;
+        }
+        // Crafting facts do not enter the inventory-session path; if a future caller does, keep the existing
+        // snapshot lifecycle and do not silently reinterpret its already-frozen Quest eligibility.
+        if (eventTimeRequests == null) throw new IllegalArgumentException("event-time requests are required");
+        accept(fact);
+    }
+
     @Override public boolean beginInventorySession(final GameplayFact fact) {
         if (!isPartyInventoryObservation(fact) || !observesBqPartyInventory()) {
-            delegate.accept(fact);
+            acceptPersonalFacts(fact);
             return true;
         }
         final UUID sessionId = sessionId(fact);
@@ -137,9 +152,20 @@ public final class BqPartyInventorySnapshotFactSink implements QuestFactSink {
         }
 
         cleanupExpiredIfDue();
-        delegate.accept(fact);
+        acceptPersonalFacts(fact);
         for (ParticipantId party : currentParties) publishPartyAggregate(fact, party, sessionId);
         return true;
+    }
+
+    private void acceptPersonalFacts(GameplayFact fact) {
+        acceptPersonalFacts(fact, null);
+    }
+
+    private void acceptPersonalFacts(GameplayFact fact, List<QuestEvaluationRequest> eventTimeRequests) {
+        if (eventTimeRequests == null) delegate.accept(fact);
+        else delegate.accept(fact, eventTimeRequests);
+        GameplayFact fluid = facts.fluidInventoryProjection(fact);
+        if (fluid != null) delegate.accept(fluid);
     }
 
     private void publishPartyAggregate(GameplayFact trigger, ParticipantId party, UUID triggerSession) {
@@ -155,15 +181,33 @@ public final class BqPartyInventorySnapshotFactSink implements QuestFactSink {
         if (triggerLease == null || !triggerSession.equals(triggerLease.getSessionId())
             || !trigger.getSourceServer().equals(triggerLease.getSourceServer())) return;
 
-        Map<UUID, List<InventoryObservationEntry>> decoded = new HashMap<UUID, List<InventoryObservationEntry>>();
-        InventoryObservationAttributeCodec codec = new InventoryObservationAttributeCodec();
-        for (UUID memberId : memberOrder) {
-            QuestInventorySnapshotLease lease = active.get(memberId);
-            if (lease != null) decoded.put(memberId, codec.decode(lease.getAttributes()));
+        if (trigger.getAttributes().containsKey(InventoryObservationAttributeCodec.COUNT)) {
+            Map<UUID, List<InventoryObservationEntry>> decoded = new HashMap<UUID, List<InventoryObservationEntry>>();
+            InventoryObservationAttributeCodec codec = new InventoryObservationAttributeCodec();
+            for (UUID memberId : memberOrder) {
+                QuestInventorySnapshotLease lease = active.get(memberId);
+                if (lease != null && lease.getAttributes().containsKey(InventoryObservationAttributeCodec.COUNT)) {
+                    decoded.put(memberId, codec.decode(lease.getAttributes()));
+                }
+            }
+            List<InventoryObservationEntry> aggregate = new BqPartyInventorySnapshotAggregator()
+                .aggregate(memberOrder, decoded);
+            delegate.accept(facts.bqPartyInventoryObserved(trigger, party.getId(), aggregate));
         }
-        List<InventoryObservationEntry> aggregate = new BqPartyInventorySnapshotAggregator()
-            .aggregate(memberOrder, decoded);
-        delegate.accept(facts.bqPartyInventoryObserved(trigger, party.getId(), aggregate));
+        if (trigger.getAttributes().containsKey(FluidObservationAttributeCodec.COUNT)) {
+            Map<UUID, List<FluidObservationEntry>> decoded =
+                new HashMap<UUID, List<FluidObservationEntry>>();
+            FluidObservationAttributeCodec codec = new FluidObservationAttributeCodec();
+            for (UUID memberId : memberOrder) {
+                QuestInventorySnapshotLease lease = active.get(memberId);
+                if (lease != null && lease.getAttributes().containsKey(FluidObservationAttributeCodec.COUNT)) {
+                    decoded.put(memberId, codec.decode(lease.getAttributes()));
+                }
+            }
+            List<FluidObservationEntry> aggregate = new BqPartyFluidInventorySnapshotAggregator()
+                .aggregate(memberOrder, decoded);
+            delegate.accept(facts.bqPartyFluidInventoryObserved(trigger, party.getId(), aggregate));
+        }
     }
 
     private void cleanupExpiredIfDue() {

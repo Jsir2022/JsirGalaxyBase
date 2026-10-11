@@ -37,12 +37,20 @@ public final class QuestRuntimeService {
 
     public FactProcessingResult apply(final GameplayFact fact, final List<QuestEvaluationRequest> requests,
         final long now) {
+        return apply(fact, requests, null, now);
+    }
+
+    /** Applies a server-captured event-time eligibility snapshot while retaining normal unlock reconciliation. */
+    public FactProcessingResult apply(final GameplayFact fact, final List<QuestEvaluationRequest> requests,
+        final QuestEvaluationRequestProvider provider, final long now) {
         Objects.requireNonNull(fact, "fact");
         if (requests == null || requests.isEmpty()) throw new IllegalArgumentException("requests must not be empty");
         return transaction.inTransaction(new QuestTransaction.Work<FactProcessingResult>() {
             @Override
             public FactProcessingResult execute() {
-                return QuestRuntimeService.this.execute(fact, requests, null, now);
+                List<QuestEvaluationRequest> snapshot = Collections.unmodifiableList(
+                    new ArrayList<QuestEvaluationRequest>(requests));
+                return QuestRuntimeService.this.execute(fact, snapshot, provider, now);
             }
         });
     }
@@ -122,6 +130,85 @@ public final class QuestRuntimeService {
         });
     }
 
+    /**
+     * Settles one persisted Quest after its consuming Detect batch has ended. The active-batch fence and this
+     * completion/reward write must share the caller's transaction so a crash cannot expose a half-finalized batch.
+     */
+    public FactProcessingResult reconcileAfterConsumptionDetectBatch(final QuestEvaluationRequest request,
+        final QuestEvaluationRequestProvider provider, final long now) {
+        return reconcileAfterConsumptionDetectBatch(request, provider, now, -1);
+    }
+
+    public FactProcessingResult reconcileAfterConsumptionDetectBatch(final QuestEvaluationRequest request,
+        final QuestEvaluationRequestProvider provider, final long now, final int expectedCycle) {
+        return reconcileAfterConsumptionDetectBatch(request, provider, now, expectedCycle,
+            Collections.<String>emptyList());
+    }
+
+    public FactProcessingResult reconcileAfterConsumptionDetectBatch(final QuestEvaluationRequest request,
+        final QuestEvaluationRequestProvider provider, final long now, final int expectedCycle,
+        final List<String> detectTaskKeys) {
+        Objects.requireNonNull(request, "request");
+        Objects.requireNonNull(provider, "provider");
+        Objects.requireNonNull(detectTaskKeys, "detectTaskKeys");
+        return transaction.inTransaction(() -> {
+            QuestDefinition definition = request.getDefinition();
+            ParticipantId participant = request.getMembership().getParticipantId();
+            if (repository.hasActiveConsumptionDetectBatch(participant, definition.getId(), definition.getVersion())) {
+                throw new IllegalStateException("consumption Detect batch is still active");
+            }
+            QuestProgressSnapshot previous = repository.findProgress(participant, definition.getId(),
+                definition.getVersion()).orElse(null);
+            int cycle = previous == null ? 0 : previous.getCycle();
+            boolean holdCompletedCycle = repository.hasPendingConsumptionSubmission(participant, definition.getId(),
+                definition.getVersion(), cycle);
+            long repeatAnchorMillis = previous == null ? 0L : previous.getCompletedAt();
+            if (!holdCompletedCycle && previous != null && previous.getStatus() == QuestStatus.COMPLETED
+                && definition.getRepeatPolicy().isRepeatable()) {
+                holdCompletedCycle = repository.hasClaimableRewardEntitlement(participant, definition.getId(),
+                    definition.getVersion(), cycle);
+                if (!holdCompletedCycle) repeatAnchorMillis = repository.findRepeatCycleAnchorMillis(participant,
+                    definition.getId(), definition.getVersion(), cycle, previous.getCompletedAt());
+            }
+            boolean startsExpectedNextCycle = expectedCycle == cycle + 1 && previous != null
+                && previous.getStatus() == QuestStatus.COMPLETED
+                && engine.beginsNextCycle(definition, previous, now, holdCompletedCycle, repeatAnchorMillis);
+            if (expectedCycle >= 0 && cycle != expectedCycle && !startsExpectedNextCycle) {
+                throw new IllegalStateException("Quest cycle changed before consumption Detect settlement");
+            }
+            boolean simultaneousDetectTaskCompleted = false;
+            if (previous != null && !detectTaskKeys.isEmpty()) {
+                for (TaskDefinition task : definition.getTasks()) {
+                    if (!detectTaskKeys.contains(task.getKey())) continue;
+                    TaskProgress taskProgress = previous.getTasks().get(task.getKey());
+                    if (taskProgress != null && taskProgress.isComplete()) {
+                        simultaneousDetectTaskCompleted = true;
+                        break;
+                    }
+                }
+            }
+            QuestEvaluation evaluation = engine.evaluate(request.getMembership(), definition, previous, null,
+                request.getCompletedPrerequisites(), now, holdCompletedCycle, false, repeatAnchorMillis, false,
+                simultaneousDetectTaskCompleted);
+            if (expectedCycle >= 0 && evaluation.getProgress().getCycle() != expectedCycle) throw new IllegalStateException(
+                "Quest cycle did not reach the consumption Detect batch cycle");
+            repository.saveProgress(evaluation.getProgress());
+            List<QuestEvaluation> evaluations = new ArrayList<QuestEvaluation>();
+            evaluations.add(evaluation);
+            Set<RewardEntitlement> entitlements = new LinkedHashSet<RewardEntitlement>();
+            addEntitlements(evaluation, entitlements);
+            Deque<CompletedQuest> newlyCompleted = new ArrayDeque<CompletedQuest>();
+            if ((previous == null || previous.getStatus() != QuestStatus.COMPLETED)
+                && evaluation.getProgress().getStatus() == QuestStatus.COMPLETED
+                && participant.getType() == ParticipantType.PLAYER) {
+                newlyCompleted.addLast(new CompletedQuest(participant, definition.getId()));
+            }
+            reconcileNewlyUnlockedLockedProgress(provider, newlyCompleted, evaluations, entitlements, now);
+            repository.insertEntitlementsIfAbsent(entitlements);
+            return FactProcessingResult.accepted(evaluations);
+        });
+    }
+
     private FactProcessingResult execute(GameplayFact fact, List<QuestEvaluationRequest> requests,
         QuestEvaluationRequestProvider provider, long now) {
         if (!repository.recordFactIfAbsent(fact)) return FactProcessingResult.duplicate();
@@ -135,6 +222,8 @@ public final class QuestRuntimeService {
             long repeatAnchorMillis = previous == null ? 0L : previous.getCompletedAt();
             boolean holdCompletedCycle = repository.hasPendingConsumptionSubmission(participant, definition.getId(),
                 definition.getVersion(), cycle);
+            boolean deferQuestCompletion = repository.hasActiveConsumptionDetectBatch(participant,
+                definition.getId(), definition.getVersion());
             if (!holdCompletedCycle && previous != null && previous.getStatus() == QuestStatus.COMPLETED
                 && definition.getRepeatPolicy().isRepeatable()) {
                 holdCompletedCycle = repository.hasClaimableRewardEntitlement(participant, definition.getId(),
@@ -149,7 +238,7 @@ public final class QuestRuntimeService {
             Map<String, TaskProgress> observations = new LinkedHashMap<String, TaskProgress>(projector
                 .project(definition, observationBase, request.getMembership(), request.getFactMembership(), fact));
             prepared.add(new PreparedEvaluation(request, previous, holdCompletedCycle, observations,
-                isBqPartyProgressFanout(request, fact), repeatAnchorMillis));
+                isBqPartyProgressFanout(request, fact), repeatAnchorMillis, deferQuestCompletion));
         }
         fanOutBqRetrievalCompletion(prepared);
 
@@ -161,7 +250,7 @@ public final class QuestRuntimeService {
             QuestDefinition definition = request.getDefinition();
             QuestEvaluation evaluation = engine.evaluate(request.getMembership(), definition, value.previous,
                 value.observations, request.getCompletedPrerequisites(), now, value.holdCompletedCycle,
-                value.bqPartyProgressFanout, value.repeatAnchorMillis);
+                value.bqPartyProgressFanout, value.repeatAnchorMillis, value.deferQuestCompletion);
             repository.saveProgress(evaluation.getProgress());
             addEntitlements(evaluation, entitlements);
             evaluations.add(evaluation);
@@ -250,6 +339,7 @@ public final class QuestRuntimeService {
 
     private static boolean isBqPartyProgressFanout(QuestEvaluationRequest request, GameplayFact fact) {
         if (BqPartyTaskProgressScope.authorizesPlayerRequest(request, fact)) return true;
+        if (BqPartyCraftingStatisticsScope.authorizesLockedPlayerProgress(request, fact)) return true;
         if (!BqPartyInventorySnapshotScope.isPartySnapshot(fact)
             || request.getMembership().getParticipantId().getType() != ParticipantType.PLAYER
             || request.getFactMembership().getParticipantId().getType() != ParticipantType.PARTY
@@ -318,16 +408,18 @@ public final class QuestRuntimeService {
         private final Map<String, TaskProgress> observations;
         private final boolean bqPartyProgressFanout;
         private final long repeatAnchorMillis;
+        private final boolean deferQuestCompletion;
 
         private PreparedEvaluation(QuestEvaluationRequest request, QuestProgressSnapshot previous,
             boolean holdCompletedCycle, Map<String, TaskProgress> observations, boolean bqPartyProgressFanout,
-            long repeatAnchorMillis) {
+            long repeatAnchorMillis, boolean deferQuestCompletion) {
             this.request = request;
             this.previous = previous;
             this.holdCompletedCycle = holdCompletedCycle;
             this.observations = observations;
             this.bqPartyProgressFanout = bqPartyProgressFanout;
             this.repeatAnchorMillis = repeatAnchorMillis;
+            this.deferQuestCompletion = deferQuestCompletion;
         }
     }
 }

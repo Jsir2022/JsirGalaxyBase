@@ -60,6 +60,47 @@ public class AuthenticatedCheckboxConfirmationServiceTest {
         assertEquals(QuestStatus.COMPLETED, fixture.repository.current.getStatus());
     }
 
+    @Test
+    public void unclaimedRewardDoesNotConsumeTheNextCycleFactKey() {
+        Fixture fixture = new Fixture(RepeatPolicy.after(10L));
+        assertEquals(FactProcessingStatus.ACCEPTED, fixture.confirm("check", 100L).getStatus());
+        fixture.repository.claimable = true;
+        assertEquals(FactProcessingStatus.IGNORED, fixture.confirm("check", 110L).getStatus());
+        assertEquals(1, fixture.repository.facts.size());
+        fixture.repository.claimable = false;
+        fixture.repository.repeatAnchor = 200L;
+        assertEquals(FactProcessingStatus.IGNORED, fixture.confirm("check", 209L).getStatus());
+        assertEquals(FactProcessingStatus.ACCEPTED, fixture.confirm("check", 210L).getStatus());
+        assertEquals(1, fixture.repository.current.getCycle());
+        assertEquals(2, fixture.repository.facts.size());
+        assertEquals(2, fixture.repository.entitlements.size());
+    }
+
+    @Test
+    public void pendingConsumptionDoesNotConsumeTheNextCycleFactKey() {
+        Fixture fixture = new Fixture(RepeatPolicy.after(10L));
+        fixture.confirm("check", 100L);
+        fixture.repository.pendingConsumption = true;
+        assertEquals(FactProcessingStatus.IGNORED, fixture.confirm("check", 110L).getStatus());
+        assertEquals(1, fixture.repository.facts.size());
+        fixture.repository.pendingConsumption = false;
+        assertEquals(FactProcessingStatus.ACCEPTED, fixture.confirm("check", 111L).getStatus());
+        assertEquals(1, fixture.repository.current.getCycle());
+    }
+
+    @Test
+    public void acceptanceRechecksRewardStateBeforeRecordingFact() {
+        Fixture fixture = new Fixture(RepeatPolicy.after(10L));
+        fixture.confirm("check", 100L);
+        fixture.beforeRequest = () -> fixture.repository.claimable = true;
+        assertEquals(FactProcessingStatus.IGNORED, fixture.confirm("check", 110L).getStatus());
+        assertEquals(1, fixture.repository.facts.size());
+        fixture.beforeRequest = () -> {};
+        fixture.repository.claimable = false;
+        assertEquals(FactProcessingStatus.ACCEPTED, fixture.confirm("check", 111L).getStatus());
+        assertEquals(1, fixture.repository.current.getCycle());
+    }
+
     private static final class Fixture {
         private final UUID player = UUID.randomUUID();
         private final QuestDefinition definition;
@@ -67,6 +108,7 @@ public class AuthenticatedCheckboxConfirmationServiceTest {
         private final AuthenticatedCheckboxConfirmationService service;
         private final UUID prerequisite = UUID.randomUUID();
         private boolean prerequisitesSatisfied;
+        private Runnable beforeRequest = () -> {};
 
         private Fixture(RepeatPolicy repeat) {
             this(repeat, false, QuestBehavior.DEFAULT);
@@ -91,10 +133,13 @@ public class AuthenticatedCheckboxConfirmationServiceTest {
             evaluators.register(new ConfirmationTaskEvaluator("bq_standard:checkbox", "galaxy:task_confirmed"));
             QuestRuntimeService runtime = new QuestRuntimeService(repository, new DirectTransaction(),
                 new QuestFactProjector(evaluators), new QuestEngine());
-            QuestEvaluationRequestProvider requests = fact -> Collections.singletonList(
+            QuestEvaluationRequestProvider requests = fact -> {
+                beforeRequest.run();
+                return Collections.singletonList(
                 new QuestEvaluationRequest(definition, ParticipantMembership.player(fact.getPlayerId()),
                     locked && prerequisitesSatisfied ? Collections.singleton(prerequisite)
                         : Collections.<UUID>emptySet()));
+            };
             service = new AuthenticatedCheckboxConfirmationService(definitions, repository, runtime, requests, "s2");
         }
 
@@ -105,16 +150,18 @@ public class AuthenticatedCheckboxConfirmationServiceTest {
 
     private static final class MemoryRuntimeRepository implements QuestRuntimeRepository {
         private QuestProgressSnapshot current;
+        private boolean claimable, pendingConsumption;
+        private long repeatAnchor = -1L;
         private final Set<String> facts = new HashSet<String>();
         private final List<RewardEntitlement> entitlements = new ArrayList<RewardEntitlement>();
         @Override public Optional<QuestProgressSnapshot> findProgress(ParticipantId participant, UUID questId,
             int version) { return current == null ? Optional.empty() : Optional.of(current); }
         @Override public boolean hasPendingConsumptionSubmission(ParticipantId participant, UUID questId,
-            int version, int cycle) { return false; }
+            int version, int cycle) { return pendingConsumption; }
         @Override public boolean hasClaimableRewardEntitlement(ParticipantId participant, UUID questId,
-            int version, int cycle) { return false; }
+            int version, int cycle) { return claimable; }
         @Override public long findRepeatCycleAnchorMillis(ParticipantId participant, UUID questId, int version,
-            int cycle, long fallbackCompletedAt) { return fallbackCompletedAt; }
+            int cycle, long fallbackCompletedAt) { return repeatAnchor < 0L ? fallbackCompletedAt : repeatAnchor; }
         @Override public boolean recordFactIfAbsent(GameplayFact fact) { return facts.add(fact.getFactKey()); }
         @Override public void saveProgress(QuestProgressSnapshot value) { current = value; }
         @Override public void insertEntitlementsIfAbsent(Set<RewardEntitlement> values) { entitlements.addAll(values); }

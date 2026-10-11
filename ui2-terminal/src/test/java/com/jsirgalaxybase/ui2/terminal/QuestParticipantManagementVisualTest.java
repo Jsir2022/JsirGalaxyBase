@@ -26,6 +26,28 @@ import com.jsirgalaxybase.ui2.theme.HighContrastTheme;
 import com.jsirgalaxybase.ui2.theme.UiTheme;
 
 public class QuestParticipantManagementVisualTest {
+    @Test public void craftingStatisticsTaskDoesNotExposeManualDetectAction() {
+        QuestCenterVisualModel model=craftingDetectionModel();
+        assertTrue("fixture represents a legacy-detectable crafting-stat task",
+            model.getDetail().getTasks().get(0).isDetectable());
+        int[][] sizes={{350,193},{427,240},{620,340}};
+        for(int[] size:sizes){
+            RecordingActions actions=new RecordingActions();
+            QuestCenterVisualDocument document=new QuestCenterVisualDocument(model,TerminalActionPort.NONE,actions,
+                TerminalWindowProfile.STANDARD);
+            UiRuntime runtime=new UiRuntime(document,new UiContext(GlassTerminalTheme.create(),Locale.CHINA,1F,
+                new FixedUiClock(0,true)));
+            runtime.setViewport(size[0],size[1]);DrawList drawList=runtime.frame();
+            assertTrue("crafting statistics update from matching gameplay events, not a manual task button",
+                find(runtime.getRoot(),"quest-task-detect-0")==null);
+            assertTrue(find(runtime.getRoot(),"quest-task-confirm-0")==null);
+            assertTrue(find(runtime.getRoot(),"quest-task-detect-items-0")==null);
+            assertTrue(UiDebugSnapshot.capture(runtime.getRoot(),drawList,size[0],size[1])
+                .contains("SUMMARY|issues=0"));
+            runtime.close();
+        }
+    }
+
     @Test public void availableCheckboxTaskRendersAndDispatchesOnlyQuestAndTaskIntent() {
         int[][] sizes={{350,193},{427,240},{620,340}};
         for(int[] size:sizes){
@@ -56,6 +78,32 @@ public class QuestParticipantManagementVisualTest {
         assertTrue("locked/non-confirmable tasks must not expose a client confirmation action",
             find(runtime.getRoot(),"quest-task-confirm-0")==null);
         runtime.close();
+    }
+
+    @Test public void consumingTasksShareOneQuestLevelDetectAction() {
+        int[][] sizes={{350,193},{427,240},{620,340}};
+        for(int[] size:sizes){
+            RecordingActions actions=new RecordingActions();
+            QuestCenterVisualDocument document=new QuestCenterVisualDocument(consumingModel(),TerminalActionPort.NONE,
+                actions,TerminalWindowProfile.STANDARD);
+            UiRuntime runtime=new UiRuntime(document,new UiContext(GlassTerminalTheme.create(),Locale.CHINA,1F,
+                new FixedUiClock(0,true)));
+            runtime.setViewport(size[0],size[1]);
+            DrawList drawList=runtime.frame();
+            UiNode detect=find(runtime.getRoot(),"quest-detect-consumptions");
+            assertTrue("Quest-level Detect should fit "+size[0]+"x"+size[1],detect!=null);
+            assertTrue("task rows must not expose client-driven per-Task submission",
+                find(runtime.getRoot(),"quest-task-item-actions-0")==null);
+            UiRect bounds=detect.getBounds();
+            assertTrue(new UiRect(0,0,size[0],size[1]).contains(bounds));
+            assertTrue(runtime.dispatch(UiEvent.pointer(UiEvent.Type.POINTER_DOWN,
+                bounds.getX()+Math.max(1,bounds.getWidth()/2),bounds.getY()+Math.max(1,bounds.getHeight()/2),0)));
+            assertEquals(1,actions.detectConsumptionCalls);
+            assertEquals("quest-consume",actions.detectedQuest);
+            assertTrue(UiDebugSnapshot.capture(runtime.getRoot(),drawList,size[0],size[1])
+                .contains("SUMMARY|issues=0"));
+            runtime.close();
+        }
     }
 
     @Test public void unresolvedChoiceOffersExplicitRandomClaimAndRoutesOnlyThatIntent() {
@@ -203,6 +251,36 @@ public class QuestParticipantManagementVisualTest {
             0,1,0,Collections.singletonList(summary),0,1,1,detail);
     }
 
+    private static QuestCenterVisualModel craftingDetectionModel(){
+        TerminalVisualModel shell=new TerminalVisualModel("终端","career",Collections.singletonList(
+            new TerminalVisualModel.NavItem("career","职业",true,true)));
+        QuestCenterVisualModel.QuestSummary summary=new QuestCenterVisualModel.QuestSummary("quest-crafting",
+            "chapter-a","统计合成任务","",QuestCenterVisualModel.QuestState.IN_PROGRESS,0,1,null);
+        QuestCenterVisualModel.TaskRow task=new QuestCenterVisualModel.TaskRow("crafting-0","制作目标",
+            "由匹配的合成产物自动更新",0L,1L,false,false,true);
+        QuestCenterVisualModel.QuestDetail detail=new QuestCenterVisualModel.QuestDetail(summary,"说明","",
+            "不重复",Collections.singletonList(task),Collections.<QuestCenterVisualModel.RewardRow>emptyList());
+        return new QuestCenterVisualModel(shell,QuestCenterVisualModel.View.DETAIL,QuestCenterVisualModel.LoadState.READY,
+            "chapter-a","quest-crafting","all","","",Collections.<QuestCenterVisualModel.Chapter>emptyList(),
+            0,1,0,Collections.singletonList(summary),0,1,1,detail);
+    }
+
+    private static QuestCenterVisualModel consumingModel(){
+        TerminalVisualModel shell=new TerminalVisualModel("终端","career",Collections.singletonList(
+            new TerminalVisualModel.NavItem("career","职业",true,true)));
+        QuestCenterVisualModel.QuestSummary summary=new QuestCenterVisualModel.QuestSummary("quest-consume",
+            "chapter-a","消耗物品任务","",QuestCenterVisualModel.QuestState.IN_PROGRESS,0,2,null);
+        QuestCenterVisualModel.TaskRow first=new QuestCenterVisualModel.TaskRow("item-a","物品目标 A","提交目标物品",
+            0L,4L,false,true,false);
+        QuestCenterVisualModel.TaskRow second=new QuestCenterVisualModel.TaskRow("item-b","物品目标 B","提交另一种物品",
+            1L,3L,false,true,false);
+        QuestCenterVisualModel.QuestDetail detail=new QuestCenterVisualModel.QuestDetail(summary,"说明","",
+            "不重复",Arrays.asList(first,second),Collections.<QuestCenterVisualModel.RewardRow>emptyList());
+        return new QuestCenterVisualModel(shell,QuestCenterVisualModel.View.DETAIL,QuestCenterVisualModel.LoadState.READY,
+            "chapter-a","quest-consume","all","","",Collections.<QuestCenterVisualModel.Chapter>emptyList(),
+            0,1,0,Collections.singletonList(summary),0,1,1,detail);
+    }
+
     private static UiNode find(UiNode node,String key){
         if(node==null)return null;
         if(node.getElement().getKey()!=null&&key.equals(node.getElement().getKey().getValue()))return node;
@@ -211,11 +289,13 @@ public class QuestParticipantManagementVisualTest {
     }
 
     private static final class RecordingActions implements QuestCenterActionPort{
-        private int leaveCalls,claimCalls,randomClaimCalls,choiceCalls,selectedChoice=-1,confirmCalls;
-        private String confirmedQuest="",confirmedTask="";
+        private int leaveCalls,claimCalls,randomClaimCalls,choiceCalls,selectedChoice=-1,confirmCalls,
+            detectConsumptionCalls;
+        private String confirmedQuest="",confirmedTask="",detectedQuest="";
         public void selectChapter(String value){}public void selectQuest(String value){}public void changeFilter(String value){}
         public void changeQuery(String value){}public void changeChapterPage(int value){}public void changeQuestPage(int value){}
-        public void backToBrowse(){}public void claim(String value){claimCalls++;}public void forceClaimWithRandomChoices(String value){randomClaimCalls++;}public void confirmTask(String quest,String task){confirmCalls++;confirmedQuest=quest;confirmedTask=task;}public void detectTask(String quest,String task){}public void submitTask(String quest,String task){}public void submitHeldStack(String quest,String task){}public void selectRewardChoice(String quest,String reward,int choice){choiceCalls++;selectedChoice=choice;}
+        public void backToBrowse(){}public void claim(String value){claimCalls++;}public void forceClaimWithRandomChoices(String value){randomClaimCalls++;}public void confirmTask(String quest,String task){confirmCalls++;confirmedQuest=quest;confirmedTask=task;}public void submitTask(String quest,String task){}public void submitHeldStack(String quest,String task){}public void selectRewardChoice(String quest,String reward,int choice){choiceCalls++;selectedChoice=choice;}
+        public void detectConsumptions(String quest){detectConsumptionCalls++;detectedQuest=quest;}
         public void toggleTracking(String value){}public void openManagement(){}public void retry(){}
         public void createParticipant(String type,String name){}public void addParticipantMember(String type,String id,long revision,String player,String role){}
         public void removeParticipantMember(String type,String id,long revision,String player){}

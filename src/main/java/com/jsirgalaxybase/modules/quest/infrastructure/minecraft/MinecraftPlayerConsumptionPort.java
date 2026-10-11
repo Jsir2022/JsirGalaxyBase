@@ -292,10 +292,10 @@ public final class MinecraftPlayerConsumptionPort implements ConsumptionPort {
                     containersRemaining--;
                     if (returned != null && returned.getItem() != null && returned.stackSize > 0
                         && !insert(working, returned)) return null;
-                    // Some Forge registered containers are indivisible; BQ consumes the whole container but
-                    // task progress is bounded by the remaining requirement.
-                    long credited = Math.min(remaining.get(requirement), drainedAmount);
-                    remaining.set(requirement, remaining.get(requirement) - credited);
+                    // BQ credits the full measured drain, including the overage from indivisible registered
+                    // containers. Only the next-container search is bounded by the remaining requirement.
+                    long credited = drainedAmount;
+                    remaining.set(requirement, Math.max(0L, remaining.get(requirement) - drainedAmount));
                     applied.set(requirement, applied.get(requirement) + credited);
                     anyApplied |= credited > 0L;
                 }

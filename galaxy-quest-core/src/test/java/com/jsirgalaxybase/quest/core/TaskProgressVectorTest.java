@@ -45,4 +45,51 @@ public class TaskProgressVectorTest {
         TaskProgress complete = new TaskProgress("items", Arrays.asList(4L, 4L), Arrays.asList(4L, 4L), true);
         assertSame(complete, complete.replaceIncomplete(Arrays.asList(0L, 0L)));
     }
+
+    @Test
+    public void sourceScopedCraftingUsesMaxPerSourceThenSumsSources() {
+        TaskProgress progress = new TaskProgress("craft", Arrays.asList(0L, 0L), Arrays.asList(10L, 10L), false);
+        progress = progress.advanceFromSource("s1", Arrays.asList(4L, 0L));
+        progress = progress.observeFromSource("s1", Arrays.asList(3L, 2L));
+        assertEquals(Arrays.asList(4L, 2L), progress.getValues());
+
+        progress = progress.observeFromSource("lobby", Arrays.asList(5L, 1L));
+        assertEquals(Arrays.asList(9L, 3L), progress.getValues());
+        progress = progress.observeFromSource("s1", Arrays.asList(1L, 1L));
+        assertEquals("a stale same-source snapshot is maxed locally, not subtracted", Arrays.asList(9L, 3L),
+            progress.getValues());
+    }
+
+    @Test
+    public void sourceScopedUpgradeKeepsLegacyAggregateAsNonAdditiveFloor() {
+        TaskProgress legacy = new TaskProgress("craft", Arrays.asList(5L), Arrays.asList(20L), false);
+        TaskProgress upgraded = legacy.observeFromSource("s1", Arrays.asList(2L));
+        assertEquals("unknown historical source attribution must not regress or double-add", Arrays.asList(5L),
+            upgraded.getValues());
+        upgraded = upgraded.observeFromSource("s2", Arrays.asList(4L));
+        assertEquals(Arrays.asList(6L), upgraded.getValues());
+    }
+
+    @Test
+    public void sourceScopedCraftingPreservesBqStatisticsAboveTarget() {
+        TaskProgress progress = new TaskProgress("craft", Arrays.asList(0L, 0L), Arrays.asList(3L, 4L), false);
+        progress = progress.advanceFromSource("s2", Arrays.asList(2L, 2L));
+        progress = progress.observeFromSource("s2", Arrays.asList(6L, 6L));
+        progress = progress.observeFromSource("lobby", Arrays.asList(7L, 1L));
+
+        assertEquals("same-source event and absolute statistics use max; source totals then sum",
+            Arrays.asList(13L, 7L), progress.getValues());
+        assertEquals(Arrays.asList(3L, 4L), progress.getTargets());
+        assertTrue("completion still uses the configured thresholds", progress.isComplete());
+    }
+
+    @Test
+    public void sourceScopedCraftingCapsEachServerEventAtTheTaskTarget() {
+        TaskProgress progress = new TaskProgress("craft", Arrays.asList(0L, 0L), Arrays.asList(3L, 4L), false);
+        progress = progress.advanceFromSource("s2", Arrays.asList(8L, 2L));
+
+        assertEquals(Arrays.asList(3L, 2L), progress.getValues());
+        assertEquals(Arrays.asList(3L, 2L), progress.getSourceContributions().get("s2").getEventValues());
+        assertFalse(progress.isComplete());
+    }
 }

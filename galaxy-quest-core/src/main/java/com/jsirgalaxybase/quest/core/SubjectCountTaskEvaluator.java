@@ -23,8 +23,9 @@ public final class SubjectCountTaskEvaluator implements TaskEvaluator {
         if (!factType.equals(fact.getTypeId())) return current;
         String required = definition.getParameters().get("subject");
         String exact = fact.getAttributes().get("subject");
+        if (required == null || required.trim().isEmpty() || exact == null || exact.trim().isEmpty()) return current;
         boolean subtypes = parseBoolean(definition.getParameters().get("subtypes"), true);
-        if (required != null && !(required.equals(exact) || (subtypes && aliases(fact).contains(required)))) return current;
+        if (!(required.equals(exact) || (subtypes && aliases(fact).contains(required)))) return current;
         String damageType = definition.getParameters().get("damageType");
         if (damageType != null && !damageType.isEmpty()
             && !damageType.equalsIgnoreCase(fact.getAttributes().get("damageType"))) return current;
@@ -36,7 +37,9 @@ public final class SubjectCountTaskEvaluator implements TaskEvaluator {
             }
         }
         long amount = positive(fact.getAttributes().get("amount"), 1L);
-        return current.merge(saturatingAdd(current.getValue(), amount), false);
+        // BQ TaskHunt increments one event at a time and caps the stored value at `required`.
+        // Preserve an already-over-target legacy value through merge(), but never create a new overshoot.
+        return current.merge(Math.min(current.getTarget(), saturatingAdd(current.getValue(), amount)), false);
     }
 
     private Set<String> aliases(GameplayFact fact) {

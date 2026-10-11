@@ -19,26 +19,26 @@ public final class FluidSnapshotTaskEvaluator implements TaskEvaluator {
     @Override
     public TaskProgress evaluate(TaskDefinition definition, TaskProgress current, GameplayFact fact) {
         if (!factType.equals(fact.getTypeId()) || bool(definition.getParameters().get("consume"), true)) return current;
+        if (BqPartyInventorySnapshotScope.isPartySnapshot(fact)
+            && !BqPartyInventorySnapshotScope.matchesBqPartyFluidTask(definition, fact)) return current;
         int requirements = integer(definition.getParameters().get("fluid.count"), 0);
         if (current.getValues().size() != requirements) throw new IllegalArgumentException(
             "fluid task vector width does not match definition");
         int observed = integer(fact.getAttributes().get("fluidInventory.count"), 0);
-        long[] remaining = new long[observed];
-        for (int item = 0; item < observed; item++) remaining[item] = positive(
-            fact.getAttributes().get("fluidInventory." + item + ".amount"), 0L);
         List<Long> values = new ArrayList<Long>(requirements);
         for (int requirement = 0; requirement < requirements; requirement++) {
             long total = 0L;
             for (int item = 0; item < observed; item++) {
                 if (!matches(definition.getParameters(), requirement, fact.getAttributes(), item)) continue;
                 long needed = Math.max(0L, current.getTargets().get(requirement) - total);
-                long allocated = Math.min(needed, remaining[item]);
+                long available = positive(fact.getAttributes().get("fluidInventory." + item + ".amount"), 0L);
+                long allocated = Math.min(needed, available);
                 total = saturatingAdd(total, allocated);
-                remaining[item] -= allocated;
             }
             values.add(Math.min(current.getTargets().get(requirement), total));
         }
-        return current.replaceIncomplete(values);
+        return bool(definition.getParameters().get("groupDetect"), false)
+            ? current.replaceIncomplete(values) : current.replaceIncompleteComponents(values);
     }
 
     private boolean matches(Map<String, String> parameters, int requirement, Map<String, String> fact, int item) {
