@@ -1,5 +1,58 @@
 # JsirGalaxyBase Work Log
 
+### 2026-10-11 - Base-only 两天工作包自动验收收口
+
+- 形成本地阶段提交：`adfb691`（个人导入/门禁/回滚）、`664436e`（健康摘要/协议/管理员布局）、`6181ece`（真实求值器注册表联动）。没有推送或部署。
+- 最后 Importer 74 项实际重跑，0 skipped/failure/error；全部模块与根结果共 1,113 项、1,061 执行、52 非 Quest 条件跳过、0 failure/error。Core 299、Postgres 61、Importer 74、UI2 Core 41、Lab 2、Terminal 29、Demo 5、根 602。跳过为 Bank 18、Market 15、Land 5、ServerTools 7、Warehouse 4、ItemPolicy 3 的独立测试配置缺失；Quest 测试库均实际执行。
+- 提交后子项目 JAR 预构建成功；随后 `test assemble verifyUi2SelfContained :ui2-demo:renderGolden :ui2-demo:verifyTerminalVisuals` 成功（57 tasks：20 executed/37 up-to-date）。252 个正式终端快照通过，直接查看小窗健康页 Java2D PNG，未操作 Minecraft。
+- 最终制品 `.gradle/codex-r2-confirmed-build/root/libs/jsirgalaxybase-6181ece-main+6181ece57c-dirty.jar`，SHA-256 `0b8266264ced24ea90757bed584b6c8ce19d991996adcba64fb673184d602645`。dirty 来自未提交文档。自包含检查与 ZIP 清单核验无 BQ 运行包、Importer/CLI、Gson 或 Demo 类。
+- CodeGraph 最后 sync 4 文件，运行清单 impact 27 符号、affected 六个 Importer 测试类；status up-to-date。`git diff --check` 通过。
+- 新服运行证据按代表性导入/JDBC 闭环、纯求值器、Minecraft 奖励保存/重试和完整定义静态审计分层记录，不宣称逐个游玩 3,744 Quest，不宣称跨玩家文件/数据库原子事务或真实 Forge 已通过。旧玩家进度/旧 Party/实时影子退出活动路线，历史记录仍保留。
+- 本次仅临时 PG tmpfs 隔离验收，没有生产玩家读取、生产 DDL、服务器开关、客户端启动或部署。后续唯一门槛是 Base-only 新服人工运行与单独授权的灰度启用准备。
+- 验收结束后停止并自动移除专用 `jgb-bq-baseonly-it` 临时容器；其中临时 schema/tmpfs 测试数据不可恢复，不涉及生产数据库或服务器。
+
+### 2026-10-11 - Base-only 导入服务门禁、并发与视觉全量复验
+
+- 发布运行门禁下沉到 `BqMigrationDatabaseService.apply`，工具内部调用也拒绝仅可解析的未验收类型；新增 `interact_item` 服务层拒绝测试证明没有部分写入。回滚共用导入 advisory transaction lock，并要求最新 APPLIED 批次。批次时间使用锁内 `clock_timestamp()`，避免并发等待事务的开始时间误排最新批次。
+- 新增并发相同来源、后续相同内容批次保护的隔离回归；最后 Importer 全量 73 项、0 skipped/failure/error，包含真实 3,744 Quest/47 章/11,068 occurrence 的空库导入与回滚。Core 299 项和 PostgreSQL 61 项通过。首轮两项失败为新增测试误把空白变化当新来源、旧断言要求特定版本文案；修正测试来源夹具和保留原因诊断后全量通过。
+- 正式终端视觉门禁定位并修复两处真实旧布局遗漏：详情影响摘要高度不足，以及行为编辑器四页组件仍匹配三页布局。随后 252 份正式终端快照通过结构/非零布局/图表门禁；健康摘要 Java2D PNG 已直接检查，按正式计数短行调整后待最终导出。没有操作 Minecraft 窗口。
+- 最终根构建首次在依赖图阶段因启用正确 Git 版本名后子项目对应 JAR 尚未生成而退出，未进入根测试；正在按既有两阶段流程先生成依赖 JAR，再跑全量。没有修改构建合同或降低门禁。
+
+### 2026-10-11 - Base-only 管理健康摘要接入终端
+
+- 管理员授权健康查询已接入服务端快照、带上限的网络列表、纯 Java VisualModel 和 UI2 管理页面；显示当前任务书总量、revision、FAILED 奖励及待恢复消费。查询失败返回只读错误说明，未启用或未提供后端明确显示不可用。健康状态不推断真实 Forge 运行验收。
+- Core 全量 299 项通过（含拒绝未授权仓储访问的两项健康查询测试）；UI2 Terminal 全量 29 项通过，新增健康/数据库错误场景覆盖 350×193、427×240、620×340，结构审计 issues=0。首次视觉用例在 frame 前取 root 导致键断言失败，按生命周期先 frame 后捕获修正，通过后未降低布局审计。
+- 根定向 TerminalQuestCenterCodecTest、TerminalServiceTest、BqPartyInventorySnapshotFactSinkPostgresTest 构建和测试通过；新增健康列表网络往返及空后端说明断言。管理员健康正常场景加入统一纯 Java 画廊，完整视觉导出仍待运行。
+- 能力矩阵顶部旧 M.3 路线已移除并改为 N.1–N.5 权威阶段表；历史证据保留。最终全量、JAR 核验、并发导入及本地提交仍待完成，不部署。
+
+### 2026-10-11 - Base-only 管理健康查询实施
+
+- 个人库存投影最终修正后 Core 全量 297 项通过，0 skipped/failure/error。
+- 新增只读 `QuestRuntimeHealthSummary` 和管理员授权查询；JDBC 单条 SQL 按同一 PostgreSQL 快照统计最新发布 Quest/Task/Reward、章节、catalog revision、FAILED 奖励及 PREPARED/APPLIED 消费恢复数量，不返回玩家身份或玩家进度。尚未接入终端网络/UI2 展示，不能称健康页完成。
+- CodeGraph `impact JdbcQuestContentMigrationRepository` 覆盖 36 个符号。隔离 `runtimeHealthTracksPublishedContentAndRollbackWithoutPlayerData` 实跑 1 项，0 skipped/failure/error，证明空库、导入和回滚后的计数/revision；完整 GTNH 用例增加 3744/5620/5448/47 健康计数断言，尚待重跑。新增管理员拒绝访问和授权访问测试，Core 全套复验已启动。
+
+### 2026-10-11 - Base-only 个人库存投影链复验
+
+- 隔离根 JDBC 回归发现 `QuestFactProjector` 仍无条件拒绝带 `bq.raw` 的个人 Retrieval 快照，导致新导入任务保持 AVAILABLE；按 `bq.partyShare=false` 修正个人快照准入和 Party 聚合拒绝，保留无标记历史定义行为。CodeGraph `impact QuestFactProjector` 覆盖 68 个符号，`affected` 选中根库存事实集成类。
+- 更新真实 Importer 驱动的回归：同队玩家库存 3/4 各自保存，不聚合为 7，不给未观察成员创建进度。根 `BqPartyInventorySnapshotFactSinkPostgresTest` 16 项通过，0 skipped/failure/error，含源任务领取→Quest Completion→目标奖励 JDBC Worker 链。隔离 PostgreSQL 使用本机 `postgres:16-alpine`、tmpfs、loopback 55436；未连接生产。随后为保留非导入定义行为补齐 `isImported` 判断，Core 全量正在复验，最终根全量仍待执行。
+- 本工作包仍在实施；管理员健康摘要、最终视觉/构建/自包含及分阶段本地提交尚未完成。
+
+### 2026-10-11 - Base-only 新服工作包 N.1/N.2 实施中
+
+- 产品路线改为无 BetterQuesting 的全新服务器：只导入 `DefaultQuests` 内容，所有玩家从零开始；不迁移旧进度、领取/Choice 历史或旧 Party，不做实时影子。已重写活动路线、开发导航、能力矩阵顶部口径和 README，并新增只读优先的初始化命令说明；历史 Worklog 保留。
+- 新增机器可执行 `BqRuntimeCapabilityRegistry`。固定任务书实际 9 类 Task、4 类 Reward 才是 `SUPPORTED`；codec 可解析但当前未使用/未验收的交互、Task XP/Scoreboard、Reward Command/Scoreboard 保持 `ADAPTED`，未知类型为 `UNKNOWN`。apply 门禁同时拒绝 manifest ERROR，不能再把“解析成功”当作运行就绪。
+- Importer 对所有 Task 写入 `bq.partyShare=false`，Quest 显式 `participantScope=PLAYER`。Core 兼容辅助按该标记关闭 Party 库存聚合、Crafting/Hunt/Location/Meeting 事件扇出和 Party Crafting 统计；缺少标记的历史定义维持原兼容行为。新增 Planner 回归证明加入 Party 的玩家仍只使用个人 Hunt/背包事实；导入/JDBC Location 周期测试改为只产生观察者进度与权益。
+- CodeGraph 起始 status up-to-date；`impact BqBehaviorInventory` 影响 78 个符号，`impact QuestEvaluationPlanner` 影响 104 个符号；同步 19 个变更文件/633 节点后，管理视觉模型影响 196 个符号，TerminalService 为宽影响 357 个符号，后续健康页按此选择协议/UI2/服务测试。
+- 只读重扫 S2 `DefaultQuests`：hash `9795d6c7fe71e72e91fed8cdc3dea632ab091ccf040e71707d2dd0d90cd355fc`，3,744 Quest、47 章；5,620 Task occurrence 与 5,448 Reward occurrence 全部落入 9+4 `SUPPORTED`，未读取 Players 或其它进度数据。
+- Core 297 项全部执行通过；Importer 无数据库轮 66 项中 58 执行、8 项因未提供隔离 URL assumption-skip，0 failure/error。临时 PostgreSQL 16 使用 `jgb-bq-baseonly-it`、512 MiB tmpfs、loopback 55436；完整任务书数据库测试证明 3,791 个实体首次创建、相同来源幂等、PLAYER 标记覆盖每个 Task、完整 occurrence 运行映射及 rollback。首轮唯一失败为旧 Location Party 扇出断言，改成个人合同后单场景通过，完整 9 项数据库类随后通过。最终模块/根全量、UI2 视觉、assemble、自包含与 JAR 内容仍待 N.5，不提前宣称工作包完成。
+
+### 2026-10-11 - BQ 后续阶段规划与文档入口修正
+
+- 用户要求评估后续阶段并入文档。本轮仅文档，不新增功能、不设置执行目标、不读取生产数据或部署。
+- 新增 `betterquesting-next-stages-2026-10-11.md`：按 M.3-A 来源/权益核实 → M.3-B 隔离写入 → M.3-C 回滚恢复 → M.4 管理诊断 → M.5 实时影子 → M.6 切换准备划分交付、门槛、风险与工作量。长期目标建议覆盖 M.3-A/B/C；repeat、Choice、已有进度/权益和回滚边界保持待核实/确认，不擅自批准。
+- 开发导航、能力矩阵与 README 链接统一到后续计划；修正 README 仍把 R.2.19/发布并发写成待决策的过期描述。阶段状态不因计划更新而升级。
+- 核对当前干净代码检查点 `b57f56b` 与既有 65 项隔离 Importer 自动证据；本轮未重跑代码测试/构建，文档链接及 `git diff --check` 单独检查。
+
 ### 2026-10-11 - M.3 离线预览文件级验收收口
 
 - 新增实际 CLI 合成文件回归 5 项：命名来源参数换序仍生成相同报告、SHA-256 对应读取字节、输入未被修改、重复/非法来源拒绝、坏文件不输出部分报告及已捕获字节独立于后续文件内容。首次运行 2 项失败：哈希摘要跟随参数顺序（真实实现缺陷）及 Gson 的 JsonNull 异常类型与测试预期不符；分别修复排序和精确异常断言后全部通过。

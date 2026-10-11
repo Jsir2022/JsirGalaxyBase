@@ -2,9 +2,17 @@
 
 更新：2026-10-11。用途：下一轮开发先读本页，不从历史 Worklog 的“下一步”自行推断目标。
 当前状态以能力矩阵顶部唯一阶段表为准，当前工作入口为
-[M.3 离线预览工作包](betterquesting-m3-offline-preview-2026-10-11.md)；
+[Base-only 新服实施路线](betterquesting-next-stages-2026-10-11.md)，当前执行 N.1–N.5；
+[M.3 离线预览工作包](betterquesting-m3-offline-preview-2026-10-11.md)仅保留为历史工具证据，不再迁移旧玩家进度；
 [M.2 自动收口目标](betterquesting-m2-automatic-closeout-2026-10-11.md)保留为已完成的有限自动基线。
 R.2.19 事件归属与 Detect 发布并发均已由 R.2.34 解决，不再列为待决。
+
+**2026-10-11 当前产品合同（优先于下方历史记录）**：目标为无 BetterQuesting 的全新服务器，所有玩家从零开始；只导入 `DefaultQuests` 内容，不迁移旧进度、领取/Choice 历史或旧 Party。所有导入 Quest 和事实均为 PLAYER 个人语义，即使玩家加入 Base Party 也不聚合或扇出。旧 M.3 进度迁移与 M.5 实时影子退出活动路线；下一生产门槛是 Base-only 新服人工验收。
+
+当前交付证据见 [Base-only 验收表](betterquesting-base-only-acceptance-2026-10-11.md)。代码检查点为 `adfb691`（个人导入与门禁）和 `664436e`（终端健康摘要）；本轮未推送、未部署。
+
+<details>
+<summary>历史 M.2/M.3 开发记录（非活动待办）</summary>
 
 M.3 离线预览：已接入定义 hash/version、多来源向量/完成/领取/时间关系和源文件 SHA-256。
 合成文件运行实际 CLI；报告禁止自动应用，repeat/Choice 明确阻断。
@@ -420,3 +428,5 @@ Gradle 使用 `--no-daemon --no-configuration-cache -PforceToolchainVersion=17`�
 CodeGraph 起始 `status` up-to-date；`callees QuestGameplayEventHandler.onPlayerTick` 确认三个周期调用，改后 `impact PeriodicTickCadence.isDue` 命中 onPlayerTick 和 2 个纯 JUnit 用例；`affected` 对事件处理器/新 helper/测试返回 46 个宽候选。先以 `--network none --offline` 尝试，根 Gradle 在 GTNH convention 插件请求 `raw.githubusercontent.com` 时 DNS 不可用，未进入测试。只读检查发现本机 7892 仍在监听，遵循网络安全规范未修改该进程/服务；通过 `--network host` 的一次性 `galaxy-dev:local` 容器设置 HTTP(S) 代理后，根 `:test --tests QuestCraftingStatisticsDispatchTest --tests PeriodicTickCadenceTest --rerun-tasks` 成功，`compileJava` 与 `compileTestJava` 成功。Gradle XML 为 4 + 2 = 6 项，0 skipped/failure/error；33 actionable tasks / 33 executed。此前另以 JDK 17 `javac -source 8 -target 8` 单独编译 helper 和测试，缓存 JUnit 4.13.2/hamcrest 实际运行 2 项 `OK (2 tests)`；有 bootstrap classpath 警告。`git diff --check` 通过。
 
 这证明根工程编译、所选周期/分发回归及 JAR 自包含构建门禁；不证明 Forge `PlayerTickEvent` 的真实触发/线程/联机时序，也不替代全量测试。隔离 runtime JAR 为 `.gradle/codex-r2-crafting-cadence-build/root/libs/jsirgalaxybase-6e80f68-main+6e80f68c22-dirty.jar`，SHA-256 `795d471321ef287b6b838fdab2751c0f724c1ad233b06fa00c801295464698ae`，未部署。未访问数据库/玩家进度、未执行 DDL/部署/Quest-BQ 开关或 S1/S2 操作；R.2.19 Party 重试归属与活动 Detect 遇新定义发布策略仍待用户确认，M.2 继续 `BLOCKED`。
+
+</details>

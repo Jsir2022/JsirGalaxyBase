@@ -1,22 +1,22 @@
 # BetterQuesting 关键能力吸收矩阵与实施路线
 
 日期：2026-09-13
-更新：2026-10-11，M.2 自动验收收口通过，最新代码修复为 R.2.35。
+更新：2026-10-11，活动路线为 Base-only 全新服务器内容导入；玩家从零开始，导入任务全部 PLAYER。
 
 ## 唯一当前阶段表
 
 | 阶段 | 当前状态与下一门槛 |
 |---|---|
-| M.0 | 真实定义清点完成；不含玩家进度 |
-| M.1 | 定义/章节迁移已有实现与隔离自动证据；正式应用受 M.2 门禁约束 |
-| M.2 | R.1 可靠性及 R.2.1–R.2.35 窄范围自动证据已完成；本次有限自动收口通过。全工程 1,086 项 / 1,034 执行 / 52 条非 Quest 环境跳过，零失败错误。实机兼容仍 BLOCKED |
-| M.3 | 多来源离线预览及合成文件 CLI 回归已实现，绑定定义 hash/version 和源文件哈希并显式阻断 repeat/Choice。重复 Quest 周期冲突决策、写入批次与回滚未完成，见 [工作包](betterquesting-m3-offline-preview-2026-10-11.md) |
-| M.4 | 编辑/管理入口和部分摘要已有；完整诊断及受控修复未完成 |
-| M.5 | 离线差异基础已有；实时影子双算未完成 |
-| M.6 | 生产迁移、灰度和正式替代未执行 |
+| N.1 | 自动验收完成，`adfb691`；真实 9 类 Task / 4 类 Reward 门禁及 PLAYER/Party 隔离，Core 299 项、个人库存/奖励 JDBC 16 项通过 |
+| N.2 | 自动验收完成，`adfb691`；完整 3,744 Quest / 47 章空库导入、来源幂等、更新/并发/失败事务/最新批次回滚，Importer 最终 74 项全部执行通过 |
+| N.3 | 代表性新玩家自动闭环及证据分层审计完成；详见 Base-only 验收文档。未逐个实际游玩 3,744 Quest，不等于 Forge 实机通过 |
+| N.4 | 自动验收完成，`664436e`；管理员健康查询、网络和 UI2 已接入，UI2 29 项、根网络/服务回归通过，正式终端 252 份视觉通过 |
+| N.5 | 自动验收完成：根/全部模块 1,113 项、1,061 执行、52 非 Quest 条件跳过、0 failure/error；assemble、自包含、252 视觉与 JAR 内容通过，制品与 SHA 见验收文档 |
+| 后续 | Base-only 新服人工运行、灰度启用与最终运行检查，未执行 |
 
-当前有限缺口清单、自动收口目标与 M.3 前置条件见
-[M.2 自动收口](betterquesting-m2-automatic-closeout-2026-10-11.md)。
+当前活动合同与任务见[Base-only 阶段跟进计划](betterquesting-next-stages-2026-10-11.md)。
+旧玩家进度迁移、旧 Party 映射和 BQ/Base 实时影子已退出活动路线；不读取历史进度或补发迁移奖励。
+M.0/M.1/M.2 已完成的自动证据作为基线保留，下文历史阶段表不再构成待办。
 旧段落的测试数、待确认项及 BLOCKED 原因均是当时证据；不能作为新的工作目标。
 事件时 Crafting 归属与 Detect 新旧版本并发已由用户决定并由 R.2.34 实现，
 不再向用户重复询问这两项。
@@ -211,7 +211,13 @@ R1-03 重试与 PARTY 事件归属审计补充（2026-10-11）：CodeGraph 对 `
 | R2.9 Location / Meeting 行为兼容闭环 | 自动验收完成；Forge/GTNH 与跨服时序仍 BLOCKED | 当前只读 S2 `DefaultQuests` 画像含 33 个 Location、1 个 Meeting；互动类没有实际 occurrence，不纳入本批。固定对照 BQ `TaskLocation.detect/tickTask` 与 `TaskMeeting.detect/tickTask`。Meeting 已修复最大共享半径快照下逐 Task AABB 过滤，Core 41 项与隔离 PostgreSQL PARTY 集成 1 项通过。Location 新增完整导入/持久化/运行回归：合成 BQ JSON 经 migration 发布，读取后的 `QuestObservationPlan` 启用位置观察；与 Adapter `locationObserved` 的 `dimension/x/y/z/biome` 字段一致的事实，在在线 PARTY 资格下分别写入个人 PLAYER 进度；确认原事实键幂等、未领奖时不重开、手动领奖后按 `claimed_at` 冷却并进入 cycle 1。当前 33 项画像仍只依赖 dimension，未扩展未使用的 structure/视线/biome 行为。定向验收 Core 267、Importer 47（含隔离 PG migration 测试）、Meeting PG 1，共 315 项、0 skipped/failure/error；根 `compileJava compileTestJava assemble verifyUi2SelfContained` 通过。合成事实不证明真实 Forge/GTNH 100/60 tick、实体注册/NBT 或多服 PARTY 时序。 |
 | R2.10 Checkbox 认证手动确认与导入/JDBC 闭环 | 自动验收完成；BQ 运行配置/Party/GTNH 运行仍 BLOCKED | 固定源码显示 `TaskCheckbox.detect` 为空，`NetTaskCheckbox` 只接受认证发送者；`fullySyncQuests` 默认 false 且注释标记 NYI，但配置仍被读取和使用。S2 磁盘 `questbook.cfg` 为 false，运行时是否加载/覆盖未验证。新增集成测试从 BQ Checkbox JSON 经 importer 发布，到认证服务、Planner、Runtime 与隔离 PostgreSQL：仅点击者 PLAYER 进度完成，另一玩家无进度，重复确认不重复生效，观察计划不启用背包/流体轮询。`Core 267 + Importer 48 = 315`，0 skipped/failure/error；assemble、自包含门禁通过。Base 仍不支持 Checkbox 与 PARTY/TEAM/PUBLIC 主体混合；未验证真实终端/Forge 交互。 |
 
-## 稳定检查点结论
+## 当前 Base-only 新服口径（2026-10-11）
+
+当前目标不再是把旧服 BQ 玩家状态搬入 Base，而是让无 BQ Mod 的新服务器从空进度启动。导入只处理 3,744 个 Quest、47 章及其版本化内容；所有导入 Quest 显式为 PLAYER，Task 带个人模式标记，玩家加入 Party 也不得聚合库存或扇出事实。旧玩家进度/领取/Choice、旧 BQ Party 与实时影子双算从活动路线删除，历史工具和审计记录继续保留但不构成待办。
+
+当前活动门槛只有：真实 9 类 Task/4 类 Reward 的运行发布门禁；完整任务书在隔离空库的幂等版本化导入；全新合成玩家的进度/奖励严格一次闭环；玩家终端与管理员只读健康摘要；最后的全量构建、自包含和视觉收口。生产 DDL、部署、开关与 Base-only 新服人工验收仍在本工作包之外。
+
+## 稳定检查点结论（历史基线）
 
 本检查点已经具备 Quest 定义、编辑、检测、奖励、PostgreSQL 基础、玩家任务中心、管理员编辑入口，
 以及 BetterQuesting 定义/玩家进度的只读导入能力。BQ/Base 影子差异目前仅是离线分析基础，尚未接入
@@ -220,13 +226,7 @@ R1-03 重试与 PARTY 事件归属审计补充（2026-10-11）：CodeGraph 对 `
 稳定检查点之后已经完成 PARTY/TEAM/PUBLIC 自动验收：PostgreSQL 主体/成员关系、服务端认证管理、共享进度
 选择、按完成周期冻结当前成员为奖励接收者、离线延期交付以及 UI2 主体管理均已形成代码和自动测试。
 离队玩家的冻结奖励会脱离当前成员关系继续出现在终端；领取以“原进度主体＋任务版本＋周期＋认证收件人”
-精确定位，同一玩家在两个主体拥有相同任务周期时不会串领。因此 BetterQuesting 仍未被替代；以下后续能力
-保持未完成：
-
-1. 管理员诊断中心与受控重算、重置、修复；
-2. 玩家进度的幂等迁移、冲突处理、审计与回滚（不否定 M.1 已有的定义/章节 dry-run 和回滚实现）；
-3. BQ/Base 实时影子双算与自动切换证据；
-4. 生产 DDL、灰度启用、BQ 冻结/停用和正式切换。
+精确定位，同一玩家在两个主体拥有相同任务周期时不会串领。因此 BetterQuesting 仍未被替代。这里原有的旧进度迁移、旧 Party 映射和实时影子待办已退出当前路线；现行待办仅以上方 Base-only 口径和[实施路线](betterquesting-next-stages-2026-10-11.md)为准。
 
 历史 Worklog 中各阶段的“下一步”只代表当时状态；后续工作顺序和完成判断以本矩阵为准。
 
