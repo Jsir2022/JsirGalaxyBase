@@ -1411,6 +1411,18 @@ public final class TerminalService {
         TerminalQuestCenterSectionSnapshot.Management management=new TerminalQuestCenterSectionSnapshot.Management(
             intent.getQuery(),lifecycle==null?"":lifecycle.name(),page.getPage(),page.getPageSize(),page.getTotal(),definitions,detail,
             managementTypes(QuestElementKind.TASK),managementTypes(QuestElementKind.REWARD),migrationRows);
+        List<String> healthRows=new ArrayList<String>();
+        if(questContentMigrationQuery!=null){
+            try {
+                java.util.Optional<com.jsirgalaxybase.quest.core.QuestRuntimeHealthSummary> health=questContentMigrationQuery.health(actor);
+                if(health.isPresent()){
+                    com.jsirgalaxybase.quest.core.QuestRuntimeHealthSummary value=health.get();
+                    healthRows.add("任务书 · Quest "+value.getQuests()+" · 章节 "+value.getChapters()+" · revision "+value.getCatalogRevision());
+                    healthRows.add("目标 "+value.getTasks()+" · 奖励 "+value.getRewards()+" · 奖励失败 "+value.getFailedRewards()+" · 消费待恢复 "+value.getPendingConsumption());
+                } else healthRows.add("健康摘要暂不可用");
+            } catch(RuntimeException unavailable){healthRows.add("数据库健康查询失败，请稍后刷新；未改变任务或奖励。");}
+        } else healthRows.add("健康查询模块未启用");
+        management=management.withHealthRows(healthRows);
         return new TerminalQuestCenterSectionSnapshot("READY",message,
             TerminalQuestCenterSectionSnapshot.View.ADMIN,"","","all",intent.getQuery(),
             java.util.Collections.<TerminalQuestCenterSectionSnapshot.Chapter>emptyList(),0,6,0,

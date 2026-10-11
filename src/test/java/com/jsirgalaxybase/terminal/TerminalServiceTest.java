@@ -245,6 +245,7 @@ public class TerminalServiceTest {
             assertEquals(player,actor[0].getId());assertEquals("Admin",actor[0].getDisplayName());
             assertEquals("steel",request[0].getQuery());assertEquals(3,request[0].getPage());assertEquals(20,request[0].getPageSize());
             assertEquals(TerminalQuestCenterSectionSnapshot.View.ADMIN,result.getView());assertNotNull(result.getManagement());assertEquals("bq-test",result.getManagement().getMigrations().get(0).getBatchId());
+            assertEquals(Collections.singletonList("健康摘要暂不可用"),result.getManagement().getHealthRows());
         }finally{TerminalService.installQuestContentMigrationQuery(null);TerminalService.installQuestDefinitionManagementQuery(null);TerminalService.installQuestCenterQuery(null);}
     }
 

@@ -88,6 +88,7 @@ public final class TerminalVisualScenario {
     }
 
     private static void addQuestManagement(List<TerminalVisualScenario> result,final String themeId,final UiTheme theme){
+        result.add(new TerminalVisualScenario("terminal-quest-health-"+themeId,theme,new DocumentFactory(){public UiDocument create(){return new QuestManagementVisualDocument(new QuestManagementVisualModel(shellModel(),"","","",0,20,0,Collections.<QuestManagementVisualModel.Definition>emptyList()).withHealthRows(Arrays.asList("任务书 · Quest 3744 · 章节 47 · revision 3744","目标 5620 · 奖励 5448 · 奖励失败 2 · 消费待恢复 3")),TerminalActionPort.NONE,QuestManagementActionPort.NONE,TerminalWindowProfile.STANDARD);}}));
         final List<QuestManagementVisualModel.Definition> rows=Arrays.asList(
             new QuestManagementVisualModel.Definition("11111111-1111-1111-1111-111111111111",3,"银河公共钢材长期补给任务","DRAFT","draft-hash",0,5,3),
             new QuestManagementVisualModel.Definition("22222222-2222-2222-2222-222222222222",2,"蒸汽时代毕业认证","PUBLISHED","published-hash",1720000000000L,8,4),

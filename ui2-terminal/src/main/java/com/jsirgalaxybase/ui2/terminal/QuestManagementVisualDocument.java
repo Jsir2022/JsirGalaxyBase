@@ -125,6 +125,7 @@ public final class QuestManagementVisualDocument extends ComponentUiDocument {
             .child(button("quest-admin-next", "›", new Runnable() { public void run() { actions.page(model.getPage() + 1); } }, model.getPage() + 1 < model.getPages())).build());
         UiElement.Builder content=UiElement.type("Column").key("quest-admin").child(tools);
         if(!model.getMigrations().isEmpty()){QuestManagementVisualModel.Migration migration=model.getMigrations().get(0);content.child(label("quest-migration-latest","迁移 "+migration.getBatchId()+" · "+migration.getStatus()+" · 新增 "+migration.getCreated()+" · 变更 "+migration.getVersioned()+" · 相同 "+migration.getUnchanged()+" · 阻塞 "+migration.getErrorCount()+" · 警告 "+migration.getWarningCount()+" · "+shortHash(migration.getSourceHash()),false));String diagnostic=firstDiagnostic(migration.getDiagnostic());if(!diagnostic.isEmpty())content.child(label("quest-migration-diagnostic",diagnostic,false));}
+        for(int i=0;i<model.getHealthRows().size();i++)content.child(label("quest-health-"+i,model.getHealthRows().get(i),false));
         return content.child(rows.build()).build();
     }
 
@@ -349,6 +350,7 @@ public final class QuestManagementVisualDocument extends ComponentUiDocument {
             .child(LayoutSpec.of("quest-admin-next", LayoutKind.LEAF).preferred(18, 0).build()).build());
         LayoutSpec.Builder root=LayoutSpec.of("quest-admin", LayoutKind.COLUMN).flex(1).padding(new Insets(3, 3, 3, 3)).gap(3).child(tools);
         if(!model.getMigrations().isEmpty()){root.child(LayoutSpec.of("quest-migration-latest",LayoutKind.LEAF).preferred(0,compact?10:13).build());if(!firstDiagnostic(model.getMigrations().get(0).getDiagnostic()).isEmpty())root.child(LayoutSpec.of("quest-migration-diagnostic",LayoutKind.LEAF).preferred(0,compact?10:13).build());}
+        for(int i=0;i<model.getHealthRows().size();i++)root.child(LayoutSpec.of("quest-health-"+i,LayoutKind.LEAF).preferred(0,compact?10:13).build());
         return root.child(list.build()).build();
     }
 
@@ -372,13 +374,17 @@ public final class QuestManagementVisualDocument extends ComponentUiDocument {
             .child(actionsRow.build()).child(LayoutSpec.of("quest-admin-detail-meta",LayoutKind.LEAF).flex(1).build());
         LayoutSpec tasks = elementLayout("quest-admin-detail-tasks", detail.getTasks(), compact);
         LayoutSpec rewards = elementLayout("quest-admin-detail-rewards", detail.getRewards(), compact);
+        boolean hasImpactSummary=!option(detail,"impact.summary","").isEmpty();
+        boolean truncatedImpact=Boolean.parseBoolean(option(detail,"impact.truncated","false"));
+        int impactRows=2+(hasImpactSummary?1:0)+(truncatedImpact?1:0);
+        LayoutSpec.Builder impact=LayoutSpec.of("quest-admin-detail-impact",LayoutKind.COLUMN)
+            .preferred(0,6+12*impactRows+2*(impactRows-1)).padding(new Insets(3,3,3,3)).gap(2)
+            .child(LayoutSpec.of("quest-admin-detail-impact-title",LayoutKind.LEAF).preferred(0,12).build())
+            .child(LayoutSpec.of("quest-admin-detail-impact-counts",LayoutKind.LEAF).preferred(0,12).build());
+        if(hasImpactSummary)impact.child(LayoutSpec.of("quest-admin-detail-impact-summary",LayoutKind.LEAF).preferred(0,12).build());
+        if(truncatedImpact)impact.child(LayoutSpec.of("quest-admin-detail-impact-truncated",LayoutKind.LEAF).preferred(0,12).build());
         return LayoutSpec.of("quest-admin-detail", LayoutKind.COLUMN).flex(1).padding(new Insets(3, 3, 3, 3)).gap(3)
-            .child(heading.build()).child(LayoutSpec.of("quest-admin-detail-impact",LayoutKind.COLUMN)
-                .preferred(0,compact?32:42).padding(new Insets(3,3,3,3)).gap(2)
-                .child(LayoutSpec.of("quest-admin-detail-impact-title",LayoutKind.LEAF).preferred(0,12).build())
-                .child(LayoutSpec.of("quest-admin-detail-impact-counts",LayoutKind.LEAF).preferred(0,12).build())
-                .child(LayoutSpec.of("quest-admin-detail-impact-summary",LayoutKind.LEAF).flex(1).build())
-                .child(LayoutSpec.of("quest-admin-detail-impact-truncated",LayoutKind.LEAF).flex(1).build()).build())
+            .child(heading.build()).child(impact.build())
             .child(LayoutSpec.of("quest-admin-detail-columns", LayoutKind.ROW).flex(1).gap(3)
                 .child(tasks).child(rewards).build()).build();
     }
@@ -396,7 +402,25 @@ public final class QuestManagementVisualDocument extends ComponentUiDocument {
                 .child(LayoutSpec.of("quest-admin-editor-cancel",LayoutKind.LEAF).flex(1).build()).child(LayoutSpec.of("quest-admin-editor-save",LayoutKind.LEAF).flex(1).build()).build()).build()).build();}
     private static LayoutSpec choiceLayout(String row,String label,String and,String or,boolean compact){return LayoutSpec.of(row,LayoutKind.ROW).preferred(0,compact?18:22).gap(3).child(LayoutSpec.of(label,LayoutKind.LEAF).flex(1).build()).child(LayoutSpec.of(and,LayoutKind.LEAF).preferred(45,0).build()).child(LayoutSpec.of(or,LayoutKind.LEAF).preferred(45,0).build()).build();}
     private LayoutSpec prerequisiteEditorLayout(boolean compact){LayoutSpec.Builder card=LayoutSpec.of("quest-prerequisite-picker",LayoutKind.COLUMN).flex(1).padding(new Insets(4,4,4,4)).gap(2).child(LayoutSpec.of("quest-prerequisite-title",LayoutKind.LEAF).preferred(0,14).build());int shown=0;QuestManagementVisualModel.Definition summary=model.getDetail().getSummary();for(QuestManagementVisualModel.Definition candidate:model.getDefinitions()){if(candidate.getId().equals(summary.getId())||shown>=8)continue;shown++;card.child(LayoutSpec.of("quest-prerequisite-"+candidate.getId(),LayoutKind.LEAF).preferred(0,compact?15:19).build());}if(shown==0)card.child(LayoutSpec.of("quest-prerequisite-empty",LayoutKind.LEAF).flex(1).build());card.child(LayoutSpec.of("quest-prerequisite-actions",LayoutKind.ROW).preferred(0,compact?17:21).gap(3).child(LayoutSpec.of("quest-prerequisite-cancel",LayoutKind.LEAF).flex(1).build()).child(LayoutSpec.of("quest-prerequisite-save",LayoutKind.LEAF).flex(1).build()).build());return LayoutSpec.of("quest-prerequisite-editor",LayoutKind.COLUMN).flex(1).padding(new Insets(3,3,3,3)).child(card.build()).build();}
-    private LayoutSpec behaviorEditorLayout(boolean compact){LayoutSpec.Builder card=LayoutSpec.of("quest-behavior-picker",LayoutKind.COLUMN).flex(1).padding(new Insets(4,4,4,4)).gap(2).child(LayoutSpec.of("quest-behavior-title",LayoutKind.LEAF).preferred(0,14).build());String[] keys=edit.behaviorPage==0?new String[]{"repeat","relative","visibility","main"}:edit.behaviorPage==1?new String[]{"auto","simultaneous","locked","silent"}:new String[]{"global","share","icon","update-sound","complete-sound"};for(String key:keys)card.child(LayoutSpec.of("quest-behavior-"+key,LayoutKind.LEAF).preferred(0,compact?16:20).build());card.child(LayoutSpec.of("quest-behavior-pager",LayoutKind.ROW).preferred(0,compact?16:20).gap(3).child(LayoutSpec.of("quest-behavior-prev",LayoutKind.LEAF).flex(1).build()).child(LayoutSpec.of("quest-behavior-next",LayoutKind.LEAF).flex(1).build()).build()).child(LayoutSpec.of("quest-behavior-actions",LayoutKind.ROW).preferred(0,compact?17:21).gap(3).child(LayoutSpec.of("quest-behavior-cancel",LayoutKind.LEAF).flex(1).build()).child(LayoutSpec.of("quest-behavior-save",LayoutKind.LEAF).flex(1).build()).build());return LayoutSpec.of("quest-behavior-editor",LayoutKind.COLUMN).flex(1).padding(new Insets(3,3,3,3)).child(card.build()).build();}
+    private LayoutSpec behaviorEditorLayout(boolean compact) {
+        LayoutSpec.Builder card=LayoutSpec.of("quest-behavior-picker",LayoutKind.COLUMN).flex(1)
+            .padding(new Insets(4,4,4,4)).gap(2)
+            .child(LayoutSpec.of("quest-behavior-title",LayoutKind.LEAF).preferred(0,14).build());
+        String[] keys=edit.behaviorPage==0?new String[]{"repeat","relative","visibility","main"}
+            :edit.behaviorPage==1?new String[]{"auto","simultaneous","locked","silent"}
+            :edit.behaviorPage==2?new String[]{"scope","scope-help","global","share"}
+            :new String[]{"icon","update-sound","complete-sound"};
+        for(String key:keys)card.child(LayoutSpec.of("quest-behavior-"+key,LayoutKind.LEAF)
+            .preferred(0,compact?16:20).build());
+        card.child(LayoutSpec.of("quest-behavior-pager",LayoutKind.ROW).preferred(0,compact?16:20).gap(3)
+            .child(LayoutSpec.of("quest-behavior-prev",LayoutKind.LEAF).flex(1).build())
+            .child(LayoutSpec.of("quest-behavior-next",LayoutKind.LEAF).flex(1).build()).build())
+            .child(LayoutSpec.of("quest-behavior-actions",LayoutKind.ROW).preferred(0,compact?17:21).gap(3)
+                .child(LayoutSpec.of("quest-behavior-cancel",LayoutKind.LEAF).flex(1).build())
+                .child(LayoutSpec.of("quest-behavior-save",LayoutKind.LEAF).flex(1).build()).build());
+        return LayoutSpec.of("quest-behavior-editor",LayoutKind.COLUMN).flex(1)
+            .padding(new Insets(3,3,3,3)).child(card.build()).build();
+    }
     private LayoutSpec elementEditorLayout(boolean compact){QuestElementEditState element=edit.element;LayoutSpec.Builder card=LayoutSpec.of("quest-element-editor-card",LayoutKind.COLUMN).flex(1).padding(new Insets(4,4,4,4)).gap(2)
         .child(LayoutSpec.of("quest-element-editor-title",LayoutKind.LEAF).preferred(0,12).build()).child(LayoutSpec.of("quest-element-editor-key",LayoutKind.LEAF).preferred(0,compact?17:20).build()).child(LayoutSpec.of("quest-element-editor-type",LayoutKind.LEAF).preferred(0,12).build());
         if(element.task)card.child(LayoutSpec.of("quest-element-editor-optional",LayoutKind.LEAF).preferred(0,compact?17:20).build());
