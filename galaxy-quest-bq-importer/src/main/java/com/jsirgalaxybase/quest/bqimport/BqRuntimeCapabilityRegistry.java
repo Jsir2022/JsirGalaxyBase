@@ -16,18 +16,40 @@ public final class BqRuntimeCapabilityRegistry {
         "bq_standard:block_break", "BlockVectorTaskEvaluator + authenticated block-break fact tests",
         "bq_standard:checkbox", "AuthenticatedCheckboxConfirmationService tests",
         "bq_standard:crafting", "ItemVectorTaskEvaluator + crafting statistics/event tests",
-        "bq_standard:fluid", "FluidVectorTaskEvaluator + inventory observation/consumption tests",
-        "bq_standard:hunt", "ScalarTaskEvaluator + authenticated entity-kill fact tests",
+        "bq_standard:fluid", "FluidSnapshotTaskEvaluator + ConsumptionAppliedTaskEvaluator tests",
+        "bq_standard:hunt", "SubjectCountTaskEvaluator + authenticated entity-kill fact tests",
         "bq_standard:location", "LocationTaskEvaluator + observation/repeat tests",
         "bq_standard:meeting", "MeetingTaskEvaluator + nearby-entity observation tests",
-        "bq_standard:optional_retrieval", "ItemVectorTaskEvaluator optional-task tests",
-        "bq_standard:retrieval", "ItemVectorTaskEvaluator + inventory observation/consumption tests");
+        "bq_standard:optional_retrieval", "InventorySnapshotTaskEvaluator optional-task tests",
+        "bq_standard:retrieval", "InventorySnapshotTaskEvaluator + ConsumptionAppliedTaskEvaluator tests");
 
     private static final Map<String, String> REWARD_EVIDENCE = evidence(
-        "bq_standard:choice", "ChoiceRewardHandler + exactly-once selection tests",
-        "bq_standard:item", "ItemRewardHandler + delivery/retry tests",
-        "bq_standard:questcompletion", "QuestCompletionRewardHandler + dependency tests",
-        "bq_standard:xp", "XpRewardHandler + exactly-once delivery tests");
+        "bq_standard:choice", "MinecraftItemRewardDeliveryHandler + exactly-once selection tests",
+        "bq_standard:item", "MinecraftItemRewardDeliveryHandler + delivery/retry tests",
+        "bq_standard:questcompletion", "QuestCompletionRewardDeliveryHandler + dependency tests",
+        "bq_standard:xp", "MinecraftXpRewardDeliveryHandler + exactly-once delivery tests");
+
+    private static final Map<String,String> TASK_FACTS=evidence(
+        "bq_standard:block_break","galaxy:block_broken",
+        "bq_standard:checkbox","galaxy:task_confirmed",
+        "bq_standard:crafting","galaxy:item_produced",
+        "bq_standard:fluid","galaxy:fluid_inventory_observed,galaxy:consumption_applied",
+        "bq_standard:hunt","galaxy:entity_killed",
+        "bq_standard:location","galaxy:location_observed",
+        "bq_standard:meeting","galaxy:nearby_entities_observed",
+        "bq_standard:optional_retrieval","galaxy:inventory_observed,galaxy:consumption_applied",
+        "bq_standard:retrieval","galaxy:inventory_observed,galaxy:consumption_applied");
+
+    private static final Map<String,String> TASK_EVALUATORS=evidence(
+        "bq_standard:block_break","BlockVectorTaskEvaluator",
+        "bq_standard:checkbox","ConfirmationTaskEvaluator",
+        "bq_standard:crafting","ItemVectorTaskEvaluator",
+        "bq_standard:fluid","CompositeTaskEvaluator",
+        "bq_standard:hunt","SubjectCountTaskEvaluator",
+        "bq_standard:location","LocationTaskEvaluator",
+        "bq_standard:meeting","MeetingTaskEvaluator",
+        "bq_standard:optional_retrieval","CompositeTaskEvaluator",
+        "bq_standard:retrieval","CompositeTaskEvaluator");
 
     private BqRuntimeCapabilityRegistry() { }
 
@@ -45,6 +67,8 @@ public final class BqRuntimeCapabilityRegistry {
 
     public static Map<String, String> taskEvidence() { return TASK_EVIDENCE; }
     public static Map<String, String> rewardEvidence() { return REWARD_EVIDENCE; }
+    public static Map<String,String> taskFactTypes() { return TASK_FACTS; }
+    public static Map<String,String> taskEvaluators() { return TASK_EVALUATORS; }
 
     private static Map<String, String> evidence(String... entries) {
         Map<String, String> result = new LinkedHashMap<String, String>();

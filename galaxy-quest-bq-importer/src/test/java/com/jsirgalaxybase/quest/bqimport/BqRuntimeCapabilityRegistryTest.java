@@ -32,4 +32,19 @@ public class BqRuntimeCapabilityRegistryTest {
         assertEquals(BqCompatibilityStatus.UNKNOWN,
             BqRuntimeCapabilityRegistry.taskStatus("addon:unknown"));
     }
+
+    @Test public void publishedTaskChainsResolveToActualRuntimeEvaluators() {
+        com.jsirgalaxybase.quest.core.TaskEvaluatorRegistry runtime=
+            com.jsirgalaxybase.quest.core.BqCompatibleTaskEvaluatorRegistry.firstEventDrivenBatch();
+        assertEquals(BqRuntimeCapabilityRegistry.taskEvidence().keySet(),
+            BqRuntimeCapabilityRegistry.taskFactTypes().keySet());
+        assertEquals(BqRuntimeCapabilityRegistry.taskEvidence().keySet(),
+            BqRuntimeCapabilityRegistry.taskEvaluators().keySet());
+        for(String type:BqRuntimeCapabilityRegistry.taskEvidence().keySet()) {
+            assertEquals(type,runtime.require(type).getTypeId());
+            assertEquals(BqRuntimeCapabilityRegistry.taskEvaluators().get(type),
+                runtime.require(type).getClass().getSimpleName());
+            assertFalse(BqRuntimeCapabilityRegistry.taskFactTypes().get(type).isEmpty());
+        }
+    }
 }
