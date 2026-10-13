@@ -8,6 +8,11 @@ import java.util.UUID;
 import org.junit.Test;
 
 public class QuestCenterPaginatorTest {
+    @Test public void defaultRequestUsesCompactTerminalPageSizes(){
+        QuestCenterPageRequest request=QuestCenterPageRequest.initial();
+        assertEquals(4,request.getChapterPageSize());assertEquals(4,request.getQuestPageSize());
+    }
+
     @Test public void boundsLargeCatalogAndFiltersBeforePaging(){
         UUID chapterId=UUID.randomUUID();List<QuestCenterEntry> quests=new ArrayList<QuestCenterEntry>();
         List<QuestChapterEntry> placements=new ArrayList<QuestChapterEntry>();
@@ -28,6 +33,29 @@ public class QuestCenterPaginatorTest {
         QuestCenterPage page=QuestCenterPaginator.page(new QuestCenterSnapshot(ParticipantId.player(UUID.randomUUID()),
             Collections.<QuestChapterDefinition>emptyList(),Collections.<QuestCenterEntry>emptyList()),request);
         assertEquals(0,page.getQuestPageIndex());assertTrue(page.getQuests().isEmpty());
+    }
+
+    @Test public void resolvesSelectedVisibleQuestAndOnlyVisiblePrerequisiteNames(){
+        UUID player=UUID.randomUUID(),visibleParentId=UUID.randomUUID(),hiddenParentId=UUID.randomUUID();
+        UUID selectedId=UUID.randomUUID();
+        QuestCenterEntry visibleParent=new QuestCenterEntry(quest(visibleParentId,"Visible parent"),null,
+            QuestRewardSummary.EMPTY,QuestStatus.COMPLETED);
+        QuestDefinition selectedDefinition=new QuestDefinition(selectedId,1,"Selected quest","",QuestLogic.AND,
+            QuestLogic.AND,new java.util.LinkedHashSet<UUID>(java.util.Arrays.asList(visibleParentId,hiddenParentId)),
+            Collections.<TaskDefinition>emptyList(),Collections.<RewardDefinition>emptyList());
+        QuestCenterEntry selected=new QuestCenterEntry(selectedDefinition,null,QuestRewardSummary.EMPTY,
+            QuestStatus.AVAILABLE);
+        QuestCenterSnapshot snapshot=new QuestCenterSnapshot(ParticipantId.player(player),
+            Collections.<QuestChapterDefinition>emptyList(),java.util.Arrays.asList(visibleParent,selected));
+
+        QuestCenterPage page=QuestCenterPaginator.page(snapshot,new QuestCenterPageRequest("",selectedId.toString(),
+            "claimable","",0,6,99,7));
+
+        assertTrue("detail selection must not depend on the current page/filter",page.getQuests().isEmpty());
+        assertEquals(selectedId,page.getSelectedQuest().getDefinition().getId());
+        assertEquals(1,page.getVisiblePrerequisites().size());
+        assertEquals(visibleParentId,page.getVisiblePrerequisites().get(0).getDefinition().getId());
+        assertNotEquals(hiddenParentId,page.getVisiblePrerequisites().get(0).getDefinition().getId());
     }
 
     private static QuestDefinition quest(UUID id,String name){TaskDefinition task=new TaskDefinition("check","bq_standard:checkbox",false,Collections.singletonMap("target","1"));return new QuestDefinition(id,1,name,"Description",QuestLogic.AND,QuestLogic.AND,Collections.<UUID>emptySet(),Collections.singletonList(task),Collections.<RewardDefinition>emptyList(),RepeatPolicy.never());}

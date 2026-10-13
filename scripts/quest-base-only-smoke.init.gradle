@@ -1,0 +1,13 @@
+def smokeRunId = System.getenv("QUEST_BASE_ONLY_SMOKE_RUN_ID")
+if (smokeRunId == null || !(smokeRunId ==~ /[A-Za-z0-9._-]{1,80}/)) {
+    throw new GradleException("QUEST_BASE_ONLY_SMOKE_RUN_ID must be a safe one-run identifier")
+}
+
+allprojects { project ->
+    String suffix = project.path == ":" ? "root" : project.path.replace(":", "_")
+    project.layout.buildDirectory.set(new File(rootProject.rootDir,
+        ".gradle/codex-quest-base-only-smoke-${smokeRunId}/build/${suffix}"))
+    if (project.path == ":") {
+        project.ext.set("modVersion", "0.0.0-quest-base-only-smoke")
+    }
+}

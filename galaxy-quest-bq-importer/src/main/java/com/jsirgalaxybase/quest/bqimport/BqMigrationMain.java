@@ -38,13 +38,13 @@ public final class BqMigrationMain {
             // Reject unverified behavior before opening even a read-only database connection.
             BqBehaviorInventory.from(manifest).requireRuntimeReady();
         }
+        if ("preview".equals(command) || "apply".equals(command)) confirm();
         BqMigrationDatabaseService service = service();
         BqMigrationDryRun preview = service.dryRun(manifest);
         System.out.print(manifest.toText());
         System.out.print(compatibility(manifest));
         System.out.print(preview.toText());
         if ("dry-run".equals(command)) return;
-        confirm();
         if ("preview".equals(command)) {
             System.out.println("status=" + service.stage(manifest).getStatus());
             return;
@@ -69,8 +69,10 @@ public final class BqMigrationMain {
     }
 
     private static void confirm() {
-        if (!"ISOLATED_ONLY".equals(System.getenv("BQ_MIGRATION_WRITE_CONFIRM"))) throw new IllegalStateException(
-            "preview/apply/rollback requires BQ_MIGRATION_WRITE_CONFIRM=ISOLATED_ONLY");
+        if (!"ISOLATED_ONLY".equals(System.getenv("BQ_MIGRATION_WRITE_CONFIRM"))) {
+            throw new IllegalStateException("preview/apply/rollback requires BQ_MIGRATION_WRITE_CONFIRM=ISOLATED_ONLY");
+        }
+        BqBaseOnlyPreflight.requireIsolatedLoopbackUrl(required("BQ_MIGRATION_JDBC_URL"), "ISOLATED_ONLY");
     }
 
     private static String required(String name) {

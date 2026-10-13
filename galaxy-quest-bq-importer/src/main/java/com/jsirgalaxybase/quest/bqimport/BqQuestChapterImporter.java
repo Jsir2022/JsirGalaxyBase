@@ -70,7 +70,7 @@ public final class BqQuestChapterImporter {
                 root = gson.fromJson(reader, JsonObject.class);
             }
             entries.add(new QuestChapterEntry(BqQuestDefinitionImporter.uuid(root, "questIDHigh", "questIDLow"),
-                (int) BqTypedJson.number(root, "x", 0L), (int) BqTypedJson.number(root, "y", 0L),
+                int32(root, "x", 0, file), int32(root, "y", 0, file),
                 positiveDimension(root, "sizeX", file), positiveDimension(root, "sizeY", file)));
         }
         return entries;
@@ -90,15 +90,23 @@ public final class BqQuestChapterImporter {
         return new ChapterMetadata(BqTypedJson.string(properties, "name", ""),
             BqTypedJson.string(properties, "desc", ""), icon.size() == 0 ? "" : gson.toJson(icon),
             BqTypedJson.string(properties, "bg_image", ""),
-            (int) BqTypedJson.number(properties, "bg_size", 256L),
+            int32(properties, "bg_size", 256, source),
             visibility(BqTypedJson.string(properties, "visibility", "NORMAL")));
     }
 
     private static int positiveDimension(JsonObject root, String key, Path source) throws IOException {
-        long value = BqTypedJson.number(root, key, 24L);
-        if (value < 1L || value > Integer.MAX_VALUE) throw new IOException(
+        int value = int32(root, key, 24, source);
+        if (value < 1) throw new IOException(
             "Invalid " + key + " in " + source + ": " + value);
-        return (int) value;
+        return value;
+    }
+
+    private static int int32(JsonObject root, String key, int fallback, Path source) throws IOException {
+        try {
+            return BqTypedJson.int32(root, key, fallback);
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException("Invalid " + key + " in " + source + ": " + invalid.getMessage(), invalid);
+        }
     }
 
     private static Map<UUID, OrderedName> readOrder(Path source) throws IOException {

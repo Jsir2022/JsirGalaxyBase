@@ -50,6 +50,34 @@ public class BqStandardCodecTest {
     }
 
     @Test
+    public void rejectsFractionalAndOutOfRangeStackAndFluidIntegersInsteadOfTruncating() {
+        Gson gson = new Gson();
+        JsonObject fractionalItem = gson.fromJson("{\"taskID:8\":\"bq_standard:retrieval\","
+            + "\"requiredItems:9\":{\"0:10\":{\"id:8\":\"minecraft:iron_ingot\","
+            + "\"Count:3\":1.5}}}", JsonObject.class);
+        try {
+            codec.task(fractionalItem, 0);
+            fail("fractional stack count must not be truncated");
+        } catch (IllegalArgumentException expected) { }
+
+        JsonObject oversizedItem = gson.fromJson("{\"taskID:8\":\"bq_standard:retrieval\","
+            + "\"requiredItems:9\":{\"0:10\":{\"id:8\":\"minecraft:iron_ingot\","
+            + "\"Count:3\":2147483648}}}", JsonObject.class);
+        try {
+            codec.task(oversizedItem, 0);
+            fail("out-of-range stack count must not wrap");
+        } catch (IllegalArgumentException expected) { }
+
+        JsonObject fractionalFluid = gson.fromJson("{\"taskID:8\":\"bq_standard:fluid\","
+            + "\"requiredFluids:9\":{\"0:10\":{\"FluidName:8\":\"water\","
+            + "\"Amount:3\":1000.5}}}", JsonObject.class);
+        try {
+            codec.task(fractionalFluid, 0);
+            fail("fractional fluid amount must not be truncated");
+        } catch (IllegalArgumentException expected) { }
+    }
+
+    @Test
     public void decodesFluidBlockAndQuestCompletionReward() {
         JsonObject fluid = new Gson().fromJson("{\"taskID:8\":\"bq_standard:fluid\",\"requiredFluids:9\":{"
             + "\"0:10\":{\"FluidName:8\":\"water\",\"Amount:3\":1000}}}", JsonObject.class);

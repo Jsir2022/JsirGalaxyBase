@@ -2,6 +2,7 @@ package com.jsirgalaxybase.quest.bqimport;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import java.util.Arrays;
 import java.util.LinkedHashSet;
@@ -20,6 +21,19 @@ public class BqRuntimeCapabilityRegistryTest {
             BqRuntimeCapabilityRegistry.rewardEvidence().keySet());
         for (String evidence : BqRuntimeCapabilityRegistry.taskEvidence().values()) assertFalse(evidence.isEmpty());
         for (String evidence : BqRuntimeCapabilityRegistry.rewardEvidence().values()) assertFalse(evidence.isEmpty());
+        assertEquals(BqRuntimeCapabilityRegistry.taskEvidence().keySet(),
+            BqRuntimeCapabilityRegistry.taskOptionKeys().keySet());
+        assertEquals(BqRuntimeCapabilityRegistry.rewardEvidence().keySet(),
+            BqRuntimeCapabilityRegistry.rewardOptionKeys().keySet());
+        assertEquals(BqRuntimeCapabilityRegistry.taskEvidence().keySet(),
+            BqRuntimeCapabilityRegistry.taskIntegerOptionKeys().keySet());
+        assertEquals(BqRuntimeCapabilityRegistry.rewardEvidence().keySet(),
+            BqRuntimeCapabilityRegistry.rewardIntegerOptionKeys().keySet());
+        assertTrue(BqRuntimeCapabilityRegistry.taskOptionKeys().get("bq_standard:checkbox").isEmpty());
+        assertTrue(BqRuntimeCapabilityRegistry.taskOptionKeys().get("bq_standard:retrieval")
+            .contains("requiredItems.raw"));
+        assertEquals(new LinkedHashSet<String>(Arrays.asList("biome", "dimension", "posX", "posY", "posZ", "range")),
+            BqRuntimeCapabilityRegistry.taskIntegerOptionKeys().get("bq_standard:location"));
     }
 
     @Test public void decodableFutureTypesRemainNonPublishable() {

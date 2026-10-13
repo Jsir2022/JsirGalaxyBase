@@ -30,8 +30,8 @@ import com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot;
 /** Converts the server-authenticated quest read model into a platform-neutral UI document model. */
 public final class QuestCenterVisualModelAdapter {
     private static final String UNPLACED="unplaced";
-    private static final int DEFAULT_CHAPTER_PAGE_SIZE=6;
-    private static final int DEFAULT_QUEST_PAGE_SIZE=7;
+    private static final int DEFAULT_CHAPTER_PAGE_SIZE=4;
+    private static final int DEFAULT_QUEST_PAGE_SIZE=4;
     private QuestCenterVisualModelAdapter() {}
 
     public static QuestCenterVisualModel browse(TerminalVisualModel shell,QuestCenterSnapshot snapshot,
@@ -63,17 +63,63 @@ public final class QuestCenterVisualModelAdapter {
         for(TerminalQuestCenterSectionSnapshot.Chapter value:wire.getChapters())chapters.add(new QuestCenterVisualModel.Chapter(value.getId(),value.getName(),value.getCompleted(),value.getTotal()));
         List<QuestCenterVisualModel.QuestSummary> quests=new ArrayList<QuestCenterVisualModel.QuestSummary>();
         for(TerminalQuestCenterSectionSnapshot.Quest value:wire.getQuests())quests.add(wireSummary(value));
-        QuestCenterVisualModel.QuestDetail detail=null;if(wire.getDetail()!=null){TerminalQuestCenterSectionSnapshot.Detail source=wire.getDetail();
-            List<QuestCenterVisualModel.TaskRow> tasks=new ArrayList<QuestCenterVisualModel.TaskRow>();for(TerminalQuestCenterSectionSnapshot.Task value:source.getTasks())tasks.add(new QuestCenterVisualModel.TaskRow(value.getKey(),value.getLabel(),value.getDetail(),value.getValue(),value.getTarget(),value.isConfirmable(),value.isSubmittable(),value.isDetectable()));
-            List<QuestCenterVisualModel.RewardRow> rewards=new ArrayList<QuestCenterVisualModel.RewardRow>();for(TerminalQuestCenterSectionSnapshot.Reward value:source.getRewards()){VisualItem item=value.getItemRegistry().isEmpty()?null:new VisualItem("quest-reward-"+value.getKey(),value.getItemRegistry(),value.getItemMeta(),value.getItemName(),value.getQuantity());List<QuestCenterVisualModel.ChoiceOption> choices=new ArrayList<QuestCenterVisualModel.ChoiceOption>();int choiceIndex=0;for(TerminalQuestCenterSectionSnapshot.Choice choice:value.getChoices()){VisualItem choiceItem=new VisualItem("quest-choice-"+value.getKey()+"-"+choiceIndex,choice.getItemRegistry(),choice.getItemMeta(),choice.getItemName(),choice.getQuantity());choices.add(new QuestCenterVisualModel.ChoiceOption(choiceItem,choice.getItemName()));choiceIndex++;}rewards.add(new QuestCenterVisualModel.RewardRow(value.getKey(),value.getLabel(),value.getDetail(),item,value.isClaimable(),value.isClaimed(),choices,value.getSelectedChoiceIndex()));}
-            detail=new QuestCenterVisualModel.QuestDetail(wireSummary(source.getSummary()),source.getDescription(),source.getPrerequisiteText(),source.getRepeatText(),tasks,rewards);}
+        QuestCenterVisualModel.QuestDetail detail=null;
+        if(wire.getDetail()!=null){
+            TerminalQuestCenterSectionSnapshot.Detail source=wire.getDetail();
+            List<QuestCenterVisualModel.TaskRow> tasks=new ArrayList<QuestCenterVisualModel.TaskRow>();
+            for(TerminalQuestCenterSectionSnapshot.Task value:source.getTasks()){
+                List<QuestCenterVisualModel.ComponentRow> components=new ArrayList<QuestCenterVisualModel.ComponentRow>();
+                for(TerminalQuestCenterSectionSnapshot.Component component:value.getComponents())components.add(wireComponent(
+                    "quest-task-"+value.getKey()+"-"+component.getSourceIndex(),component));
+                tasks.add(new QuestCenterVisualModel.TaskRow(value.getKey(),value.getLabel(),value.getDetail(),value.getValue(),
+                    value.getTarget(),value.isConfirmable(),value.isSubmittable(),value.isDetectable(),value.getTypeId(),components));
+            }
+            List<QuestCenterVisualModel.RewardRow> rewards=new ArrayList<QuestCenterVisualModel.RewardRow>();
+            for(TerminalQuestCenterSectionSnapshot.Reward value:source.getRewards()){
+                VisualItem item=visualItem("quest-reward-"+value.getKey(),value.getItemRegistry(),value.getItemMeta(),
+                    value.getItemName(),value.getQuantity());
+                List<QuestCenterVisualModel.ComponentRow> components=new ArrayList<QuestCenterVisualModel.ComponentRow>();
+                for(TerminalQuestCenterSectionSnapshot.Component component:value.getComponents())components.add(wireComponent(
+                    "quest-reward-"+value.getKey()+"-"+component.getSourceIndex(),component));
+                List<QuestCenterVisualModel.ChoiceOption> choices=new ArrayList<QuestCenterVisualModel.ChoiceOption>();
+                for(TerminalQuestCenterSectionSnapshot.Choice choice:value.getChoices()){
+                    String label=choice.getItemName().trim().isEmpty()?choice.getItemRegistry():choice.getItemName();
+                    if(label.trim().isEmpty())label="未注册物品 #"+choice.getSourceIndex();
+                    VisualItem choiceItem=visualItem("quest-choice-"+value.getKey()+"-"+choice.getSourceIndex(),
+                        choice.getItemRegistry(),choice.getItemMeta(),label,choice.getQuantity());
+                    choices.add(new QuestCenterVisualModel.ChoiceOption(choice.getSourceIndex(),choiceItem,label,choice.getNbt(),choice.getQuantity()));
+                }
+                rewards.add(new QuestCenterVisualModel.RewardRow(value.getKey(),value.getLabel(),value.getDetail(),item,
+                    value.isClaimable(),value.isClaimed(),choices,value.getSelectedChoiceIndex(),value.getTypeId(),components,value.getItemNbt()));
+            }
+            List<QuestCenterVisualModel.PrerequisiteRow> prerequisites=new ArrayList<QuestCenterVisualModel.PrerequisiteRow>();
+            for(TerminalQuestCenterSectionSnapshot.Prerequisite value:source.getPrerequisites())prerequisites.add(
+                new QuestCenterVisualModel.PrerequisiteRow(value.getId(),value.getName(),value.getState(),value.isNavigable()));
+            detail=new QuestCenterVisualModel.QuestDetail(wireSummary(source.getSummary()),source.getDescription(),
+                source.getPrerequisiteText(),source.getRepeatText(),tasks,rewards,source.getDefinitionVersion(),source.getCycle(),prerequisites);
+        }
         QuestCenterVisualModel.LoadState load="UNAVAILABLE".equalsIgnoreCase(wire.getServiceState())||"ERROR".equalsIgnoreCase(wire.getServiceState())?QuestCenterVisualModel.LoadState.ERROR:quests.isEmpty()&&detail==null?QuestCenterVisualModel.LoadState.EMPTY:QuestCenterVisualModel.LoadState.READY;
         QuestCenterVisualModel result=new QuestCenterVisualModel(shell,wire.getView()==TerminalQuestCenterSectionSnapshot.View.DETAIL?QuestCenterVisualModel.View.DETAIL:QuestCenterVisualModel.View.BROWSE,load,
             wire.getSelectedChapterId(),wire.getSelectedQuestId(),wire.getFilter(),wire.getQuery(),wire.getMessage(),chapters,wire.getChapterPageIndex(),wire.getChapterPageSize(),wire.getChapterTotalEntries(),quests,wire.getQuestPageIndex(),wire.getQuestPageSize(),wire.getQuestTotalEntries(),detail);
         List<QuestCenterVisualModel.Participant> participants=new ArrayList<QuestCenterVisualModel.Participant>();for(TerminalQuestCenterSectionSnapshot.Participant value:wire.getParticipants()){List<QuestCenterVisualModel.Member> members=new ArrayList<QuestCenterVisualModel.Member>();for(TerminalQuestCenterSectionSnapshot.Member member:value.getMembers())members.add(new QuestCenterVisualModel.Member(member.getPlayerId(),member.getRole(),member.getJoinedAt(),member.getMembershipVersion()));participants.add(new QuestCenterVisualModel.Participant(value.getType(),value.getId(),value.getName(),value.getRole(),value.getRevision(),value.getMemberCount(),members));}return result.withParticipants(participants);
     }
 
-    private static QuestCenterVisualModel.QuestSummary wireSummary(TerminalQuestCenterSectionSnapshot.Quest value){VisualItem icon=value.getIconRegistry().isEmpty()?null:new VisualItem("quest-icon-"+value.getId(),value.getIconRegistry(),value.getIconMeta(),value.getIconName(),1);QuestCenterVisualModel.QuestState state;try{state=QuestCenterVisualModel.QuestState.valueOf(value.getState());}catch(RuntimeException invalid){state=QuestCenterVisualModel.QuestState.AVAILABLE;}return new QuestCenterVisualModel.QuestSummary(value.getId(),value.getChapterId(),value.getName(),value.getSubtitle(),state,value.getCompletedTasks(),value.getTotalTasks(),icon,value.isTracked());}
+    private static QuestCenterVisualModel.QuestSummary wireSummary(TerminalQuestCenterSectionSnapshot.Quest value){VisualItem icon=visualItem("quest-icon-"+value.getId(),value.getIconRegistry(),value.getIconMeta(),value.getIconName(),1);QuestCenterVisualModel.QuestState state;try{state=QuestCenterVisualModel.QuestState.valueOf(value.getState());}catch(RuntimeException invalid){state=QuestCenterVisualModel.QuestState.AVAILABLE;}return new QuestCenterVisualModel.QuestSummary(value.getId(),value.getChapterId(),value.getName(),value.getSubtitle(),state,value.getCompletedTasks(),value.getTotalTasks(),icon,value.isTracked());}
+
+    private static QuestCenterVisualModel.ComponentRow wireComponent(String id,TerminalQuestCenterSectionSnapshot.Component value){
+        String label=value.getDisplayName().trim().isEmpty()?value.getIdentity():value.getDisplayName();
+        if(label.trim().isEmpty())label=value.getKey();
+        VisualItem item="item".equals(value.getKind())?visualItem(id,value.getIdentity(),value.getMetadata(),label,value.getQuantity()):null;
+        return new QuestCenterVisualModel.ComponentRow(value.getSourceIndex(),value.getKind(),value.getKey(),value.getIdentity(),
+            value.getDisplayName(),value.getMetadata(),value.getQuantity(),value.getProgress(),value.getTarget(),
+            value.getOreDictionary(),value.getNbt(),item);
+    }
+
+    private static VisualItem visualItem(String id,String registry,int meta,String name,long amount){
+        if(registry==null||registry.trim().isEmpty())return null;
+        String display=name==null||name.trim().isEmpty()?registry:name;
+        return new VisualItem(id,registry,meta,display,amount);
+    }
 
     public static QuestCenterVisualModel browse(TerminalVisualModel shell,QuestCenterSnapshot snapshot,
         String selectedChapterId,String filter,String query,int chapterPageIndex,int chapterPageSize,

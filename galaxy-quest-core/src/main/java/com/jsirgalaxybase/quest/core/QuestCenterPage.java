@@ -11,17 +11,28 @@ public final class QuestCenterPage {
     private final List<QuestCenterChapterSummary> chapters;
     private final int chapterPageIndex, chapterPageSize, chapterTotalEntries;
     private final List<QuestCenterEntry> quests;
+    private final QuestCenterEntry selectedQuest;
+    private final List<QuestCenterEntry> visiblePrerequisites;
     private final int questPageIndex, questPageSize, questTotalEntries;
 
     public QuestCenterPage(ParticipantId participantId,String selectedChapterId,
         List<QuestCenterChapterSummary> chapters,int chapterPageIndex,int chapterPageSize,int chapterTotalEntries,
         List<QuestCenterEntry> quests,int questPageIndex,int questPageSize,int questTotalEntries) {
+        this(participantId,selectedChapterId,chapters,chapterPageIndex,chapterPageSize,chapterTotalEntries,
+            quests,questPageIndex,questPageSize,questTotalEntries,null,Collections.<QuestCenterEntry>emptyList());
+    }
+
+    public QuestCenterPage(ParticipantId participantId,String selectedChapterId,
+        List<QuestCenterChapterSummary> chapters,int chapterPageIndex,int chapterPageSize,int chapterTotalEntries,
+        List<QuestCenterEntry> quests,int questPageIndex,int questPageSize,int questTotalEntries,
+        QuestCenterEntry selectedQuest,List<QuestCenterEntry> visiblePrerequisites) {
         if(participantId==null)throw new IllegalArgumentException("participantId is required");
         this.participantId=participantId;this.selectedChapterId=selectedChapterId==null?"":selectedChapterId;
         this.chapters=immutable(chapters);this.chapterPageIndex=Math.max(0,chapterPageIndex);
         this.chapterPageSize=Math.max(1,chapterPageSize);this.chapterTotalEntries=Math.max(this.chapters.size(),chapterTotalEntries);
         this.quests=immutable(quests);this.questPageIndex=Math.max(0,questPageIndex);
         this.questPageSize=Math.max(1,questPageSize);this.questTotalEntries=Math.max(this.quests.size(),questTotalEntries);
+        this.selectedQuest=selectedQuest;this.visiblePrerequisites=immutable(visiblePrerequisites);
     }
     private static <T> List<T> immutable(List<T> values){return Collections.unmodifiableList(new ArrayList<T>(values));}
     public ParticipantId getParticipantId(){return participantId;} public String getSelectedChapterId(){return selectedChapterId;}
@@ -29,4 +40,8 @@ public final class QuestCenterPage {
     public int getChapterPageSize(){return chapterPageSize;} public int getChapterTotalEntries(){return chapterTotalEntries;}
     public List<QuestCenterEntry> getQuests(){return quests;} public int getQuestPageIndex(){return questPageIndex;}
     public int getQuestPageSize(){return questPageSize;} public int getQuestTotalEntries(){return questTotalEntries;}
+    /** Selected detail is resolved only from the caller's already-authorized visible snapshot. */
+    public QuestCenterEntry getSelectedQuest(){return selectedQuest;}
+    /** Only prerequisites present in the same authorized visible snapshot are exposed by name/id. */
+    public List<QuestCenterEntry> getVisiblePrerequisites(){return visiblePrerequisites;}
 }

@@ -2,6 +2,7 @@ package com.jsirgalaxybase.terminal.network;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.nio.charset.StandardCharsets;
 
 import com.jsirgalaxybase.terminal.TerminalBankSectionSnapshot;
 import com.jsirgalaxybase.terminal.TerminalCustomMarketSectionSnapshot;
@@ -30,6 +31,13 @@ import cpw.mods.fml.common.network.simpleimpl.MessageContext;
 import io.netty.buffer.ByteBuf;
 
 public class OpenTerminalApprovedMessage implements IMessage {
+
+    private static final int MAX_QUEST_DESCRIPTION_BYTES = 64 * 1024;
+    private static final int MAX_QUEST_DETAIL_STRING_BYTES = 8 * 1024;
+    private static final int MAX_QUEST_NBT_BYTES = 16 * 1024;
+    private static final int MAX_QUEST_DETAIL_BYTES = 512 * 1024;
+    private static final int MAX_QUEST_DETAIL_COMPONENTS = 512;
+    private static final int MAX_QUEST_DETAIL_CHOICES = 512;
 
     private String selectedPageId;
     private String terminalTitle;
@@ -181,10 +189,27 @@ public class OpenTerminalApprovedMessage implements IMessage {
             ByteBufUtils.writeUTF8String(buf,safe(chapter.getId()));ByteBufUtils.writeUTF8String(buf,safe(chapter.getName()));buf.writeInt(chapter.getCompleted());buf.writeInt(chapter.getTotal());}
         buf.writeInt(model.getQuestPageIndex());buf.writeInt(model.getQuestPageSize());buf.writeInt(model.getQuestTotalEntries());
         int questCount=Math.min(24,model.getQuests().size());buf.writeInt(questCount);for(int questIndex=0;questIndex<questCount;questIndex++)writeQuest(buf,model.getQuests().get(questIndex));
-        buf.writeBoolean(model.getDetail()!=null);if(model.getDetail()!=null){com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Detail detail=model.getDetail();writeQuest(buf,detail.getSummary());
-            ByteBufUtils.writeUTF8String(buf,safe(detail.getDescription()));ByteBufUtils.writeUTF8String(buf,safe(detail.getPrerequisiteText()));ByteBufUtils.writeUTF8String(buf,safe(detail.getRepeatText()));
-            int taskCount=Math.min(64,detail.getTasks().size());buf.writeInt(taskCount);for(int taskIndex=0;taskIndex<taskCount;taskIndex++){com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Task task=detail.getTasks().get(taskIndex);ByteBufUtils.writeUTF8String(buf,safe(task.getKey()));ByteBufUtils.writeUTF8String(buf,safe(task.getLabel()));ByteBufUtils.writeUTF8String(buf,safe(task.getDetail()));buf.writeLong(task.getValue());buf.writeLong(task.getTarget());buf.writeBoolean(task.isConfirmable());buf.writeBoolean(task.isSubmittable());buf.writeBoolean(task.isDetectable());}
-            int rewardCount=Math.min(64,detail.getRewards().size());buf.writeInt(rewardCount);for(int rewardIndex=0;rewardIndex<rewardCount;rewardIndex++){com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Reward reward=model.getDetail().getRewards().get(rewardIndex);ByteBufUtils.writeUTF8String(buf,safe(reward.getKey()));ByteBufUtils.writeUTF8String(buf,safe(reward.getLabel()));ByteBufUtils.writeUTF8String(buf,safe(reward.getDetail()));ByteBufUtils.writeUTF8String(buf,safe(reward.getItemRegistry()));buf.writeInt(reward.getItemMeta());ByteBufUtils.writeUTF8String(buf,safe(reward.getItemName()));buf.writeLong(reward.getQuantity());buf.writeBoolean(reward.isClaimable());buf.writeBoolean(reward.isClaimed());int choiceCount=Math.min(32,reward.getChoices().size());buf.writeInt(choiceCount);for(int choiceIndex=0;choiceIndex<choiceCount;choiceIndex++){com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Choice choice=reward.getChoices().get(choiceIndex);ByteBufUtils.writeUTF8String(buf,safe(choice.getItemRegistry()));buf.writeInt(choice.getItemMeta());ByteBufUtils.writeUTF8String(buf,safe(choice.getItemName()));buf.writeLong(choice.getQuantity());}buf.writeInt(reward.getSelectedChoiceIndex());}}
+        buf.writeBoolean(model.getDetail()!=null);
+        if(model.getDetail()!=null){
+            com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Detail detail=model.getDetail();
+            QuestDetailBudget budget=new QuestDetailBudget();
+            writeQuest(buf,detail.getSummary(),budget);
+            writeQuestText(buf,detail.getDescription(),MAX_QUEST_DESCRIPTION_BYTES,"quest description",budget);
+            writeQuestText(buf,detail.getPrerequisiteText(),MAX_QUEST_DETAIL_STRING_BYTES,"quest prerequisite text",budget);
+            writeQuestText(buf,detail.getRepeatText(),MAX_QUEST_DETAIL_STRING_BYTES,"quest repeat text",budget);
+            buf.writeInt(detail.getDefinitionVersion());buf.writeInt(detail.getCycle());
+            int prerequisiteCount=boundedSize(detail.getPrerequisites(),64,"quest prerequisites");buf.writeInt(prerequisiteCount);
+            for(com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Prerequisite prerequisite:detail.getPrerequisites()){
+                writeQuestText(buf,prerequisite.getId(),MAX_QUEST_DETAIL_STRING_BYTES,"quest prerequisite id",budget);
+                writeQuestText(buf,prerequisite.getName(),MAX_QUEST_DETAIL_STRING_BYTES,"quest prerequisite name",budget);
+                writeQuestText(buf,prerequisite.getState(),MAX_QUEST_DETAIL_STRING_BYTES,"quest prerequisite state",budget);
+                buf.writeBoolean(prerequisite.isNavigable());}
+            int taskCount=boundedSize(detail.getTasks(),64,"quest tasks");buf.writeInt(taskCount);
+            for(com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Task task:detail.getTasks())writeQuestTask(buf,task,budget);
+            int rewardCount=boundedSize(detail.getRewards(),64,"quest rewards");buf.writeInt(rewardCount);
+            for(com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Reward reward:detail.getRewards())writeQuestReward(buf,reward,budget);
+            budget.verify();
+        }
         com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Management management=model.getManagement();buf.writeBoolean(management!=null);if(management!=null){ByteBufUtils.writeUTF8String(buf,safe(management.getQuery()));ByteBufUtils.writeUTF8String(buf,safe(management.getLifecycle()));buf.writeInt(management.getPage());buf.writeInt(management.getPageSize());buf.writeLong(management.getTotal());int definitionCount=Math.min(50,management.getDefinitions().size());buf.writeInt(definitionCount);for(int i=0;i<definitionCount;i++)writeManagedDefinition(buf,management.getDefinitions().get(i));com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.DefinitionDetail managed=management.getDetail();buf.writeBoolean(managed!=null);if(managed!=null){writeManagedDefinition(buf,managed.getSummary());ByteBufUtils.writeUTF8String(buf,safe(managed.getDescription()));ByteBufUtils.writeUTF8String(buf,safe(managed.getPrerequisiteLogic()));ByteBufUtils.writeUTF8String(buf,safe(managed.getTaskLogic()));int prerequisiteCount=Math.min(64,managed.getPrerequisites().size());buf.writeInt(prerequisiteCount);for(int i=0;i<prerequisiteCount;i++)ByteBufUtils.writeUTF8String(buf,safe(managed.getPrerequisites().get(i)));writeManagedElements(buf,managed.getTasks());writeManagedElements(buf,managed.getRewards());writeStringMap(buf,managed.getOptions(),32);}writeElementTypes(buf,management.getTaskTypes());writeElementTypes(buf,management.getRewardTypes());int migrationCount=Math.min(10,management.getMigrations().size());buf.writeInt(migrationCount);for(int i=0;i<migrationCount;i++){com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Migration migration=management.getMigrations().get(i);ByteBufUtils.writeUTF8String(buf,safe(migration.getBatchId()));ByteBufUtils.writeUTF8String(buf,safe(migration.getSourceHash()));ByteBufUtils.writeUTF8String(buf,safe(migration.getStatus()));buf.writeLong(migration.getAppliedAt());buf.writeLong(migration.getRolledBackAt());buf.writeInt(migration.getCreated());buf.writeInt(migration.getVersioned());buf.writeInt(migration.getUnchanged());buf.writeInt(migration.getErrorCount());buf.writeInt(migration.getWarningCount());ByteBufUtils.writeUTF8String(buf,safe(migration.getDiagnostic()));}}
         if (management != null) {
             int healthCount=Math.min(8,management.getHealthRows().size());buf.writeInt(healthCount);
@@ -205,9 +230,33 @@ public class OpenTerminalApprovedMessage implements IMessage {
         for(int i=0;i<chapterCount;i++)chapters.add(new com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Chapter(ByteBufUtils.readUTF8String(buf),ByteBufUtils.readUTF8String(buf),buf.readInt(),buf.readInt()));
         int questPage=buf.readInt(),questSize=buf.readInt(),questTotal=buf.readInt(),questCount=count(buf.readInt(),24,"quest rows");
         List<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Quest> quests=new ArrayList<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Quest>(questCount);for(int i=0;i<questCount;i++)quests.add(readQuest(buf));
-        com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Detail detail=null;if(buf.readBoolean()){com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Quest summary=readQuest(buf);String description=ByteBufUtils.readUTF8String(buf),prerequisite=ByteBufUtils.readUTF8String(buf),repeat=ByteBufUtils.readUTF8String(buf);
-            int taskCount=count(buf.readInt(),64,"quest tasks");List<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Task> tasks=new ArrayList<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Task>(taskCount);for(int i=0;i<taskCount;i++)tasks.add(new com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Task(ByteBufUtils.readUTF8String(buf),ByteBufUtils.readUTF8String(buf),ByteBufUtils.readUTF8String(buf),buf.readLong(),buf.readLong(),buf.readBoolean(),buf.readBoolean(),buf.readBoolean()));
-            int rewardCount=count(buf.readInt(),64,"quest rewards");List<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Reward> rewards=new ArrayList<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Reward>(rewardCount);for(int i=0;i<rewardCount;i++){String rewardKey=ByteBufUtils.readUTF8String(buf),label=ByteBufUtils.readUTF8String(buf),rewardDetail=ByteBufUtils.readUTF8String(buf),registry=ByteBufUtils.readUTF8String(buf);int meta=buf.readInt();String name=ByteBufUtils.readUTF8String(buf);long quantity=buf.readLong();boolean claimable=buf.readBoolean(),claimed=buf.readBoolean();int choiceCount=count(buf.readInt(),32,"quest reward choices");List<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Choice> choices=new ArrayList<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Choice>(choiceCount);for(int choiceIndex=0;choiceIndex<choiceCount;choiceIndex++)choices.add(new com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Choice(ByteBufUtils.readUTF8String(buf),buf.readInt(),ByteBufUtils.readUTF8String(buf),buf.readLong()));rewards.add(new com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Reward(rewardKey,label,rewardDetail,registry,meta,name,quantity,claimable,claimed,choices,buf.readInt()));}detail=new com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Detail(summary,description,prerequisite,repeat,tasks,rewards);}
+        com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Detail detail=null;
+        if(buf.readBoolean()){
+            QuestDetailBudget budget=new QuestDetailBudget();
+            com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Quest summary=readQuest(buf,budget);
+            String description=readQuestText(buf,MAX_QUEST_DESCRIPTION_BYTES,"quest description",budget);
+            String prerequisite=readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest prerequisite text",budget);
+            String repeat=readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest repeat text",budget);
+            int definitionVersion=buf.readInt(),cycle=buf.readInt();
+            int prerequisiteCount=count(buf.readInt(),64,"quest prerequisites");
+            List<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Prerequisite> prerequisites=
+                new ArrayList<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Prerequisite>(prerequisiteCount);
+            for(int i=0;i<prerequisiteCount;i++)prerequisites.add(new com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Prerequisite(
+                readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest prerequisite id",budget),
+                readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest prerequisite name",budget),
+                readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest prerequisite state",budget),buf.readBoolean()));
+            int taskCount=count(buf.readInt(),64,"quest tasks");
+            List<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Task> tasks=
+                new ArrayList<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Task>(taskCount);
+            for(int i=0;i<taskCount;i++)tasks.add(readQuestTask(buf,budget));
+            int rewardCount=count(buf.readInt(),64,"quest rewards");
+            List<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Reward> rewards=
+                new ArrayList<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Reward>(rewardCount);
+            for(int i=0;i<rewardCount;i++)rewards.add(readQuestReward(buf,budget));
+            budget.verify();
+            detail=new com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Detail(summary,description,
+                prerequisite,repeat,tasks,rewards,definitionVersion,cycle,prerequisites);
+        }
         com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Management management=null;if(buf.readBoolean()){String managementQuery=ByteBufUtils.readUTF8String(buf),lifecycle=ByteBufUtils.readUTF8String(buf);int managementPage=buf.readInt(),managementPageSize=buf.readInt();long managementTotal=buf.readLong();int definitionCount=count(buf.readInt(),50,"quest management definitions");List<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Definition> definitions=new ArrayList<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Definition>(definitionCount);for(int i=0;i<definitionCount;i++)definitions.add(readManagedDefinition(buf));com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.DefinitionDetail managed=null;if(buf.readBoolean()){com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Definition summary=readManagedDefinition(buf);String managedDescription=ByteBufUtils.readUTF8String(buf),prerequisiteLogic=ByteBufUtils.readUTF8String(buf),taskLogic=ByteBufUtils.readUTF8String(buf);int prerequisiteCount=count(buf.readInt(),64,"quest prerequisites");List<String> prerequisites=new ArrayList<String>(prerequisiteCount);for(int i=0;i<prerequisiteCount;i++)prerequisites.add(ByteBufUtils.readUTF8String(buf));managed=new com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.DefinitionDetail(summary,managedDescription,prerequisiteLogic,taskLogic,prerequisites,readManagedElements(buf),readManagedElements(buf),readStringMap(buf,32));}List<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.ElementType> taskTypes=readElementTypes(buf),rewardTypes=readElementTypes(buf);int migrationCount=count(buf.readInt(),10,"quest migration batches");List<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Migration> migrations=new ArrayList<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Migration>(migrationCount);for(int i=0;i<migrationCount;i++)migrations.add(new com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Migration(ByteBufUtils.readUTF8String(buf),ByteBufUtils.readUTF8String(buf),ByteBufUtils.readUTF8String(buf),buf.readLong(),buf.readLong(),buf.readInt(),buf.readInt(),buf.readInt(),buf.readInt(),buf.readInt(),ByteBufUtils.readUTF8String(buf)));management=new com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Management(managementQuery,lifecycle,managementPage,managementPageSize,managementTotal,definitions,managed,taskTypes,rewardTypes,migrations);}
         if(management!=null){int healthCount=count(buf.readInt(),8,"quest health rows");List<String> healthRows=new ArrayList<String>(healthCount);for(int i=0;i<healthCount;i++)healthRows.add(ByteBufUtils.readUTF8String(buf));management=management.withHealthRows(healthRows);}
         com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.ChapterManagement chapterManagement=readChapterManagement(buf);
@@ -215,8 +264,147 @@ public class OpenTerminalApprovedMessage implements IMessage {
         return new com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot(service,message,view,chapterId,questId,filter,query,chapters,chapterPage,chapterSize,chapterTotal,quests,questPage,questSize,questTotal,detail,management,chapterManagement).withParticipants(participants);
     }
 
-    private static void writeQuest(ByteBuf buf,com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Quest quest){ByteBufUtils.writeUTF8String(buf,safe(quest.getId()));ByteBufUtils.writeUTF8String(buf,safe(quest.getChapterId()));ByteBufUtils.writeUTF8String(buf,safe(quest.getName()));ByteBufUtils.writeUTF8String(buf,safe(quest.getSubtitle()));ByteBufUtils.writeUTF8String(buf,safe(quest.getState()));buf.writeInt(quest.getCompletedTasks());buf.writeInt(quest.getTotalTasks());ByteBufUtils.writeUTF8String(buf,safe(quest.getIconRegistry()));buf.writeInt(quest.getIconMeta());ByteBufUtils.writeUTF8String(buf,safe(quest.getIconName()));buf.writeBoolean(quest.isTracked());}
-    private static com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Quest readQuest(ByteBuf buf){return new com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Quest(ByteBufUtils.readUTF8String(buf),ByteBufUtils.readUTF8String(buf),ByteBufUtils.readUTF8String(buf),ByteBufUtils.readUTF8String(buf),ByteBufUtils.readUTF8String(buf),buf.readInt(),buf.readInt(),ByteBufUtils.readUTF8String(buf),buf.readInt(),ByteBufUtils.readUTF8String(buf),buf.readBoolean());}
+    private static void writeQuest(ByteBuf buf,com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Quest quest){writeQuest(buf,quest,null);}
+    private static void writeQuest(ByteBuf buf,com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Quest quest,
+        QuestDetailBudget budget){
+        writeQuestField(buf,quest.getId(),"quest id",budget);writeQuestField(buf,quest.getChapterId(),"quest chapter id",budget);
+        writeQuestField(buf,quest.getName(),"quest name",budget);writeQuestField(buf,quest.getSubtitle(),"quest subtitle",budget);
+        writeQuestField(buf,quest.getState(),"quest state",budget);buf.writeInt(quest.getCompletedTasks());
+        buf.writeInt(quest.getTotalTasks());writeQuestField(buf,quest.getIconRegistry(),"quest icon registry",budget);
+        buf.writeInt(quest.getIconMeta());writeQuestField(buf,quest.getIconName(),"quest icon name",budget);
+        buf.writeBoolean(quest.isTracked());writeQuestText(buf,quest.getIconNbt(),MAX_QUEST_NBT_BYTES,"quest icon nbt",budget);
+    }
+    private static com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Quest readQuest(ByteBuf buf){return readQuest(buf,null);}
+    private static com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Quest readQuest(ByteBuf buf,
+        QuestDetailBudget budget){
+        String id=readQuestField(buf,"quest id",budget),chapterId=readQuestField(buf,"quest chapter id",budget);
+        String name=readQuestField(buf,"quest name",budget),subtitle=readQuestField(buf,"quest subtitle",budget);
+        String state=readQuestField(buf,"quest state",budget);int completed=buf.readInt(),total=buf.readInt();
+        String icon=readQuestField(buf,"quest icon registry",budget);int meta=buf.readInt();
+        String iconName=readQuestField(buf,"quest icon name",budget);boolean tracked=buf.readBoolean();
+        String nbt=readQuestText(buf,MAX_QUEST_NBT_BYTES,"quest icon nbt",budget);
+        return new com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Quest(id,chapterId,name,subtitle,
+            state,completed,total,icon,meta,iconName,tracked,nbt);
+    }
+    private static void writeQuestTask(ByteBuf buf,com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Task task,
+        QuestDetailBudget budget){
+        writeQuestText(buf,task.getKey(),MAX_QUEST_DETAIL_STRING_BYTES,"quest task key",budget);
+        writeQuestText(buf,task.getLabel(),MAX_QUEST_DETAIL_STRING_BYTES,"quest task label",budget);
+        writeQuestText(buf,task.getDetail(),MAX_QUEST_DETAIL_STRING_BYTES,"quest task detail",budget);
+        buf.writeLong(task.getValue());buf.writeLong(task.getTarget());buf.writeBoolean(task.isConfirmable());
+        buf.writeBoolean(task.isSubmittable());buf.writeBoolean(task.isDetectable());
+        writeQuestText(buf,task.getTypeId(),MAX_QUEST_DETAIL_STRING_BYTES,"quest task type",budget);
+        int size=boundedSize(task.getComponents(),64,"quest task components");buf.writeInt(size);budget.addComponents(size);
+        for(com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Component value:task.getComponents())
+            writeQuestComponent(buf,value,budget);
+    }
+    private static com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Task readQuestTask(ByteBuf buf,
+        QuestDetailBudget budget){
+        String key=readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest task key",budget);
+        String label=readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest task label",budget);
+        String detail=readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest task detail",budget);
+        long value=buf.readLong(),target=buf.readLong();boolean confirmable=buf.readBoolean();
+        boolean submittable=buf.readBoolean(),detectable=buf.readBoolean();
+        String type=readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest task type",budget);
+        int size=count(buf.readInt(),64,"quest task components");budget.addComponents(size);
+        List<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Component> components=
+            new ArrayList<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Component>(size);
+        for(int i=0;i<size;i++)components.add(readQuestComponent(buf,budget));
+        return new com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Task(key,label,detail,value,target,
+            confirmable,submittable,detectable,type,components);
+    }
+    private static void writeQuestReward(ByteBuf buf,com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Reward reward,
+        QuestDetailBudget budget){
+        writeQuestText(buf,reward.getKey(),MAX_QUEST_DETAIL_STRING_BYTES,"quest reward key",budget);
+        writeQuestText(buf,reward.getLabel(),MAX_QUEST_DETAIL_STRING_BYTES,"quest reward label",budget);
+        writeQuestText(buf,reward.getDetail(),MAX_QUEST_DETAIL_STRING_BYTES,"quest reward detail",budget);
+        writeQuestText(buf,reward.getItemRegistry(),MAX_QUEST_DETAIL_STRING_BYTES,"quest reward item",budget);
+        buf.writeInt(reward.getItemMeta());writeQuestText(buf,reward.getItemName(),MAX_QUEST_DETAIL_STRING_BYTES,"quest reward item name",budget);
+        buf.writeLong(reward.getQuantity());buf.writeBoolean(reward.isClaimable());buf.writeBoolean(reward.isClaimed());
+        int choiceCount=boundedSize(reward.getChoices(),32,"quest reward choices");buf.writeInt(choiceCount);
+        budget.addChoices(choiceCount);
+        for(com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Choice choice:reward.getChoices()){
+            buf.writeInt(choice.getSourceIndex());writeQuestText(buf,choice.getItemRegistry(),MAX_QUEST_DETAIL_STRING_BYTES,"quest choice item",budget);
+            buf.writeInt(choice.getItemMeta());writeQuestText(buf,choice.getItemName(),MAX_QUEST_DETAIL_STRING_BYTES,"quest choice name",budget);
+            buf.writeLong(choice.getQuantity());writeQuestText(buf,choice.getNbt(),MAX_QUEST_NBT_BYTES,"quest choice nbt",budget);}
+        buf.writeInt(reward.getSelectedChoiceIndex());writeQuestText(buf,reward.getTypeId(),MAX_QUEST_DETAIL_STRING_BYTES,"quest reward type",budget);
+        writeQuestText(buf,reward.getItemNbt(),MAX_QUEST_NBT_BYTES,"quest reward nbt",budget);
+        int componentCount=boundedSize(reward.getComponents(),64,"quest reward components");buf.writeInt(componentCount);
+        budget.addComponents(componentCount);
+        for(com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Component component:reward.getComponents())
+            writeQuestComponent(buf,component,budget);
+    }
+    private static com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Reward readQuestReward(ByteBuf buf,
+        QuestDetailBudget budget){
+        String key=readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest reward key",budget);
+        String label=readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest reward label",budget);
+        String detail=readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest reward detail",budget);
+        String registry=readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest reward item",budget);int meta=buf.readInt();
+        String name=readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest reward item name",budget);long quantity=buf.readLong();
+        boolean claimable=buf.readBoolean(),claimed=buf.readBoolean();int choiceCount=count(buf.readInt(),32,"quest reward choices");
+        budget.addChoices(choiceCount);List<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Choice> choices=
+            new ArrayList<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Choice>(choiceCount);
+        for(int i=0;i<choiceCount;i++){int sourceIndex=buf.readInt();String item=readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest choice item",budget);
+            int itemMeta=buf.readInt();String itemName=readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest choice name",budget);
+            long amount=buf.readLong();String nbt=readQuestText(buf,MAX_QUEST_NBT_BYTES,"quest choice nbt",budget);
+            choices.add(new com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Choice(sourceIndex,item,itemMeta,itemName,amount,nbt));}
+        int selected=buf.readInt();String type=readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest reward type",budget);
+        String nbt=readQuestText(buf,MAX_QUEST_NBT_BYTES,"quest reward nbt",budget);int componentCount=count(buf.readInt(),64,"quest reward components");
+        budget.addComponents(componentCount);List<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Component> components=
+            new ArrayList<com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Component>(componentCount);
+        for(int i=0;i<componentCount;i++)components.add(readQuestComponent(buf,budget));
+        return new com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Reward(key,label,detail,registry,meta,name,
+            quantity,claimable,claimed,choices,selected,type,components,nbt);
+    }
+    private static void writeQuestComponent(ByteBuf buf,com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Component value,
+        QuestDetailBudget budget){
+        buf.writeInt(value.getSourceIndex());writeQuestText(buf,value.getKind(),MAX_QUEST_DETAIL_STRING_BYTES,"quest component kind",budget);
+        writeQuestText(buf,value.getKey(),MAX_QUEST_DETAIL_STRING_BYTES,"quest component key",budget);
+        writeQuestText(buf,value.getIdentity(),MAX_QUEST_DETAIL_STRING_BYTES,"quest component identity",budget);
+        writeQuestText(buf,value.getDisplayName(),MAX_QUEST_DETAIL_STRING_BYTES,"quest component name",budget);
+        buf.writeInt(value.getMetadata());buf.writeLong(value.getQuantity());buf.writeLong(value.getProgress());buf.writeLong(value.getTarget());
+        writeQuestText(buf,value.getOreDictionary(),MAX_QUEST_DETAIL_STRING_BYTES,"quest component ore dictionary",budget);
+        writeQuestText(buf,value.getNbt(),MAX_QUEST_NBT_BYTES,"quest component nbt",budget);
+    }
+    private static com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Component readQuestComponent(ByteBuf buf,
+        QuestDetailBudget budget){
+        int index=buf.readInt();String kind=readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest component kind",budget);
+        String key=readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest component key",budget);
+        String identity=readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest component identity",budget);
+        String name=readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest component name",budget);int meta=buf.readInt();
+        long quantity=buf.readLong(),progress=buf.readLong(),target=buf.readLong();
+        String oreDictionary=readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,"quest component ore dictionary",budget);
+        String nbt=readQuestText(buf,MAX_QUEST_NBT_BYTES,"quest component nbt",budget);
+        return new com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Component(index,kind,key,identity,name,
+            meta,quantity,progress,target,oreDictionary,nbt);
+    }
+    private static int boundedSize(List<?> values,int maximum,String label){
+        int size=values==null?0:values.size();if(size>maximum)throw new IllegalArgumentException(label+" count exceeds "+maximum+": "+size);return size;
+    }
+    private static void writeQuestField(ByteBuf buf,String value,String label,QuestDetailBudget budget){
+        if(budget==null)ByteBufUtils.writeUTF8String(buf,safe(value));
+        else writeQuestText(buf,value,MAX_QUEST_DETAIL_STRING_BYTES,label,budget);
+    }
+    private static String readQuestField(ByteBuf buf,String label,QuestDetailBudget budget){
+        return budget==null?ByteBufUtils.readUTF8String(buf):readQuestText(buf,MAX_QUEST_DETAIL_STRING_BYTES,label,budget);
+    }
+    private static void writeQuestText(ByteBuf buf,String value,int maximumBytes,String label,QuestDetailBudget budget){
+        String text=safe(value);int bytes=utf8Length(text);if(bytes>maximumBytes)throw new IllegalArgumentException(label+" exceeds "+maximumBytes+" UTF-8 bytes");
+        if(budget!=null)budget.add(bytes);ByteBufUtils.writeUTF8String(buf,text);
+    }
+    private static String readQuestText(ByteBuf buf,int maximumBytes,String label,QuestDetailBudget budget){
+        String value=ByteBufUtils.readUTF8String(buf);int bytes=utf8Length(value);
+        if(bytes>maximumBytes)throw new IllegalArgumentException(label+" exceeds "+maximumBytes+" UTF-8 bytes");
+        if(budget!=null)budget.add(bytes);return value;
+    }
+    private static int utf8Length(String value){return value.getBytes(StandardCharsets.UTF_8).length;}
+    private static final class QuestDetailBudget{
+        private int components,choices;private long bytes;
+        private void add(int count){bytes+=count;if(bytes>MAX_QUEST_DETAIL_BYTES)throw new IllegalArgumentException("quest detail exceeds "+MAX_QUEST_DETAIL_BYTES+" bytes");}
+        private void addComponents(int count){components+=count;if(components>MAX_QUEST_DETAIL_COMPONENTS)throw new IllegalArgumentException("quest detail component count exceeds "+MAX_QUEST_DETAIL_COMPONENTS);}
+        private void addChoices(int count){choices+=count;if(choices>MAX_QUEST_DETAIL_CHOICES)throw new IllegalArgumentException("quest detail choice count exceeds "+MAX_QUEST_DETAIL_CHOICES);}
+        private void verify(){if(bytes>MAX_QUEST_DETAIL_BYTES)throw new IllegalArgumentException("quest detail exceeds byte budget");}
+    }
     private static void writeManagedDefinition(ByteBuf buf,com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Definition definition){ByteBufUtils.writeUTF8String(buf,safe(definition.getId()));buf.writeInt(definition.getVersion());ByteBufUtils.writeUTF8String(buf,safe(definition.getName()));ByteBufUtils.writeUTF8String(buf,safe(definition.getLifecycle()));ByteBufUtils.writeUTF8String(buf,safe(definition.getContentHash()));buf.writeLong(definition.getPublishedAt());buf.writeInt(definition.getTaskCount());buf.writeInt(definition.getRewardCount());}
     private static com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Definition readManagedDefinition(ByteBuf buf){return new com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.Definition(ByteBufUtils.readUTF8String(buf),buf.readInt(),ByteBufUtils.readUTF8String(buf),ByteBufUtils.readUTF8String(buf),ByteBufUtils.readUTF8String(buf),buf.readLong(),buf.readInt(),buf.readInt());}
     private static void writeChapterManagement(ByteBuf buf,com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.ChapterManagement value){buf.writeBoolean(value!=null);if(value==null)return;ByteBufUtils.writeUTF8String(buf,safe(value.getQuery()));ByteBufUtils.writeUTF8String(buf,safe(value.getLifecycle()));buf.writeInt(value.getPage());buf.writeInt(value.getPageSize());buf.writeLong(value.getTotal());int size=Math.min(50,value.getChapters().size());buf.writeInt(size);for(int i=0;i<size;i++)writeManagedChapter(buf,value.getChapters().get(i));buf.writeBoolean(value.getDetail()!=null);if(value.getDetail()!=null){com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.ChapterDetail detail=value.getDetail();writeManagedChapter(buf,detail.getSummary());ByteBufUtils.writeUTF8String(buf,safe(detail.getDescription()));ByteBufUtils.writeUTF8String(buf,safe(detail.getIcon()));ByteBufUtils.writeUTF8String(buf,safe(detail.getBackground()));buf.writeInt(detail.getBackgroundSize());ByteBufUtils.writeUTF8String(buf,safe(detail.getVisibility()));int placements=Math.min(4096,detail.getPlacements().size());buf.writeInt(placements);for(int i=0;i<placements;i++){com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.ChapterPlacement row=detail.getPlacements().get(i);ByteBufUtils.writeUTF8String(buf,safe(row.getQuestId()));ByteBufUtils.writeUTF8String(buf,safe(row.getName()));buf.writeInt(row.getX());buf.writeInt(row.getY());buf.writeInt(row.getWidth());buf.writeInt(row.getHeight());}int dependencies=Math.min(8192,detail.getDependencies().size());buf.writeInt(dependencies);for(int i=0;i<dependencies;i++){com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.ChapterDependency row=detail.getDependencies().get(i);ByteBufUtils.writeUTF8String(buf,safe(row.getPrerequisiteQuestId()));ByteBufUtils.writeUTF8String(buf,safe(row.getQuestId()));ByteBufUtils.writeUTF8String(buf,safe(row.getKind()));}int candidates=Math.min(50,detail.getCandidates().size());buf.writeInt(candidates);for(int i=0;i<candidates;i++){com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot.ChapterCandidate row=detail.getCandidates().get(i);ByteBufUtils.writeUTF8String(buf,safe(row.getQuestId()));ByteBufUtils.writeUTF8String(buf,safe(row.getName()));}}}

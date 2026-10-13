@@ -19,6 +19,20 @@ import com.jsirgalaxybase.ui2.render.DrawList;
 import com.jsirgalaxybase.ui2.theme.DarkIndustrialTheme;
 
 public class UiRuntimeTest {
+    @Test public void viewportIsDeliveredBeforeTreeBuildAndAfterResize() {
+        ViewportDocument document = new ViewportDocument();
+        UiRuntime runtime = new UiRuntime(document,
+            new UiContext(DarkIndustrialTheme.create(), Locale.CHINA, 1F, new FixedUiClock(0, false)));
+        runtime.setViewport(350, 193);
+        runtime.frame();
+        assertEquals(new UiSize(350, 193), document.builtFor);
+        runtime.setViewport(620, 340);
+        runtime.frame();
+        assertEquals(new UiSize(620, 340), document.builtFor);
+        assertEquals(2, document.viewportChanges);
+        runtime.close();
+    }
+
     @Test public void invalidationReconcilesStableNodeAndCloseUnmountsIt() {
         CountingDocument document = new CountingDocument();
         UiRuntime runtime = new UiRuntime(document,
@@ -37,7 +51,7 @@ public class UiRuntimeTest {
         assertFalse(node.isMounted());
     }
 
-    private static final class CountingDocument implements UiDocument {
+    private static class CountingDocument implements UiDocument {
         private int builds;
         @Override public UiElement build(UiContext context) { builds++; return UiComponents.surface("root"); }
         @Override public LayoutSpec layout(UiElement root, UiSize viewport, UiContext context) {
@@ -47,5 +61,19 @@ public class UiRuntimeTest {
             return new DrawList().add(DrawCommand.surface(0, root.getBounds(), context.getTheme().color("background"), 0));
         }
         @Override public UiInputNode input(UiNode root, UiContext context) { return null; }
+    }
+
+    private static final class ViewportDocument extends CountingDocument {
+        private UiSize viewport;
+        private UiSize builtFor;
+        private int viewportChanges;
+        @Override public void onViewportChanged(UiSize value, UiContext context) {
+            viewport=value;
+            viewportChanges++;
+        }
+        @Override public UiElement build(UiContext context) {
+            builtFor=viewport;
+            return super.build(context);
+        }
     }
 }

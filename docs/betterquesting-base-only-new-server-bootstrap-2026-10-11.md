@@ -1,6 +1,6 @@
 # Base-only 新服任务书初始化
 
-本文只描述离线内容导入。它不读取 BQ 玩家进度，不迁移旧 Party，不部署 Mod，也不替操作者执行生产 DDL。
+本文只描述离线内容导入和隔离自动预检。它不读取 BQ 玩家进度，不迁移旧 Party，不部署 Mod，也不替操作者执行生产 DDL。当前完整执行合同见 [隔离初始化预检](betterquesting-base-only-isolated-preflight-2026-10-12.md)。
 
 ## 输入与前置检查
 
@@ -16,7 +16,7 @@ galaxy-quest-bq-importer/build/install/galaxy-quest-bq-importer/bin/galaxy-quest
 
 ## 数据库预览
 
-数据库必须先由独立变更流程建立 Base Quest DDL。下面变量只可指向全新、明确获授权的目标库；开发验收使用临时隔离 PostgreSQL：
+数据库必须先由独立变更流程建立 Base Quest DDL。下面变量在当前自动验收中只可指向临时隔离 PostgreSQL，命令要求显式数据库配置且不提供生产连接 fallback：
 
 ```bash
 export BQ_MIGRATION_JDBC_URL='jdbc:postgresql://127.0.0.1:55436/quest_it'
@@ -27,7 +27,7 @@ galaxy-quest-bq-importer/build/install/galaxy-quest-bq-importer/bin/galaxy-quest
   dry-run /readonly/DefaultQuests
 ```
 
-`dry-run` 不写数据库。`preview` 会登记预览批次，因此必须额外设置写入确认令牌：
+`dry-run` 不写数据库。`preview` 会登记预览批次；所有 `preview/apply/rollback` 写入操作均要求确认令牌，并在建立连接前拒绝非 loopback、非 `_test`/`_it` 数据库 URL：
 
 ```bash
 export BQ_MIGRATION_WRITE_CONFIRM='ISOLATED_ONLY'
@@ -37,7 +37,7 @@ galaxy-quest-bq-importer/build/install/galaxy-quest-bq-importer/bin/galaxy-quest
 
 ## 应用与回滚
 
-确认 dry-run/preview 的来源哈希、CREATED/VERSIONED/UNCHANGED、ERROR/WARNING 后，才可在单独授权的变更窗口执行：
+确认 dry-run/preview 的来源哈希、CREATED/VERSIONED/UNCHANGED、ERROR/WARNING 后，只在临时隔离库中执行：
 
 ```bash
 galaxy-quest-bq-importer/build/install/galaxy-quest-bq-importer/bin/galaxy-quest-bq-importer \
@@ -51,4 +51,4 @@ galaxy-quest-bq-importer/build/install/galaxy-quest-bq-importer/bin/galaxy-quest
   rollback <batch-id>
 ```
 
-回滚内容批次不等于回滚玩家已经产生的进度或奖励；新服启用后，版本发布和玩家补偿属于管理员职责。本文不授权任何生产命令，实际生产初始化仍需单独审批。
+回滚内容批次不等于回滚玩家已经产生的进度或奖励；新服启用后，版本发布和玩家补偿属于管理员职责。导入后可运行只读 `baseOnlyPreflight`，验证来源与 Base JAR hash、schema、APPLIED 批次、发布内容逐项一致及章节顺序。预检只接受本机 loopback `_test`/`_it` 数据库，不读取玩家进度、不写数据库。本文不授权任何生产命令，实际生产初始化仍需单独审批。

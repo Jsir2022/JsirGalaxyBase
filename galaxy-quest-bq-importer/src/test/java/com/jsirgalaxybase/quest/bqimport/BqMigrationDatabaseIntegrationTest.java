@@ -191,6 +191,34 @@ public class BqMigrationDatabaseIntegrationTest {
         assertEquals(0, countPublished("galaxy_quest_definition"));
         assertEquals(0, countPublished("galaxy_quest_chapter_definition"));
     }
+    @Test public void baseOnlyPreflightRequiresAppliedContentAndDoesNotWrite() throws Exception {
+        BqMigrationManifest manifest = new BqMigrationPlanner().plan(fixture());
+        JdbcQuestConnectionManager manager = new JdbcQuestConnectionManager(scoped);
+        BqMigrationDatabaseService service = new BqMigrationDatabaseService(new JdbcQuestTransaction(manager),
+            new JdbcQuestDefinitionRepository(manager), new JdbcQuestChapterRepository(manager),
+            new JdbcQuestContentMigrationRepository(manager));
+
+        try {
+            BqBaseOnlyPreflight.verifyInitializedDatabase(manifest, scoped);
+            fail("preflight must reject a schema without the imported source batch");
+        } catch (IllegalStateException expected) {
+            assertTrue(expected.getMessage().contains("batch is missing"));
+        }
+        assertEquals(0, count("galaxy_quest_content_migration_batch"));
+        assertEquals(0, countPublished("galaxy_quest_definition"));
+
+        service.apply(manifest, 1000L);
+        BqBaseOnlyPreflight.DatabaseReport report = BqBaseOnlyPreflight.verifyInitializedDatabase(manifest, scoped);
+        assertEquals(manifest.getBatchId(), report.getBatchId());
+        assertEquals(manifest.getSourceHash(), report.getSourceHash());
+        assertEquals(1, report.getQuests());
+        assertEquals(1, report.getChapters());
+        assertEquals(2, report.getUnchangedEntities());
+        assertEquals(1, count("galaxy_quest_content_migration_batch"));
+        assertEquals(1, countPublished("galaxy_quest_definition"));
+        assertEquals(1, countPublished("galaxy_quest_chapter_definition"));
+    }
+
     @Test public void failedApplyRollsBackEveryMigrationWrite() throws Exception {BqMigrationManifest manifest=new BqMigrationPlanner().plan(fixture());JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(scoped);JdbcQuestTransaction transaction=new JdbcQuestTransaction(manager);JdbcQuestDefinitionRepository definitions=new JdbcQuestDefinitionRepository(manager);BqMigrationDatabaseService service=new BqMigrationDatabaseService(transaction,definitions,new JdbcQuestChapterRepository(manager),new JdbcQuestContentMigrationRepository(manager));transaction.inTransaction(()->{definitions.createDraft(manifest.getQuests().get(0).getDefinition());return null;});try{service.apply(manifest,1L);fail("expected version conflict");}catch(com.jsirgalaxybase.quest.core.QuestDefinitionConflictException expected){}assertEquals(0,count("galaxy_quest_content_migration_batch"));assertEquals(1,count("galaxy_quest_definition"));assertEquals(0,count("galaxy_quest_chapter_definition"));}
     @Test public void changedContentCreatesControlledVersionAndProtectsEarlierRollback() throws Exception {Path firstSource=fixture();BqMigrationManifest first=new BqMigrationPlanner().plan(firstSource);JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(scoped);BqMigrationDatabaseService service=new BqMigrationDatabaseService(new JdbcQuestTransaction(manager),new JdbcQuestDefinitionRepository(manager),new JdbcQuestChapterRepository(manager),new JdbcQuestContentMigrationRepository(manager));service.apply(first,1L);Path quest=firstSource.resolve("Quests/line/q.json");String changed=new String(Files.readAllBytes(quest),StandardCharsets.UTF_8).replace("\"Q\"","\"Q2\"");Files.write(quest,changed.getBytes(StandardCharsets.UTF_8));BqMigrationManifest second=new BqMigrationPlanner().plan(firstSource);QuestContentMigrationBatch applied=service.apply(second,2L);QuestContentMigrationItem questItem=null;for(QuestContentMigrationItem item:applied.getItems())if(item.getKind()==QuestContentMigrationItem.Kind.QUEST)questItem=item;assertNotNull(questItem);assertEquals(2,questItem.getVersion());assertEquals(QuestContentMigrationItem.Action.VERSIONED,questItem.getAction());try{service.rollback(first.getBatchId());fail("later version must protect earlier batch");}catch(IllegalStateException expected){assertTrue(expected.getMessage().contains("later quest version"));}service.rollback(second.getBatchId());assertEquals("Q",new JdbcQuestDefinitionRepository(manager).findPublished(questItem.getId()).get().getDefinition().getName());service.rollback(first.getBatchId());assertEquals(0,countPublished("galaxy_quest_definition"));}
     @Test public void blockedPreviewIsVisibleButCannotApplyOrRollback() throws Exception {Path source=fixture();Path quest=source.resolve("Quests/line/q.json");String invalid=new String(Files.readAllBytes(quest),StandardCharsets.UTF_8).replace("bq_standard:checkbox","addon:unknown");Files.write(quest,invalid.getBytes(StandardCharsets.UTF_8));BqMigrationManifest manifest=new BqMigrationPlanner().plan(source);assertFalse(manifest.isApplicable());JdbcQuestConnectionManager manager=new JdbcQuestConnectionManager(scoped);BqMigrationDatabaseService service=new BqMigrationDatabaseService(new JdbcQuestTransaction(manager),new JdbcQuestDefinitionRepository(manager),new JdbcQuestChapterRepository(manager),new JdbcQuestContentMigrationRepository(manager));QuestContentMigrationBatch staged=service.stage(manifest);assertEquals(QuestContentMigrationBatch.Status.BLOCKED,staged.getStatus());assertTrue(staged.getErrorCount()>0);assertEquals(0,countPublished("galaxy_quest_definition"));try{service.apply(manifest,1L);fail("blocked manifest must not apply");}catch(IllegalArgumentException expected){}try{service.rollback(staged.getBatchId());fail("blocked preview must not roll back");}catch(IllegalStateException expected){}}

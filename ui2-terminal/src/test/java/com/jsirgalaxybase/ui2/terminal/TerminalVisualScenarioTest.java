@@ -46,6 +46,12 @@ public class TerminalVisualScenarioTest {
                 assertTrue(scenario.getId() + " " + size[0] + "x" + size[1] + "\n" + snapshot,
                     snapshot.contains("SUMMARY|issues=0"));
                 assertTrue(snapshot.contains("quest-"));
+                if (scenario.getId().startsWith("terminal-quests-browse-")) {
+                    assertTrue(scenario.getId() + " quest pager collapsed at " + size[0] + "x" + size[1] + "\n" + snapshot,
+                        snapshot.matches("(?s).*Row\\|quest-list-pager\\|[^|]* [1-9][0-9]*x[1-9][0-9]*\\|mounted.*"));
+                    assertTrue(scenario.getId() + " chapter pager collapsed at " + size[0] + "x" + size[1] + "\n" + snapshot,
+                        snapshot.matches("(?s).*Row\\|quest-chapter-pager\\|[^|]* [1-9][0-9]*x[1-9][0-9]*\\|mounted.*"));
+                }
                 runtime.close();
             }
         }

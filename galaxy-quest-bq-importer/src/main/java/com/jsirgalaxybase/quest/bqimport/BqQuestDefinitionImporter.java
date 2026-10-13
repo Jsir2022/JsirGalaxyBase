@@ -63,7 +63,7 @@ public final class BqQuestDefinitionImporter {
                 standardCodec.rewardParameters(spec, gson.toJson(reward))));
         }
 
-        long repeatTime = BqTypedJson.number(properties, "repeatTime", -1L);
+        int repeatTime = BqTypedJson.int32(properties, "repeatTime", -1);
         RepeatPolicy repeat = repeatTime < 0 ? RepeatPolicy.never() : RepeatPolicy.after(ticksToMillis(repeatTime),
             BqTypedJson.bool(properties, "repeat_relative", true));
         JsonObject icon = BqTypedJson.object(properties, "icon");
@@ -107,7 +107,9 @@ public final class BqQuestDefinitionImporter {
 
     private static QuestVisibility visibility(String raw) {
         try { return QuestVisibility.valueOf(raw.toUpperCase(java.util.Locale.ROOT)); }
-        catch (IllegalArgumentException invalid) { return QuestVisibility.NORMAL; }
+        catch (IllegalArgumentException invalid) {
+            throw new IllegalArgumentException("unsupported BQ quest visibility: " + raw, invalid);
+        }
     }
 
     static UUID uuid(JsonObject object, String highName, String lowName) {

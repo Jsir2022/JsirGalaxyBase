@@ -5,8 +5,14 @@
 ## 当前最建议先看的内容
 
 - [BQ 替代开发导航与变更边界](betterquesting-development-guide-2026-10-09.md)
+- [BQ N.9.1 两天工作包：玩家任务书完整性与隔离准备](betterquesting-player-book-completeness-work-package-2026-10-12.md)
+  - A–D 自动验收完成：真实任务书内容、三档布局/输入、HTML/PNG 画廊、隔离导入和 Base JAR 只读预检；不替代 Forge/人工验收
+- [BQ Base-only 隔离初始化预检](betterquesting-base-only-isolated-preflight-2026-10-12.md)
+  - 固定来源/Base JAR hash、loopback `_test`/`_it` PostgreSQL、只读 schema/导入一致性检查与 N.9.2 边界
 - [BQ Base-only 新服实施路线](betterquesting-next-stages-2026-10-11.md)
-  - 当前 N.1–N.5：真实任务书运行门禁、PLAYER 个人语义、完整版本化导入、全新玩家闭环、终端健康页与自动收口
+  - N.1–N.9.1 自动阶段完成；下一步是 N.9.2 隔离 Base-only Forge 新服真实运行验收，生产切换仍需单独授权
+- [BQ N.9.2 Base-only 隔离运行验收](betterquesting-base-only-runtime-acceptance-2026-10-12.md)
+  - 3,744 Quest/47 章隔离导入、Base JAR 只读预检与 1,159 项自动回归已复验；Forge 启动停在 EULA 提示，Base/Quest runtime 尚未启动
 - [BQ Base-only 新服任务书初始化](betterquesting-base-only-new-server-bootstrap-2026-10-11.md)
 - [BQ Base-only 自动验收证据](betterquesting-base-only-acceptance-2026-10-11.md)
   - 只读 plan/dry-run、显式 preview/apply/rollback、隔离与生产授权边界

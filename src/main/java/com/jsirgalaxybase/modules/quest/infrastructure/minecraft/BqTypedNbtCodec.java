@@ -21,12 +21,12 @@ import net.minecraft.nbt.NBTTagShort;
 import net.minecraft.nbt.NBTTagString;
 
 /** Decodes BetterQuesting's typed JSON NBT and applies its reward string substitutions. */
-final class BqTypedNbtCodec {
+public final class BqTypedNbtCodec {
     private static final Field TAG_LIST = tagListField();
 
     private BqTypedNbtCodec() {}
 
-    static NBTTagCompound compound(String json) {
+    public static NBTTagCompound compound(String json) {
         if (json == null || json.trim().isEmpty() || "{}".equals(json.trim())) return new NBTTagCompound();
         JsonElement parsed = new JsonParser().parse(json);
         if (!parsed.isJsonObject()) throw new IllegalArgumentException("item NBT is not a compound");

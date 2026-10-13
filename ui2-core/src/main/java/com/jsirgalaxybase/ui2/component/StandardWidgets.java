@@ -113,6 +113,7 @@ public final class StandardWidgets {
                         if (event.getType() == UiEvent.Type.KEY_DOWN
                             && (event.getKeyCode() == com.jsirgalaxybase.ui2.input.UiKeyCode.BACKSPACE
                                 || event.getKeyCode() == com.jsirgalaxybase.ui2.input.UiKeyCode.DELETE
+                                || event.getKeyCode() == com.jsirgalaxybase.ui2.input.UiKeyCode.ENTER
                                 || event.getKeyCode() == com.jsirgalaxybase.ui2.input.UiKeyCode.HOME
                                 || event.getKeyCode() == com.jsirgalaxybase.ui2.input.UiKeyCode.END)) {
                             return ((UiActionHandler) handler).handle(event);

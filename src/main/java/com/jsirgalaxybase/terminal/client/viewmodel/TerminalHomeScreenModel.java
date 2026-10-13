@@ -147,6 +147,8 @@ public class TerminalHomeScreenModel {
     private static List<PageSnapshotModel> defaultPageSnapshots() {
         List<PageSnapshotModel> defaults = new ArrayList<PageSnapshotModel>();
         defaults.add(PageSnapshotModel.placeholder(TerminalPage.HOME));
+        defaults.add(PageSnapshotModel.placeholder(TerminalPage.CAREER));
+        defaults.add(PageSnapshotModel.placeholder(TerminalPage.PUBLIC_SERVICE));
         defaults.add(PageSnapshotModel.placeholder(TerminalPage.MARKET));
         defaults.add(PageSnapshotModel.placeholder(TerminalPage.PROPERTY));
         defaults.add(PageSnapshotModel.placeholder(TerminalPage.BANK));
@@ -177,6 +179,8 @@ public class TerminalHomeScreenModel {
         List<PageSnapshotModel> normalized = new ArrayList<PageSnapshotModel>();
         TerminalPage[] topLevelPages = new TerminalPage[] {
             TerminalPage.HOME,
+            TerminalPage.CAREER,
+            TerminalPage.PUBLIC_SERVICE,
             TerminalPage.MARKET,
             TerminalPage.PROPERTY,
             TerminalPage.BANK,

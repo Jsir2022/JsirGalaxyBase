@@ -1,7 +1,7 @@
 # BetterQuesting 关键能力吸收矩阵与实施路线
 
 日期：2026-09-13
-更新：2026-10-11，活动路线为 Base-only 全新服务器内容导入；玩家从零开始，导入任务全部 PLAYER。
+更新：2026-10-13，活动路线为 Base-only 全新服务器内容导入；玩家从零开始，导入任务全部 PLAYER。
 
 ## 唯一当前阶段表
 
@@ -10,12 +10,16 @@
 | N.1 | 自动验收完成，`adfb691`；真实 9 类 Task / 4 类 Reward 门禁及 PLAYER/Party 隔离，Core 299 项、个人库存/奖励 JDBC 16 项通过 |
 | N.2 | 自动验收完成，`adfb691`；完整 3,744 Quest / 47 章空库导入、来源幂等、更新/并发/失败事务/最新批次回滚，Importer 最终 74 项全部执行通过 |
 | N.3 | 代表性新玩家自动闭环及证据分层审计完成；详见 Base-only 验收文档。未逐个实际游玩 3,744 Quest，不等于 Forge 实机通过 |
-| N.4 | 自动验收完成，`664436e`；管理员健康查询、网络和 UI2 已接入，UI2 29 项、根网络/服务回归通过，正式终端 252 份视觉通过 |
+| N.4 | 原入口/管理员健康与有限场景自动验收完成，`664436e`；不代表真实任务书内容完整。2026-10-12 复评确认目标/奖励/Choice 截断、图标/分项/搜索缺口，整改列入 N.9.1 |
 | N.5 | 自动验收完成：根/全部模块 1,113 项、1,061 执行、52 非 Quest 条件跳过、0 failure/error；assemble、自包含、252 视觉与 JAR 内容通过，制品与 SHA 见验收文档 |
 | N.6 | 自动验收完成：Base composition root 注册 9 类导入求值器、启动事件入口，4 类导入奖励均进入唯一 Router；完整自动回归见验收文档 |
-| 后续 | Base-only 新服运行验收与灰度启用准备，未执行；真实 Forge/玩家实机仍是上线门槛 |
+| N.7 | 自动验收完成：固定 DefaultQuests 5,620 Task/5,448 Reward 参数键和值格式审计，未知键与非法布尔值 fail-closed；Importer 81 项、全工程 1,121 项报告通过。尚未证明所有参数配置与 BQ 运行语义等价 |
+| N.8 | 自动验收完成：真实来源画像→Importer/evaluator；消耗 Retrieval/Fluid 经 Quest Detect、服务端授权和隔离 PostgreSQL；Item/Choice/XP/Quest Completion 来源奖励到处理器/PG；固定来源 Retrieval 同时进入 Minecraft ItemStack matcher。Core 299、Postgres 61、Importer 99 全执行通过；全工程 1,143 项、52 项非 Quest 环境跳过、0 failure/error；assemble、自包含和 252 份终端视觉通过。实际 Forge 服务端/玩家验收未完成 |
+| N.9.1 | 自动验收完成：1,159 tests、0 skip/failure/error；固定来源 3,744 Quest definition→Mapper→codec→VisualModel 审计；6 个真实边界 Quest 三档 409 帧/202 次转换与 81 帧 HTML/PNG 画廊；隔离 CLI apply + Base JAR read-only preflight；assemble、自包含和 252 场景正式终端视觉门禁通过。Java2D/隔离 PG 不代表 Forge 实机验收。详见工作包和最新 Worklog |
+| N.9.2 | D 自动 smoke 完成并复验：固定 3,744 Quest/47 章 apply、Base JAR 只读 preflight、1,159 tests（52 个非 Quest DB 配置 skip）、assemble、自包含和许可证门禁通过。A 仍停在 EULA：Forge 未加载 Base/Quest、未创建世界；真实 Forge 事实/奖励/存档/重启未测。须用户明确接受 EULA 后继续，且不得复用 supervisord 生产镜像或会终止现有进程的脚本。合同与证据见[N.9.2 隔离运行验收](betterquesting-base-only-runtime-acceptance-2026-10-12.md) |
 
-当前活动合同与任务见[Base-only 阶段跟进计划](betterquesting-next-stages-2026-10-11.md)。
+当前开发入口以[N.9.2 Base-only 隔离运行验收合同](betterquesting-base-only-runtime-acceptance-2026-10-12.md)为准。可重复 Quest/PG/UI2 smoke、全工程 test、`assemble` 与自包含检查已通过：1,159 tests、52 个非 Quest 独立数据库配置型 skip、0 failure/error。N.9.2-A 的 `runServer` 目录/JDK/classpath 已检查，但 Forge 启动因未接受 EULA 停在 Mod bootstrap 前；没有声称 Base-only 实服已启动。Forge 事实/奖励/存档/重启仍未测。N.9.2 不复用 `galaxy-gtnh` 生产组服务镜像或会终止已有进程的本地双客户端脚本；不触及生产数据、DDL、开关或部署。
+当前 smoke 另已通过隔离任务书 apply 与 Base JAR 只读预检（3,744 Quest、47 章、3,791 个实体未变更）。真正运行 Quest 时还需要专用新库包含 Banking 基线 schema 和 Quest schema/migrations；目前 Forge 尚未越过 EULA，不能将自动回归表述为 Mod runtime 验收。
 旧玩家进度迁移、旧 Party 映射和 BQ/Base 实时影子已退出活动路线；不读取历史进度或补发迁移奖励。
 M.0/M.1/M.2 已完成的自动证据作为基线保留，下文历史阶段表不再构成待办。
 旧段落的测试数、待确认项及 BLOCKED 原因均是当时证据；不能作为新的工作目标。

@@ -61,6 +61,24 @@ public class BqQuestChapterImporterTest {
     }
 
     @Test
+    public void rejectsFractionalOrOutOfRangeChapterCoordinatesInsteadOfWrapping() throws Exception {
+        Path root = Files.createTempDirectory("bq-lines-invalid-coordinate");
+        Files.write(root.resolve("QuestLinesOrder.txt"), "AAAAAAAAAAAAAAAAAAAAAQ==: Stone\n"
+            .getBytes(StandardCharsets.UTF_8));
+        Path line = Files.createDirectories(root.resolve("QuestLines/Stone-AAAAAAAAAAAAAAAAAAAAAQ=="));
+        Path entry = line.resolve("q.json");
+        Files.write(entry, ("{\"questIDHigh:4\":0,\"questIDLow:4\":2,"
+            + "\"sizeX:3\":24,\"sizeY:3\":24,\"x:3\":2147483648}")
+                .getBytes(StandardCharsets.UTF_8));
+        assertThrows(java.io.IOException.class, () -> new BqQuestChapterImporter().readDirectory(root));
+
+        Files.write(entry, ("{\"questIDHigh:4\":0,\"questIDLow:4\":2,"
+            + "\"sizeX:3\":24,\"sizeY:3\":24,\"x:3\":1.5}")
+                .getBytes(StandardCharsets.UTF_8));
+        assertThrows(java.io.IOException.class, () -> new BqQuestChapterImporter().readDirectory(root));
+    }
+
+    @Test
     public void directoryParserDoesNotConfuseUrlSafeDashInsideUuidForSeparator() throws Exception {
         UUID expected = BqQuestChapterImporter.decodeUuid("D_aFb1hFQH2PDkN0_KvAEQ==");
         assertEquals(expected, BqQuestChapterImporter.idFromFileName(

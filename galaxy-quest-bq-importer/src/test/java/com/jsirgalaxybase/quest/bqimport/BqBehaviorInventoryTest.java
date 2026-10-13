@@ -18,8 +18,8 @@ public class BqBehaviorInventoryTest {
         Path quests = Files.createDirectories(root.resolve("Quests/line"));
         Files.createDirectories(root.resolve("QuestLines"));
         Files.write(root.resolve("QuestLinesOrder.txt"), new byte[0]);
-        write(quests.resolve("one.json"), 1, "bq_standard:checkbox", "bq_standard:xp");
-        write(quests.resolve("two.json"), 2, "bq_standard:checkbox", "addon:reward");
+        write(quests.resolve("one.json"), 1, "bq_standard:checkbox", "bq_standard:xp", true);
+        write(quests.resolve("two.json"), 2, "bq_standard:checkbox", "addon:reward", true);
 
         BqMigrationManifest manifest = new BqMigrationPlanner().plan(root);
         BqBehaviorInventory inventory = BqBehaviorInventory.from(manifest);
@@ -38,9 +38,89 @@ public class BqBehaviorInventoryTest {
             inventory.requireRuntimeReady();
             org.junit.Assert.fail("unverified behavior must block publishing");
         } catch (IllegalStateException expected) {
-            assertTrue(!expected.getMessage().contains("TASK bq_standard:checkbox"));
+            assertTrue(expected.getMessage().contains("TASK bq_standard:checkbox OPTION consume=UNVERIFIED"));
             assertTrue(expected.getMessage().contains("REWARD addon:reward=UNKNOWN"));
         }
+    }
+
+    @Test public void aKnownTypeWithAnUnverifiedOptionIsBlockedBeforeApply() throws Exception {
+        Path root = Files.createTempDirectory("bq-runtime-unknown-option");
+        Path quests = Files.createDirectories(root.resolve("Quests/line"));
+        Files.createDirectories(root.resolve("QuestLines"));
+        Files.write(root.resolve("QuestLinesOrder.txt"), new byte[0]);
+        Path source = quests.resolve("quest.json");
+        write(source, 1, "bq_standard:checkbox", "bq_standard:item");
+        String json = new String(Files.readAllBytes(source), StandardCharsets.UTF_8).replace(
+            "\"taskID:8\":\"bq_standard:checkbox\"",
+            "\"taskID:8\":\"bq_standard:checkbox\",\"futureFlag:8\":\"on\"");
+        Files.write(source, json.getBytes(StandardCharsets.UTF_8));
+
+        try {
+            BqBehaviorInventory.from(new BqMigrationPlanner().plan(root)).requireRuntimeReady();
+            org.junit.Assert.fail("a parsed but unverified task option must block publication");
+        } catch (IllegalStateException expected) {
+            assertTrue(expected.getMessage().contains("TASK bq_standard:checkbox OPTION futureFlag=UNVERIFIED"));
+        }
+    }
+
+    @Test public void malformedBooleanBehaviorOptionIsBlockedEvenWhenItsTypeIsSupported() throws Exception {
+        Path root = Files.createTempDirectory("bq-runtime-invalid-option");
+        Path quests = Files.createDirectories(root.resolve("Quests/line"));
+        Files.createDirectories(root.resolve("QuestLines"));
+        Files.write(root.resolve("QuestLinesOrder.txt"), new byte[0]);
+        Path source = quests.resolve("quest.json");
+        write(source, 1, "bq_standard:checkbox", "bq_standard:xp");
+        String json = new String(Files.readAllBytes(source), StandardCharsets.UTF_8).replace(
+            "\"ignoreDisabled:1\":1", "\"ignoreDisabled:1\":2");
+        Files.write(source, json.getBytes(StandardCharsets.UTF_8));
+
+        try {
+            BqBehaviorInventory.from(new BqMigrationPlanner().plan(root)).requireRuntimeReady();
+            org.junit.Assert.fail("malformed BQ boolean values must block publication");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("Invalid BetterQuesting boolean option ignoreDisabled=2"));
+        }
+    }
+
+    @Test public void outOfRangeIntegerOptionsAreReportedAndBlockRuntimePublication() throws Exception {
+        Path root = Files.createTempDirectory("bq-runtime-invalid-integer");
+        Path quests = Files.createDirectories(root.resolve("Quests/line"));
+        Files.createDirectories(root.resolve("QuestLines"));
+        Files.write(root.resolve("QuestLinesOrder.txt"), new byte[0]);
+        String json = "{\"questIDHigh:4\":0,\"questIDLow:4\":41,"
+            + "\"properties:10\":{\"betterquesting:10\":{\"name:8\":\"Hunt\"}},"
+            + "\"tasks:9\":{\"0:10\":{\"index:3\":0,\"taskID:8\":\"bq_standard:hunt\","
+            + "\"required:3\":2147483648,\"target:8\":\"Zombie\"}},\"rewards:9\":{}}";
+        Files.write(quests.resolve("quest.json"), json.getBytes(StandardCharsets.UTF_8));
+
+        BqBehaviorInventory inventory = BqBehaviorInventory.from(new BqMigrationPlanner().plan(root));
+        assertEquals(Integer.valueOf(1), inventory.getTasks().get("bq_standard:hunt")
+            .getInvalidIntegerOptions().get("required"));
+        assertTrue(inventory.toText().contains("invalidIntegerOptions={required=1}"));
+        try {
+            inventory.requireRuntimeReady();
+            org.junit.Assert.fail("out-of-range integer options must block publication");
+        } catch (IllegalStateException expected) {
+            assertTrue(expected.getMessage().contains("TASK bq_standard:hunt INTEGER required=INVALID_VALUE"));
+        }
+    }
+
+    @Test public void inventoryReportsAnonymousFrequencyOfValidIntegerOptionValues() throws Exception {
+        Path root = Files.createTempDirectory("bq-runtime-integer-profiles");
+        Path quests = Files.createDirectories(root.resolve("Quests/line"));
+        Files.createDirectories(root.resolve("QuestLines"));
+        Files.write(root.resolve("QuestLinesOrder.txt"), new byte[0]);
+        String json = "{\"questIDHigh:4\":0,\"questIDLow:4\":42,"
+            + "\"properties:10\":{\"betterquesting:10\":{\"name:8\":\"Private Name\"}},"
+            + "\"tasks:9\":{\"0:10\":{\"index:3\":0,\"taskID:8\":\"bq_standard:hunt\","
+            + "\"required:3\":2,\"target:8\":\"Zombie\"}},\"rewards:9\":{}}";
+        Files.write(quests.resolve("quest.json"), json.getBytes(StandardCharsets.UTF_8));
+
+        BqBehaviorInventory inventory = BqBehaviorInventory.from(new BqMigrationPlanner().plan(root));
+        assertEquals(Integer.valueOf(1), inventory.getTasks().get("bq_standard:hunt")
+            .getIntegerOptionProfiles().get("required").get("2"));
+        assertTrue(inventory.toText().contains("integerOptionProfiles={required={2=1}}"));
+        assertTrue(!inventory.toText().contains("Private Name") && !inventory.toText().contains("Zombie"));
     }
 
     @Test public void applyRejectsRecognizedButUnverifiedBehaviorBeforeDatabaseConfiguration() throws Exception {
@@ -302,11 +382,25 @@ public class BqBehaviorInventoryTest {
     }
 
     private static void write(Path path, int id, String task, String reward) throws Exception {
+        write(path, id, task, reward, false);
+    }
+
+    private static void write(Path path, int id, String task, String reward, boolean includeConsume)
+        throws Exception {
+        String rewardOptions;
+        if ("bq_standard:xp".equals(reward)) {
+            rewardOptions = "\"amount:3\":3,\"ignoreDisabled:1\":1";
+        } else if ("bq_standard:item".equals(reward)) {
+            rewardOptions = "\"rewards:9\":{}";
+        } else {
+            rewardOptions = "\"ignoreDisabled:1\":1";
+        }
         String json = "{\"questIDHigh:4\":0,\"questIDLow:4\":" + id
             + ",\"properties:10\":{\"betterquesting:10\":{\"name:8\":\"Q\"}},"
             + "\"tasks:9\":{\"0:10\":{\"index:3\":0,\"taskID:8\":\"" + task
-            + "\",\"consume:1\":1}},\"rewards:9\":{\"0:10\":{\"index:3\":0,\"rewardID:8\":\""
-            + reward + "\",\"amount:3\":3,\"ignoreDisabled:1\":1}}}";
+            + "\"" + (includeConsume ? ",\"consume:1\":1" : "")
+            + "}},\"rewards:9\":{\"0:10\":{\"index:3\":0,\"rewardID:8\":\""
+            + reward + "\"," + rewardOptions + "}}}";
         Files.write(path, json.getBytes(StandardCharsets.UTF_8));
     }
 }

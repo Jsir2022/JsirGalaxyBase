@@ -20,14 +20,21 @@ public class TerminalQuestCenterCodecTest {
     public void roundTripsBoundedBrowseAndDetailPayload() {
         TerminalQuestCenterSectionSnapshot.Quest quest = new TerminalQuestCenterSectionSnapshot.Quest(
             "quest-a", "chapter-a", "高炉", "完成目标", "CLAIMABLE", 2, 2,
-            "minecraft:iron_ingot", 0, "铁锭",true);
+            "minecraft:iron_ingot", 0, "铁锭",true,"{\"display:10\":{\"Name:8\":\"炉渣\"}}");
         TerminalQuestCenterSectionSnapshot.Detail detail = new TerminalQuestCenterSectionSnapshot.Detail(
             quest, "建造一座高炉", "前置任务 1 项", "不可重复",
-            Arrays.asList(new TerminalQuestCenterSectionSnapshot.Task("task-a", "物品任务", "必需目标", 32, 64, true, true, true)),
+            Arrays.asList(new TerminalQuestCenterSectionSnapshot.Task("task-a", "物品任务", "必需目标", 32, 64,
+                true, true, true, "bq_standard:retrieval", Arrays.asList(
+                    new TerminalQuestCenterSectionSnapshot.Component(3, "item", "item.3", "gregtech:ingotIron",
+                        "铁锭", 2, 64, 32, 64, "ingotIron", "{\"display:10\":{\"Name:8\":\"高级铁锭\"}}")))),
             Arrays.asList(new TerminalQuestCenterSectionSnapshot.Reward("reward-a", "选择奖励", "bq_standard:choice",
                 "minecraft:diamond", 0, "钻石", 4, true, false,Arrays.asList(
-                    new TerminalQuestCenterSectionSnapshot.Choice("minecraft:diamond",0,"钻石",4),
-                    new TerminalQuestCenterSectionSnapshot.Choice("minecraft:emerald",0,"绿宝石",8)),1)));
+                    new TerminalQuestCenterSectionSnapshot.Choice(2,"minecraft:diamond",0,"钻石",4,"{\"display:10\":{\"Name:8\":\"钻石\"}}"),
+                    new TerminalQuestCenterSectionSnapshot.Choice(5,"",0,"未注册奖励",8,"")),5,"bq_standard:choice",
+                    Arrays.asList(new TerminalQuestCenterSectionSnapshot.Component(0,"item","item.0","minecraft:diamond",
+                        "钻石",0,4,0,4,"","{\"display:10\":{\"Name:8\":\"钻石\"}}")),
+                    "{\"display:10\":{\"Name:8\":\"奖励钻石\"}}")),2,7,Arrays.asList(
+                new TerminalQuestCenterSectionSnapshot.Prerequisite("quest-pre","焦炉","COMPLETED",true)));
         TerminalQuestCenterSectionSnapshot original = new TerminalQuestCenterSectionSnapshot(
             "READY", "", TerminalQuestCenterSectionSnapshot.View.DETAIL, "chapter-a", "quest-a", "claimable",
             "高炉", Arrays.asList(new TerminalQuestCenterSectionSnapshot.Chapter("chapter-a", "钢铁时代", 3, 8)),
@@ -42,17 +49,50 @@ public class TerminalQuestCenterCodecTest {
         assertEquals(9, decoded.getChapterTotalEntries());
         assertEquals(17, decoded.getQuestTotalEntries());
         assertEquals("quest-a", decoded.getQuests().get(0).getId());
+        assertEquals("{\"display:10\":{\"Name:8\":\"炉渣\"}}", decoded.getQuests().get(0).getIconNbt());
         assertTrue(decoded.getQuests().get(0).isTracked());
         assertNotNull(decoded.getDetail());
         assertEquals(32, decoded.getDetail().getTasks().get(0).getValue());
         assertTrue(decoded.getDetail().getTasks().get(0).isConfirmable());
         assertTrue(decoded.getDetail().getTasks().get(0).isSubmittable());
         assertTrue(decoded.getDetail().getTasks().get(0).isDetectable());
+        assertEquals("bq_standard:retrieval", decoded.getDetail().getTasks().get(0).getTypeId());
+        TerminalQuestCenterSectionSnapshot.Component taskComponent=decoded.getDetail().getTasks().get(0).getComponents().get(0);
+        assertEquals(3,taskComponent.getSourceIndex());
+        assertEquals("gregtech:ingotIron",taskComponent.getIdentity());
+        assertEquals("{\"display:10\":{\"Name:8\":\"高级铁锭\"}}",taskComponent.getNbt());
+        assertEquals(2,decoded.getDetail().getDefinitionVersion());
+        assertEquals(7,decoded.getDetail().getCycle());
+        assertEquals("quest-pre",decoded.getDetail().getPrerequisites().get(0).getId());
+        assertTrue(decoded.getDetail().getPrerequisites().get(0).isNavigable());
         assertEquals("minecraft:diamond", decoded.getDetail().getRewards().get(0).getItemRegistry());
         assertTrue(decoded.getDetail().getRewards().get(0).isClaimable());
         assertEquals(2,decoded.getDetail().getRewards().get(0).getChoices().size());
-        assertEquals("minecraft:emerald",decoded.getDetail().getRewards().get(0).getChoices().get(1).getItemRegistry());
-        assertEquals(1,decoded.getDetail().getRewards().get(0).getSelectedChoiceIndex());
+        assertEquals(5,decoded.getDetail().getRewards().get(0).getChoices().get(1).getSourceIndex());
+        assertEquals("",decoded.getDetail().getRewards().get(0).getChoices().get(1).getItemRegistry());
+        assertEquals(5,decoded.getDetail().getRewards().get(0).getSelectedChoiceIndex());
+        assertEquals("{\"display:10\":{\"Name:8\":\"奖励钻石\"}}",decoded.getDetail().getRewards().get(0).getItemNbt());
+        assertEquals(0,buffer.readableBytes());
+    }
+
+    @Test
+    public void detailWriterRejectsOversizedVectorsInsteadOfSilentlyDroppingEntries() {
+        List<TerminalQuestCenterSectionSnapshot.Task> tasks=new ArrayList<TerminalQuestCenterSectionSnapshot.Task>();
+        for(int i=0;i<65;i++)tasks.add(new TerminalQuestCenterSectionSnapshot.Task("t"+i,"任务","详情",0,1));
+        TerminalQuestCenterSectionSnapshot.Quest quest=new TerminalQuestCenterSectionSnapshot.Quest(
+            "q","c","任务","","AVAILABLE",0,65,"",0,"");
+        TerminalQuestCenterSectionSnapshot.Detail detail=new TerminalQuestCenterSectionSnapshot.Detail(
+            quest,"","","",tasks,java.util.Collections.<TerminalQuestCenterSectionSnapshot.Reward>emptyList());
+        TerminalQuestCenterSectionSnapshot original=new TerminalQuestCenterSectionSnapshot("READY","",
+            TerminalQuestCenterSectionSnapshot.View.DETAIL,"c","q","all","",
+            java.util.Collections.<TerminalQuestCenterSectionSnapshot.Chapter>emptyList(),0,6,0,
+            java.util.Collections.<TerminalQuestCenterSectionSnapshot.Quest>emptyList(),0,7,0,detail);
+        try {
+            OpenTerminalApprovedMessage.writeQuestCenter(Unpooled.buffer(),original);
+            throw new AssertionError("oversized quest detail must be rejected");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("quest tasks count exceeds"));
+        }
     }
 
     @Test

@@ -64,6 +64,24 @@ tasks.register<JavaExec>("progressMigrationPreview") {
     mainClass.set("com.jsirgalaxybase.quest.bqimport.BqProgressMigrationPreviewMain")
 }
 
+tasks.register<JavaExec>("baseOnlyPreflight") {
+    group = "verification"
+    description = "Read-only validation of an isolated Base-only Quest installation"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("com.jsirgalaxybase.quest.bqimport.BqBaseOnlyPreflightMain")
+    doFirst {
+        val source = providers.gradleProperty("bqDefaultQuests").orNull
+            ?: throw GradleException("Pass -PbqDefaultQuests=<DefaultQuests directory>")
+        val baseJar = providers.gradleProperty("bqBaseJar").orNull
+            ?: throw GradleException("Pass -PbqBaseJar=<built Base JAR>")
+        val expectedSourceHash = providers.gradleProperty("bqExpectedSourceSha256").orNull
+            ?: throw GradleException("Pass -PbqExpectedSourceSha256=<64 hex characters>")
+        val expectedJarHash = providers.gradleProperty("bqExpectedJarSha256").orNull
+            ?: throw GradleException("Pass -PbqExpectedJarSha256=<64 hex characters>")
+        args(source, baseJar, expectedSourceHash, expectedJarHash)
+    }
+}
+
 tasks.test {
     useJUnit()
 }

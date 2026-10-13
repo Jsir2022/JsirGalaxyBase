@@ -15,6 +15,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -94,6 +95,9 @@ import com.jsirgalaxybase.quest.core.RewardDefinition;
 import com.jsirgalaxybase.quest.core.RepeatPolicy;
 import com.jsirgalaxybase.quest.core.StoredQuestDefinition;
 import com.jsirgalaxybase.quest.core.TaskDefinition;
+import com.jsirgalaxybase.quest.bqimport.BqImportedQuest;
+import com.jsirgalaxybase.quest.bqimport.BqMigrationManifest;
+import com.jsirgalaxybase.quest.bqimport.BqMigrationPlanner;
 import com.jsirgalaxybase.quest.bqimport.BqQuestDefinitionImporter;
 import com.jsirgalaxybase.quest.postgres.JdbcBqPartyInventorySnapshotRepository;
 import com.jsirgalaxybase.quest.postgres.JdbcConsumptionSubmissionRepository;
@@ -113,6 +117,69 @@ import com.jsirgalaxybase.quest.postgres.QuestInventorySnapshotLease;
 
 /** PostgreSQL-only integration coverage for the production BQ PARTY inventory producer. */
 public class BqPartyInventorySnapshotFactSinkPostgresTest {
+
+    @Test
+    public void pinnedDefaultQuestsCompletionRewardCompletesItsImportedTargetInPostgres() throws Exception {
+        Fixture fixture = Fixture.open();
+        try {
+            String source = System.getenv("BQ_TEST_DEFAULT_QUESTS");
+            Assume.assumeTrue("read-only pinned DefaultQuests mount is required for source completion reward audit",
+                source != null && !source.trim().isEmpty());
+            BqMigrationManifest manifest = new BqMigrationPlanner().plan(Paths.get(source));
+            assertEquals("9795d6c7fe71e72e91fed8cdc3dea632ab091ccf040e71707d2dd0d90cd355fc",
+                manifest.getSourceHash());
+
+            Map<UUID, QuestDefinition> sourceQuests = new LinkedHashMap<UUID, QuestDefinition>();
+            for (BqImportedQuest imported : manifest.getQuests()) {
+                sourceQuests.put(imported.getDefinition().getId(), imported.getDefinition());
+            }
+            RewardDefinition sourceReward = null;
+            QuestDefinition target = null;
+            for (QuestDefinition quest : sourceQuests.values()) {
+                for (RewardDefinition reward : quest.getRewards()) {
+                    if (!"bq_standard:questcompletion".equals(reward.getTypeId())) continue;
+                    UUID targetId;
+                    try { targetId = UUID.fromString(reward.getParameters().get("questUuid")); }
+                    catch (RuntimeException invalid) { continue; }
+                    QuestDefinition resolved = sourceQuests.get(targetId);
+                    if (resolved != null && !resolved.getId().equals(quest.getId())) {
+                        sourceReward = reward;
+                        target = resolved;
+                        break;
+                    }
+                }
+                if (sourceReward != null) break;
+            }
+            assertNotNull("the pinned source should contain a resolvable QuestCompletion target", sourceReward);
+            assertNotNull(target);
+            assertEquals("true", sourceReward.getParameters().get("ignoreDisabled"));
+
+            JdbcQuestDefinitionRepository definitions = new JdbcQuestDefinitionRepository(fixture.manager);
+            publish(fixture, definitions, target);
+            JdbcQuestRuntimeRepository runtime = new JdbcQuestRuntimeRepository(fixture.manager);
+            QuestCompletionRewardDeliveryHandler handler = new QuestCompletionRewardDeliveryHandler(
+                new JdbcQuestCompletionRewardPort(definitions, runtime, fixture.transaction), () -> 2400L);
+            RewardDeliveryLease lease = new RewardDeliveryLease("pinned-source-questcompletion",
+                ParticipantId.player(fixture.owner), sourceReward, 1, "source-profile-test", 10000L);
+
+            assertTrue(handler.deliver(lease).isDelivered());
+            QuestProgressSnapshot completed = runtime.findProgress(ParticipantId.player(fixture.owner),
+                target.getId(), target.getVersion()).get();
+            assertEquals(QuestStatus.COMPLETED, completed.getStatus());
+            assertEquals(2400L, completed.getCompletedAt());
+            for (TaskDefinition task : target.getTasks()) assertTrue(completed.getTasks().get(task.getKey()).isComplete());
+            long targetEntitlements = targetRewardEntitlementCount(fixture, target);
+
+            assertTrue("replaying the fixed-source reward remains an idempotent success", handler.deliver(lease)
+                .isDelivered());
+            assertEquals(QuestStatus.COMPLETED, runtime.findProgress(ParticipantId.player(fixture.owner),
+                target.getId(), target.getVersion()).get().getStatus());
+            assertEquals("replay must not create target rewards a second time", targetEntitlements,
+                targetRewardEntitlementCount(fixture, target));
+        } finally {
+            fixture.close();
+        }
+    }
 
     @Test
     public void aggregatesOnlyFreshDatabaseLeasesAndPublishesThePartyFact() throws Exception {
@@ -1813,6 +1880,14 @@ public class BqPartyInventorySnapshotFactSinkPostgresTest {
                 return row.getLong(1);
             }
         }
+    }
+
+    private static long targetRewardEntitlementCount(Fixture fixture, QuestDefinition target) throws Exception {
+        long total = 0L;
+        for (RewardDefinition reward : target.getRewards()) {
+            total += countRewardEntitlements(fixture, target.getId(), reward.getKey());
+        }
+        return total;
     }
 
     private static int countItem(List<ItemStack> inventory, Item item) {

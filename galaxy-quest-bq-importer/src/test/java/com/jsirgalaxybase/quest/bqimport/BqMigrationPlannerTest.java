@@ -5,8 +5,10 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
 
 import org.junit.Test;
 
@@ -144,6 +146,61 @@ public class BqMigrationPlannerTest {
         BqCompatibilityReport compatibility = BqCompatibilityReport.create(manifest);
         assertEquals(BqCompatibilityStatus.BLOCKED,
             compatibility.getElementCompatibility().get("TASK|00000000-0000-0000-0000-00000000000c|task-0|bq_standard:xp"));
+    }
+
+    @Test public void xpRewardRejectsValuesThatCannotBeDeliveredByTheRuntimeHandler() throws Exception {
+        for (String amount : new String[] { "-1", "2147483648", "not-a-number" }) {
+            Path root = root("bq-plan-invalid-xp-reward");
+            String quest = "{\"questIDHigh:4\":0,\"questIDLow:4\":31,"
+                + "\"properties:10\":{\"betterquesting:10\":{\"name:8\":\"XP\"}},"
+                + "\"tasks:9\":{\"0:10\":{\"index:3\":0,\"taskID:8\":\"bq_standard:checkbox\"}},"
+                + "\"rewards:9\":{\"0:10\":{\"index:3\":0,\"rewardID:8\":\"bq_standard:xp\","
+                + "\"amount:3\":" + amount + "}}}";
+            Files.write(root.resolve("Quests/line/xp.json"), quest.getBytes(StandardCharsets.UTF_8));
+            BqMigrationManifest manifest = new BqMigrationPlanner().plan(root);
+            assertFalse(manifest.toText(), manifest.isApplicable());
+            assertTrue(manifest.toText().contains("INVALID_REWARD_PARAMETER"));
+            assertTrue(manifest.toText().contains("XP reward amount"));
+        }
+    }
+
+    @Test public void outOfRangeTaskIntegerProducesBlockedPlanInsteadOfAbortingDryRun() throws Exception {
+        Path root = root("bq-plan-invalid-task-integer");
+        String quest = "{\"questIDHigh:4\":0,\"questIDLow:4\":34,"
+            + "\"properties:10\":{\"betterquesting:10\":{\"name:8\":\"Hunt\"}},"
+            + "\"tasks:9\":{\"0:10\":{\"index:3\":0,\"taskID:8\":\"bq_standard:hunt\","
+            + "\"required:3\":2147483648,\"target:8\":\"Zombie\"}},\"rewards:9\":{}}";
+        Files.write(root.resolve("Quests/line/hunt.json"), quest.getBytes(StandardCharsets.UTF_8));
+
+        BqMigrationManifest manifest = new BqMigrationPlanner().plan(root);
+        assertFalse(manifest.toText(), manifest.isApplicable());
+        assertTrue(manifest.toText().contains("INVALID_TASK_PARAMETER"));
+        assertTrue(manifest.toText().contains("task parameter required must fit a signed 32-bit integer"));
+        assertTrue(BqCompatibilityReport.create(manifest).getElementCompatibility().get(
+            "TASK|00000000-0000-0000-0000-000000000022|task-0|bq_standard:hunt")
+            == BqCompatibilityStatus.BLOCKED);
+    }
+
+    @Test public void questCompletionRewardsRejectMissingAndSelfTargets() throws Exception {
+        Path root = root("bq-plan-invalid-completion-target");
+        writeQuestCompletion(root, "missing.json", 32, 99);
+        writeQuestCompletion(root, "self.json", 33, 33);
+        BqMigrationManifest manifest = new BqMigrationPlanner().plan(root);
+        assertFalse(manifest.toText(), manifest.isApplicable());
+        assertTrue(manifest.toText().contains("MISSING_QUEST_COMPLETION_TARGET"));
+        assertTrue(manifest.toText().contains("SELF_QUEST_COMPLETION_TARGET"));
+    }
+
+    private static void writeQuestCompletion(Path root, String file, long questId, long targetId)
+        throws Exception {
+        String compactTarget = Base64.getUrlEncoder().withoutPadding().encodeToString(
+            ByteBuffer.allocate(16).putLong(0L).putLong(targetId).array());
+        String json = "{\"questIDHigh:4\":0,\"questIDLow:4\":" + questId
+            + ",\"properties:10\":{\"betterquesting:10\":{\"name:8\":\"Completion\"}},"
+            + "\"tasks:9\":{},\"rewards:9\":{\"0:10\":{\"index:3\":0,"
+            + "\"rewardID:8\":\"bq_standard:questcompletion\",\"questID:8\":\""
+            + compactTarget + "\"}}}";
+        Files.write(root.resolve("Quests/line").resolve(file), json.getBytes(StandardCharsets.UTF_8));
     }
 
     private static Path root(String prefix) throws Exception {

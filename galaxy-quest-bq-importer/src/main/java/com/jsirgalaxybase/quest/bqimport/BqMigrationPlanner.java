@@ -57,6 +57,7 @@ public final class BqMigrationPlanner {
                     issue.getCode() + ": " + issue.getMessage());
             }
         }
+        validateQuestCompletionTargets(quests, definitions, issues);
         for (QuestDefinition definition : definitions.values()) for (UUID prerequisite : definition.getPrerequisites())
             if (!definitions.containsKey(prerequisite)) error(issues, "MISSING_PREREQUISITE", definition.getId(), prerequisite.toString());
         detectCycles(definitions, issues);
@@ -88,6 +89,8 @@ public final class BqMigrationPlanner {
     private static void validateTask(UUID questId,com.jsirgalaxybase.quest.core.TaskDefinition task,List<BqMigrationIssue> issues){
         Map<String,String> values=task.getParameters();String subject=questId+"/"+task.getKey();
         if(!values.containsKey("bq.raw"))error(issues,"INVALID_TASK_PARAMETER",subject,"missing preserved BQ payload");
+        validateIntegerOptions(values, BqRuntimeCapabilityRegistry.taskIntegerOptionKeys().get(task.getTypeId()),
+            "INVALID_TASK_PARAMETER", subject, "task", issues);
         String target=values.get("target");if(target==null||positive(target)<1)error(issues,"INVALID_TASK_PARAMETER",subject,"target must be positive");
         String type=task.getTypeId();if(("bq_standard:retrieval".equals(type)||"bq_standard:optional_retrieval".equals(type)||"bq_standard:crafting".equals(type))&&positive(values.get("item.count"))<1)error(issues,"INVALID_TASK_PARAMETER",subject,"at least one item is required");
         if("bq_standard:fluid".equals(type)&&positive(values.get("fluid.count"))<1)error(issues,"INVALID_TASK_PARAMETER",subject,"at least one fluid is required");
@@ -95,8 +98,32 @@ public final class BqMigrationPlanner {
     }
     private static void validateReward(UUID questId,com.jsirgalaxybase.quest.core.RewardDefinition reward,List<BqMigrationIssue> issues){
         Map<String,String> values=reward.getParameters();String subject=questId+"/"+reward.getKey();if(!values.containsKey("bq.raw"))error(issues,"INVALID_REWARD_PARAMETER",subject,"missing preserved BQ payload");
+        validateIntegerOptions(values, BqRuntimeCapabilityRegistry.rewardIntegerOptionKeys().get(reward.getTypeId()),
+            "INVALID_REWARD_PARAMETER", subject, "reward", issues);
         if("bq_standard:choice".equals(reward.getTypeId())&&positive(values.get("item.count"))<1)error(issues,"INVALID_REWARD_PARAMETER",subject,"at least one choice is required");
+        if("bq_standard:xp".equals(reward.getTypeId()))try{int amount=Integer.parseInt(values.get("amount"));if(amount<0)error(issues,"INVALID_REWARD_PARAMETER",subject,"XP reward amount must be non-negative");}catch(RuntimeException invalid){error(issues,"INVALID_REWARD_PARAMETER",subject,"XP reward amount must fit a signed 32-bit integer");}
         if("bq_standard:questcompletion".equals(reward.getTypeId()))try{UUID.fromString(values.get("questUuid"));}catch(RuntimeException invalid){error(issues,"INVALID_REWARD_PARAMETER",subject,"questUuid is invalid");}
+    }
+    private static void validateIntegerOptions(Map<String,String> values,Set<String> integerKeys,String code,
+        String subject,String kind,List<BqMigrationIssue> issues){
+        if(integerKeys==null)return;
+        for(String key:integerKeys){
+            String value=values.get(key);
+            if(value==null)continue;
+            try{Integer.parseInt(value.trim());}
+            catch(RuntimeException invalid){error(issues,code,subject,kind+" parameter "+key+" must fit a signed 32-bit integer");}
+        }
+    }
+    private static void validateQuestCompletionTargets(List<BqImportedQuest> quests,
+        Map<UUID,QuestDefinition> definitions,List<BqMigrationIssue> issues){
+        for(BqImportedQuest source:quests)for(com.jsirgalaxybase.quest.core.RewardDefinition reward:source.getDefinition().getRewards()){
+            if(!"bq_standard:questcompletion".equals(reward.getTypeId()))continue;
+            String subject=source.getDefinition().getId()+"/"+reward.getKey();UUID target;
+            try{target=UUID.fromString(reward.getParameters().get("questUuid"));}
+            catch(RuntimeException invalid){continue;}
+            if(target.equals(source.getDefinition().getId()))error(issues,"SELF_QUEST_COMPLETION_TARGET",subject,"quest completion reward cannot target its own quest");
+            else if(!definitions.containsKey(target))error(issues,"MISSING_QUEST_COMPLETION_TARGET",subject,"quest completion target is absent from the imported catalog");
+        }
     }
     private static long positive(String value){try{return Math.max(0L,Long.parseLong(value));}catch(RuntimeException invalid){return 0L;}}
     private static void validateResource(UUID chapterId,String field,String value,List<BqMigrationIssue> issues){if(value==null||value.isEmpty())return;if(value.indexOf('\0')>=0||value.contains("..")||value.startsWith("/")||value.startsWith("\\")||value.contains("://"))error(issues,"INVALID_RESOURCE_REFERENCE",chapterId+"/"+field,"unsafe resource reference");}

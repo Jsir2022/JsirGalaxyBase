@@ -1,15 +1,15 @@
 # BQ 替代开发导航与变更边界
 
-更新：2026-10-11。用途：下一轮开发先读本页，不从历史 Worklog 的“下一步”自行推断目标。
+更新：2026-10-13。用途：下一轮开发先读本页，不从历史 Worklog 的“下一步”自行推断目标。
 当前状态以能力矩阵顶部唯一阶段表为准，当前工作入口为
-[Base-only 新服实施路线](betterquesting-next-stages-2026-10-11.md)，当前执行 N.1–N.5；
+[N.9.1 两天工作包](betterquesting-player-book-completeness-work-package-2026-10-12.md)：A–D 自动验收完成；当时 1,159 tests、0 skip/failure/error。当前进入[N.9.2 Base-only 隔离运行验收](betterquesting-base-only-runtime-acceptance-2026-10-12.md)：可重复 Quest/PG/UI2 smoke、全量 test、assemble 和自包含检查通过（1,159 tests，其中 52 个非 Quest 独立数据库配置型 skip、0 failure/error）。Forge 启动停在 EULA 提示，未加载 Base/Quest；须用户明确接受后继续，不能把当前状态写成实服运行验收完成。[Base-only 新服实施路线](betterquesting-next-stages-2026-10-11.md)保留 N.1–N.8 各自自动证据；
 [M.3 离线预览工作包](betterquesting-m3-offline-preview-2026-10-11.md)仅保留为历史工具证据，不再迁移旧玩家进度；
 [M.2 自动收口目标](betterquesting-m2-automatic-closeout-2026-10-11.md)保留为已完成的有限自动基线。
-R.2.19 事件归属与 Detect 发布并发均已由 R.2.34 解决，不再列为待决。
+R.2.19 事件归属与 Detect 发布并发均已由 R.2.34 解决，不再列为待决。2026-10-13 可重复 smoke 已将固定 DefaultQuests apply 与 Base JAR 只读 preflight 纳入；最新运行 1,159 tests、52 个非 Quest 数据库配置型 skip、0 failure/error，3,744 Quest/47 章导入和 3,791 个未变更实体预检通过。Forge 仍未启动：启动链必须先有用户对 Minecraft EULA 的明确接受；真实 Forge 事实、奖励与重启恢复仍是当前验收缺口。
 
-**2026-10-11 当前产品合同（优先于下方历史记录）**：目标为无 BetterQuesting 的全新服务器，所有玩家从零开始；只导入 `DefaultQuests` 内容，不迁移旧进度、领取/Choice 历史或旧 Party。所有导入 Quest 和事实均为 PLAYER 个人语义，即使玩家加入 Base Party 也不聚合或扇出。旧 M.3 进度迁移与 M.5 实时影子退出活动路线；下一生产门槛是 Base-only 新服人工验收。
+**2026-10-12 当前产品合同（优先于下方历史记录）**：目标为无 BetterQuesting 的全新服务器，所有玩家从零开始；只导入 `DefaultQuests` 内容，不迁移旧进度、领取/Choice 历史或旧 Party。所有导入 Quest 和事实均为 PLAYER 个人语义，即使玩家加入 Base Party 也不聚合或扇出。旧 M.3 进度迁移与 M.5 实时影子退出活动路线。N.9.1 玩家任务书完整性与隔离初始化自动验收已完成；下一阶段为 N.9.2 隔离 Base-only Forge/GTNH 新服真实运行。自动阶段通过不构成生产上线或停用 BQ 的许可。
 
-当前交付证据见 [Base-only 验收表](betterquesting-base-only-acceptance-2026-10-11.md)。代码检查点为 `adfb691`（个人导入与门禁）和 `664436e`（终端健康摘要）；本轮未推送、未部署。
+当前交付证据见 [Base-only 验收表](betterquesting-base-only-acceptance-2026-10-11.md)。N.8 代码和文档仍在工作树，未提交、未推送、未部署；本轮仅使用隔离测试 PostgreSQL。
 
 <details>
 <summary>历史 M.2/M.3 开发记录（非活动待办）</summary>

@@ -62,7 +62,8 @@ public final class BqBehaviorInventory {
             }
             questProfile.add(quest);
             for (BqStandardTaskSpec spec : quest.getTaskSpecs()) {
-                usage(tasks, spec.getTypeId()).add(spec.getOptions(), spec.getItems(), spec.getFluids());
+                usage(tasks, spec.getTypeId()).add(spec.getOptions(), spec.getItems(), spec.getFluids(),
+                    spec.getBlocks(), BqRuntimeCapabilityRegistry.taskIntegerOptionKeys().get(spec.getTypeId()));
                 if ("bq_standard:location".equals(spec.getTypeId())) {
                     locationTaskCount++;
                     addLocationProfile(locationProfiles, spec.getOptions());
@@ -82,7 +83,8 @@ public final class BqBehaviorInventory {
                 }
             }
             for (BqStandardRewardSpec spec : quest.getRewardSpecs()) {
-                usage(rewards, spec.getTypeId()).add(spec.getOptions());
+                usage(rewards, spec.getTypeId()).add(spec.getOptions(),
+                    BqRuntimeCapabilityRegistry.rewardIntegerOptionKeys().get(spec.getTypeId()));
             }
         }
         List<String> manifestBlockers = new ArrayList<String>();
@@ -112,7 +114,36 @@ public final class BqBehaviorInventory {
         for (String type : rewards.keySet()) if (BqRuntimeCapabilityRegistry.rewardStatus(type)
             != BqCompatibilityStatus.SUPPORTED) blocked.add("REWARD " + type + "="
                 + BqRuntimeCapabilityRegistry.rewardStatus(type));
+        checkRuntimeOptions("TASK", tasks, BqRuntimeCapabilityRegistry.taskOptionKeys(), blocked);
+        checkRuntimeOptions("REWARD", rewards, BqRuntimeCapabilityRegistry.rewardOptionKeys(), blocked);
+        checkRuntimeIntegerOptions("TASK", tasks, blocked);
+        checkRuntimeIntegerOptions("REWARD", rewards, blocked);
         if (!blocked.isEmpty()) throw new IllegalStateException("BQ runtime is not ready: " + blocked);
+    }
+
+    private static void checkRuntimeIntegerOptions(String kind, Map<String, TypeUsage> usages, List<String> blocked) {
+        for (Map.Entry<String, TypeUsage> entry : usages.entrySet()) {
+            for (String option : entry.getValue().getInvalidIntegerOptions().keySet()) {
+                blocked.add(kind + " " + entry.getKey() + " INTEGER " + option + "=INVALID_VALUE");
+            }
+        }
+    }
+
+    private static void checkRuntimeOptions(String kind, Map<String, TypeUsage> usages,
+        Map<String, Set<String>> supportedKeys, List<String> blocked) {
+        for (Map.Entry<String, TypeUsage> entry : usages.entrySet()) {
+            String type = entry.getKey();
+            Set<String> expected = supportedKeys.get(type);
+            if (expected == null) continue;
+            for (String option : entry.getValue().getOptionKeys().keySet()) {
+                if (!expected.contains(option)) blocked.add(kind + " " + type + " OPTION " + option + "=UNVERIFIED");
+            }
+            for (Map.Entry<String, Map<String, Integer>> flag : entry.getValue().getBehaviorFlags().entrySet()) {
+                if (flag.getValue().containsKey("invalid")) {
+                    blocked.add(kind + " " + type + " FLAG " + flag.getKey() + "=INVALID_VALUE");
+                }
+            }
+        }
     }
 
     public String toText() {
@@ -318,8 +349,18 @@ public final class BqBehaviorInventory {
                 .append("|behaviorFlags=").append(usage.behaviorFlags)
                 .append("|behaviorProfiles=").append(usage.behaviorProfiles);
             if (usage.itemRequirements > 0) out.append("|itemMatchProfiles=").append(usage.itemMatchProfiles);
+            if (!usage.itemAmountProfiles.isEmpty()) out.append("|itemAmountValues=")
+                .append(usage.itemAmountProfiles.size());
+            if (!usage.invalidIntegerOptions.isEmpty()) out.append("|invalidIntegerOptions=")
+                .append(usage.invalidIntegerOptions);
+            if (!usage.integerOptionProfiles.isEmpty()) out.append("|integerOptionProfiles=")
+                .append(usage.integerOptionProfiles);
             if (usage.fluidRequirements > 0) out.append("|fluidRequirements=").append(usage.fluidRequirements)
                 .append("|fluidAmountProfiles=").append(usage.fluidAmountProfiles);
+            if (!usage.blockAmountProfiles.isEmpty()) out.append("|blockAmountProfiles=")
+                .append(usage.blockAmountProfiles);
+            if (!usage.blockMetaProfiles.isEmpty()) out.append("|blockMetaProfiles=")
+                .append(usage.blockMetaProfiles);
             out.append('\n');
         }
     }
@@ -329,12 +370,18 @@ public final class BqBehaviorInventory {
         private final Map<String, Integer> optionKeys = new TreeMap<String, Integer>();
         private final Map<String, Map<String, Integer>> behaviorFlags =
             new TreeMap<String, Map<String, Integer>>();
+        private final Map<String, Integer> invalidIntegerOptions = new TreeMap<String, Integer>();
+        private final Map<String, Map<String, Integer>> integerOptionProfiles =
+            new TreeMap<String, Map<String, Integer>>();
         private final Map<String, Integer> behaviorProfiles = new TreeMap<String, Integer>();
         private final Map<String, Integer> itemMatchProfiles = new TreeMap<String, Integer>();
+        private final Map<String, Integer> itemAmountProfiles = new TreeMap<String, Integer>();
         private int itemRequirements;
         private final Map<String, Integer> fluidAmountProfiles = new TreeMap<String, Integer>();
         private int fluidRequirements;
-        private void add(Map<String, String> options) {
+        private final Map<String, Integer> blockAmountProfiles = new TreeMap<String, Integer>();
+        private final Map<String, Integer> blockMetaProfiles = new TreeMap<String, Integer>();
+        private void add(Map<String, String> options, Set<String> integerKeys) {
             count++;
             for (String key : options.keySet()) {
                 Integer previous = optionKeys.get(key);
@@ -349,6 +396,20 @@ public final class BqBehaviorInventory {
                     Integer seen = variants.get(value);
                     variants.put(value, seen == null ? 1 : seen + 1);
                 }
+            }
+            if (integerKeys != null) for (String key : integerKeys) {
+                String value = options.get(key);
+                if (value == null) continue;
+                try {
+                    String normalized = Integer.toString(Integer.parseInt(value.trim()));
+                    Map<String, Integer> values = integerOptionProfiles.get(key);
+                    if (values == null) {
+                        values = new TreeMap<String, Integer>();
+                        integerOptionProfiles.put(key, values);
+                    }
+                    increment(values, normalized);
+                }
+                catch (RuntimeException invalid) { increment(invalidIntegerOptions, key); }
             }
             String profile = behaviorProfile(options);
             if (!profile.isEmpty()) increment(behaviorProfiles, profile);
@@ -367,14 +428,15 @@ public final class BqBehaviorInventory {
         }
 
         private void add(Map<String, String> options, List<BqItemStackSpec> items,
-            List<BqFluidStackSpec> fluids) {
-            add(options);
+            List<BqFluidStackSpec> fluids, List<BqBlockSpec> blocks, Set<String> integerKeys) {
+            add(options, integerKeys);
             if (items != null) {
                 boolean nbtCheckConfigured = options.containsKey("ignoreNBT") && "false".equals(options.get("ignoreNBT"));
                 boolean partialMatchDisabled = options.containsKey("partialMatch")
                     && "false".equals(options.get("partialMatch"));
                 for (BqItemStackSpec item : items) {
                     itemRequirements++;
+                    increment(itemAmountProfiles, Integer.toString(item.getCount()));
                     increment(itemMatchProfiles, "itemRequirements");
                     boolean oreDictionary = item.getOreDictionary() != null && !item.getOreDictionary().trim().isEmpty();
                     boolean nonEmptyNbt = item.getTagJson() != null && !item.getTagJson().trim().isEmpty()
@@ -406,6 +468,10 @@ public final class BqBehaviorInventory {
                     fluidRequirements++;
                     increment(fluidAmountProfiles, Integer.toString(fluid.getAmount()));
                 }
+            }
+            if (blocks != null) for (BqBlockSpec block : blocks) {
+                increment(blockAmountProfiles, Integer.toString(block.getAmount()));
+                increment(blockMetaProfiles, Integer.toString(block.getMeta()));
             }
         }
 
@@ -451,12 +517,31 @@ public final class BqBehaviorInventory {
             }
             return Collections.unmodifiableMap(result);
         }
+        public Map<String, Integer> getInvalidIntegerOptions() {
+            return Collections.unmodifiableMap(invalidIntegerOptions);
+        }
+        public Map<String, Map<String, Integer>> getIntegerOptionProfiles() {
+            Map<String, Map<String, Integer>> result = new TreeMap<String, Map<String, Integer>>();
+            for (Map.Entry<String, Map<String, Integer>> entry : integerOptionProfiles.entrySet()) {
+                result.put(entry.getKey(), Collections.unmodifiableMap(entry.getValue()));
+            }
+            return Collections.unmodifiableMap(result);
+        }
         public Map<String, Integer> getItemMatchProfiles() {
             return Collections.unmodifiableMap(itemMatchProfiles);
+        }
+        public Map<String, Integer> getItemAmountProfiles() {
+            return Collections.unmodifiableMap(itemAmountProfiles);
         }
         public int getFluidRequirements() { return fluidRequirements; }
         public Map<String, Integer> getFluidAmountProfiles() {
             return Collections.unmodifiableMap(fluidAmountProfiles);
+        }
+        public Map<String, Integer> getBlockAmountProfiles() {
+            return Collections.unmodifiableMap(blockAmountProfiles);
+        }
+        public Map<String, Integer> getBlockMetaProfiles() {
+            return Collections.unmodifiableMap(blockMetaProfiles);
         }
         private static boolean isBehaviorFlag(String key) {
             return "consume".equals(key) || "autoConsume".equals(key) || "groupDetect".equals(key)

@@ -43,6 +43,7 @@ public final class UiRuntime implements AutoCloseable {
     public DrawList frame() {
         ensureOpen();
         if (!dirty) return drawList;
+        document.onViewportChanged(viewport, context);
         UiElement element = document.build(context);
         root = reconciler.reconcile(root, element);
         LayoutSpec spec = document.layout(element, viewport, context);

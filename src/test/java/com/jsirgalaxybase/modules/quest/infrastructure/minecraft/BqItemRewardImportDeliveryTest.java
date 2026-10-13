@@ -9,15 +9,23 @@ import static org.junit.Assert.assertTrue;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
+import org.junit.Assume;
 import org.junit.Test;
 
+import com.jsirgalaxybase.quest.bqimport.BqImportedQuest;
+import com.jsirgalaxybase.quest.bqimport.BqMigrationManifest;
+import com.jsirgalaxybase.quest.bqimport.BqMigrationPlanner;
 import com.jsirgalaxybase.quest.bqimport.BqQuestDefinitionImporter;
 import com.jsirgalaxybase.quest.core.ParticipantId;
 import com.jsirgalaxybase.quest.core.RewardDefinition;
@@ -30,6 +38,123 @@ import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
 
 public class BqItemRewardImportDeliveryTest {
+    @Test
+    public void pinnedDefaultQuestsXpProfilesReachExperienceDeliveryExactlyOnce() throws Exception {
+        String source = System.getenv("BQ_TEST_DEFAULT_QUESTS");
+        Assume.assumeTrue("read-only pinned DefaultQuests mount is required for source XP delivery audit",
+            source != null && !source.trim().isEmpty());
+        BqMigrationManifest manifest = new BqMigrationPlanner().plan(Paths.get(source));
+        assertEquals("9795d6c7fe71e72e91fed8cdc3dea632ab091ccf040e71707d2dd0d90cd355fc",
+            manifest.getSourceHash());
+
+        Map<String, RewardDefinition> profiles = new LinkedHashMap<String, RewardDefinition>();
+        Set<String> amounts = new LinkedHashSet<String>();
+        for (BqImportedQuest quest : manifest.getQuests()) {
+            for (RewardDefinition reward : quest.getDefinition().getRewards()) {
+                if (!"bq_standard:xp".equals(reward.getTypeId())) continue;
+                String amount = reward.getParameters().get("amount");
+                String profile = "amount=" + amount + ";unit=" + reward.getParameters().get("xpUnit");
+                profiles.put(profile, reward);
+                amounts.add(amount);
+            }
+        }
+        assertEquals(new LinkedHashSet<String>(Arrays.asList("1", "10")), amounts);
+        assertEquals("the pinned book has two distinct XP reward amount/unit profiles", 2, profiles.size());
+
+        int sequence = 0;
+        for (RewardDefinition reward : profiles.values()) {
+            UUID playerId = UUID.randomUUID();
+            FakeExperiencePort player = new FakeExperiencePort(273, 15, 0.5F);
+            String entitlement = "pinned-source-xp-" + sequence++;
+            RewardDeliveryLease lease = new RewardDeliveryLease(entitlement, ParticipantId.player(playerId), reward,
+                1, "source-profile-test", 100L);
+            int amount = Integer.parseInt(reward.getParameters().get("amount"));
+            long addition = "levels".equals(reward.getParameters().get("xpUnit"))
+                ? MinecraftXpRewardDeliveryHandler.levelXp(amount) : amount;
+            int expectedTotal = (int) Math.min(Integer.MAX_VALUE, player.total + addition);
+            RewardDeliveryOutcome outcome = MinecraftXpRewardDeliveryHandler.deliverToPlayer(lease, player);
+            assertTrue(outcome.getError(), outcome.isDelivered());
+            assertEquals("the imported source amount/unit must determine XP added", expectedTotal, player.total);
+            assertTrue(player.markers.contains(QuestRewardMarker.key(entitlement)));
+            List<String> afterFirstDelivery = new ArrayList<String>(player.events);
+            assertEquals(Arrays.asList("flush", "sync"), afterFirstDelivery);
+            assertTrue(MinecraftXpRewardDeliveryHandler.deliverToPlayer(lease, player).isDelivered());
+            assertEquals(expectedTotal, player.total);
+            assertEquals(afterFirstDelivery, player.events);
+        }
+    }
+
+    @Test
+    public void pinnedDefaultQuestsItemAndChoiceRewardsReachMinecraftDeliveryExactlyOnce() throws Exception {
+        String source = System.getenv("BQ_TEST_DEFAULT_QUESTS");
+        Assume.assumeTrue("read-only pinned DefaultQuests mount is required for source reward delivery audit",
+            source != null && !source.trim().isEmpty());
+        BqMigrationManifest manifest = new BqMigrationPlanner().plan(Paths.get(source));
+        assertEquals("9795d6c7fe71e72e91fed8cdc3dea632ab091ccf040e71707d2dd0d90cd355fc",
+            manifest.getSourceHash());
+
+        RewardDefinition itemReward = firstPinnedReward(manifest, "bq_standard:item");
+        UUID itemPlayerId = UUID.randomUUID();
+        FakePlayerState itemPlayer = new FakePlayerState("PinnedRewardPlayer", 36);
+        Map<String, Item> itemLookup = new LinkedHashMap<String, Item>();
+        MinecraftItemRewardDeliveryHandler itemHandler = MinecraftItemRewardDeliveryHandler.forTest(
+            "bq_standard:item", playerId -> playerId.equals(itemPlayerId) ? itemPlayer : null,
+            registryName -> itemLookup.computeIfAbsent(registryName, ignored -> {
+                Item created = new Item().setHasSubtypes(true);
+                created.setMaxStackSize(64);
+                return created;
+            }));
+        RewardDeliveryLease itemLease = new RewardDeliveryLease("pinned-source-item-reward",
+            ParticipantId.player(itemPlayerId), itemReward, 1, "source-profile-test", 100L);
+        int expectedItemCount = configuredRewardAmount(itemReward, false);
+        assertTrue("a pinned Item reward should contain at least one configured item", expectedItemCount > 0);
+        RewardDeliveryOutcome itemOutcome = itemHandler.deliver(itemLease);
+        assertTrue(itemOutcome.getError(), itemOutcome.isDelivered());
+        int itemCountAfterDelivery = totalRewardItems(itemPlayer, itemLookup.values());
+        assertEquals(expectedItemCount, itemCountAfterDelivery);
+        assertTrue(itemPlayer.persisted.getCompoundTag(QuestRewardMarker.ROOT)
+            .getBoolean(QuestRewardMarker.key(itemLease.getEntitlementKey())));
+        int itemFlushCount = itemPlayer.flushCount;
+        int itemDropCount = itemPlayer.dropped.size();
+        assertTrue(itemHandler.deliver(itemLease).isDelivered());
+        assertEquals("source Item reward replay must not duplicate inventory or overflow", itemCountAfterDelivery,
+            totalRewardItems(itemPlayer, itemLookup.values()));
+        assertEquals(itemFlushCount, itemPlayer.flushCount);
+        assertEquals(itemDropCount, itemPlayer.dropped.size());
+
+        RewardDefinition choiceReward = firstPinnedReward(manifest, "bq_standard:choice");
+        Map<String, String> selectedParameters = new LinkedHashMap<String, String>(choiceReward.getParameters());
+        selectedParameters.put("choice.index", "0");
+        RewardDefinition selectedChoice = new RewardDefinition(choiceReward.getKey(), choiceReward.getTypeId(),
+            selectedParameters);
+        UUID choicePlayerId = UUID.randomUUID();
+        FakePlayerState choicePlayer = new FakePlayerState("PinnedChoicePlayer", 36);
+        Map<String, Item> choiceItems = new LinkedHashMap<String, Item>();
+        MinecraftItemRewardDeliveryHandler choiceHandler = MinecraftItemRewardDeliveryHandler.forTest(
+            "bq_standard:choice", playerId -> playerId.equals(choicePlayerId) ? choicePlayer : null,
+            registryName -> choiceItems.computeIfAbsent(registryName, ignored -> {
+                Item created = new Item().setHasSubtypes(true);
+                created.setMaxStackSize(64);
+                return created;
+            }));
+        RewardDeliveryLease choiceLease = new RewardDeliveryLease("pinned-source-choice-reward",
+            ParticipantId.player(choicePlayerId), selectedChoice, 1, "source-profile-test", 100L);
+        int expectedChoiceCount = configuredChoiceAmount(selectedChoice, 0);
+        RewardDeliveryOutcome choiceOutcome = choiceHandler.deliver(choiceLease);
+        assertTrue(choiceOutcome.getError(), choiceOutcome.isDelivered());
+        int choiceCountAfterDelivery = totalRewardItems(choicePlayer, choiceItems.values());
+        assertEquals(expectedChoiceCount, choiceCountAfterDelivery);
+        assertTrue(choicePlayer.persisted.getCompoundTag(QuestRewardMarker.ROOT)
+            .getBoolean(QuestRewardMarker.key(choiceLease.getEntitlementKey())));
+        int choiceFlushCount = choicePlayer.flushCount;
+        int choiceDropCount = choicePlayer.dropped.size();
+        assertTrue(choiceHandler.deliver(choiceLease).isDelivered());
+        assertEquals("source Choice replay must not duplicate the selected option", choiceCountAfterDelivery,
+            totalRewardItems(choicePlayer, choiceItems.values()));
+        assertEquals(choiceFlushCount, choicePlayer.flushCount);
+        assertEquals(choiceDropCount, choicePlayer.dropped.size());
+    }
+
     @Test
     public void importedBqItemRewardFlowsThroughMinecraftDeliveryAndPersistsIdempotencyMarker() throws Exception {
         Path source = Files.createTempFile("bq-item-reward-delivery", ".json");
@@ -308,6 +433,38 @@ public class BqItemRewardImportDeliveryTest {
         List<ItemStack> result = new ArrayList<ItemStack>();
         for (ItemStack stack : inventory) if (stack != null) result.add(stack);
         return result;
+    }
+
+    private static RewardDefinition firstPinnedReward(BqMigrationManifest manifest, String typeId) {
+        for (BqImportedQuest quest : manifest.getQuests()) {
+            for (RewardDefinition reward : quest.getDefinition().getRewards()) {
+                if (typeId.equals(reward.getTypeId())) return reward;
+            }
+        }
+        throw new AssertionError("pinned DefaultQuests is missing reward type " + typeId);
+    }
+
+    private static int configuredRewardAmount(RewardDefinition reward, boolean choice) {
+        int count = Integer.parseInt(reward.getParameters().get("item.count"));
+        int total = 0;
+        for (int index = 0; index < count; index++) {
+            int amount = Integer.parseInt(reward.getParameters().get("item." + index + ".amount"));
+            total += choice ? Math.max(0, amount) : Math.max(1, amount);
+        }
+        return total;
+    }
+
+    private static int configuredChoiceAmount(RewardDefinition reward, int selectedIndex) {
+        return Math.max(0, Integer.parseInt(reward.getParameters().get("item." + selectedIndex + ".amount")));
+    }
+
+    private static int totalRewardItems(FakePlayerState player, Iterable<Item> rewardItems) {
+        int total = 0;
+        for (Item item : rewardItems) {
+            total += count(item, nonEmpty(player.inventory));
+            total += count(item, player.dropped);
+        }
+        return total;
     }
 
     private static int count(Item item, List<ItemStack> stacks) {

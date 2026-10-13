@@ -4,6 +4,7 @@ public interface QuestCenterActionPort {
     QuestCenterActionPort NONE = new QuestCenterActionPort() {
         @Override public void selectChapter(String chapterId) {}
         @Override public void selectQuest(String questId) {}
+        @Override public void selectPrerequisite(String questId) {}
         @Override public void changeFilter(String filter) {}
         @Override public void changeQuery(String query) {}
         @Override public void changeChapterPage(int pageIndex) {}
@@ -12,8 +13,6 @@ public interface QuestCenterActionPort {
         @Override public void claim(String questId) {}
         @Override public void forceClaimWithRandomChoices(String questId) {}
         @Override public void confirmTask(String questId,String taskKey) {}
-        @Override public void submitTask(String questId,String taskKey) {}
-        @Override public void submitHeldStack(String questId,String taskKey) {}
         @Override public void selectRewardChoice(String questId,String rewardKey,int choiceIndex) {}
         @Override public void toggleTracking(String questId) {}
         @Override public void openManagement() {}
@@ -27,6 +26,8 @@ public interface QuestCenterActionPort {
 
     void selectChapter(String chapterId);
     void selectQuest(String questId);
+    /** Navigates only to a prerequisite explicitly included in the server-authorized visible detail. */
+    default void selectPrerequisite(String questId) { selectQuest(questId); }
     void changeFilter(String filter);
     void changeQuery(String query);
     void changeChapterPage(int pageIndex);
@@ -38,10 +39,6 @@ public interface QuestCenterActionPort {
     void confirmTask(String questId,String taskKey);
     /** BQ Quest-level Detect: server scans each unfinished consuming task in definition order. */
     default void detectConsumptions(String questId) {}
-    /** Consumes all matching item stacks in the authenticated player's inventory for this task. */
-    void submitTask(String questId,String taskKey);
-    /** Consumes only the single stack selected by the server from the authenticated player's hotbar. */
-    void submitHeldStack(String questId,String taskKey);
     void selectRewardChoice(String questId,String rewardKey,int choiceIndex);
     void toggleTracking(String questId);
     void openManagement();

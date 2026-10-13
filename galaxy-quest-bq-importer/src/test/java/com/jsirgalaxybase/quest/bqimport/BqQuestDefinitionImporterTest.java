@@ -129,6 +129,80 @@ public class BqQuestDefinitionImporterTest {
         assertTrue(imported.getDefinition().getTasks().get(0).getParameters().get("bq.raw").contains("consume:1"));
     }
 
+    @Test public void malformedQuestBooleanDoesNotSilentlyUseItsDefault() throws Exception {
+        Path file = Files.createTempFile("bq-invalid-quest-flag", ".json");
+        String json = "{\"questIDHigh:4\":0,\"questIDLow:4\":21,"
+            + "\"properties:10\":{\"betterquesting:10\":{\"name:8\":\"Flags\",\"autoClaim:1\":\"sometimes\"}},"
+            + "\"tasks:9\":{},\"rewards:9\":{}}";
+        Files.write(file, json.getBytes(StandardCharsets.UTF_8));
+        try {
+            new BqQuestDefinitionImporter().read(file);
+            fail("malformed BQ quest flags must not silently become false");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("Invalid BetterQuesting boolean property autoClaim=sometimes"));
+        }
+    }
+
+    @Test public void unknownQuestVisibilityDoesNotSilentlyBecomeNormal() throws Exception {
+        Path file = Files.createTempFile("bq-invalid-visibility", ".json");
+        String json = "{\"questIDHigh:4\":0,\"questIDLow:4\":22,"
+            + "\"properties:10\":{\"betterquesting:10\":{\"name:8\":\"Visibility\","
+            + "\"visibility:8\":\"FUTURE_MODE\"}},\"tasks:9\":{},\"rewards:9\":{}}";
+        Files.write(file, json.getBytes(StandardCharsets.UTF_8));
+        try {
+            new BqQuestDefinitionImporter().read(file);
+            fail("unknown BQ visibility must not silently become NORMAL");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("unsupported BQ quest visibility: FUTURE_MODE"));
+        }
+    }
+
+    @Test public void missingXpRewardAmountPreservesBqNbtReadDefaultOfZero() throws Exception {
+        Path file = Files.createTempFile("bq-xp-default", ".json");
+        String json = "{\"questIDHigh:4\":0,\"questIDLow:4\":23,"
+            + "\"properties:10\":{\"betterquesting:10\":{\"name:8\":\"XP\"}},"
+            + "\"tasks:9\":{},\"rewards:9\":{\"0:10\":{\"index:3\":0,"
+            + "\"rewardID:8\":\"bq_standard:xp\"}}}";
+        Files.write(file, json.getBytes(StandardCharsets.UTF_8));
+        BqImportedQuest imported = new BqQuestDefinitionImporter().read(file);
+        assertEquals("0", imported.getDefinition().getRewards().get(0).getParameters().get("amount"));
+        assertEquals("points", imported.getDefinition().getRewards().get(0).getParameters().get("xpUnit"));
+    }
+
+    @Test public void rejectsFractionalOrOutOfRangeRepeatTimeRatherThanChangingTheCooldown() throws Exception {
+        Path file = Files.createTempFile("bq-invalid-repeat-time", ".json");
+        String json = "{\"questIDHigh:4\":0,\"questIDLow:4\":23,"
+            + "\"properties:10\":{\"betterquesting:10\":{\"name:8\":\"Repeat\","
+            + "\"repeatTime:3\":2147483648}},\"tasks:9\":{},\"rewards:9\":{}}";
+        Files.write(file, json.getBytes(StandardCharsets.UTF_8));
+        assertThrows(IllegalArgumentException.class, () -> new BqQuestDefinitionImporter().read(file));
+
+        Files.write(file, json.replace("2147483648", "1.5").getBytes(StandardCharsets.UTF_8));
+        assertThrows(IllegalArgumentException.class, () -> new BqQuestDefinitionImporter().read(file));
+    }
+
+    @Test public void planningReportsFractionalOrOutOfRangeRuntimeIntegerOptions() throws Exception {
+        String[] invalidTaskJson = {
+            "\"taskID:8\":\"bq_standard:hunt\",\"required:3\":2147483648",
+            "\"taskID:8\":\"bq_standard:location\",\"dimension:3\":1.5",
+            "\"taskID:8\":\"bq_standard:meeting\",\"range:3\":-2147483649"
+        };
+        for (String task : invalidTaskJson) {
+            Path root = Files.createTempDirectory("bq-invalid-task-int");
+            Path quests = Files.createDirectories(root.resolve("Quests/line"));
+            Files.createDirectories(root.resolve("QuestLines"));
+            Files.write(root.resolve("QuestLinesOrder.txt"), new byte[0]);
+            String json = "{\"questIDHigh:4\":0,\"questIDLow:4\":24,"
+                + "\"properties:10\":{\"betterquesting:10\":{\"name:8\":\"Numeric\"}},"
+                + "\"tasks:9\":{\"0:10\":{" + task + "}},\"rewards:9\":{}}";
+            Files.write(quests.resolve("quest.json"), json.getBytes(StandardCharsets.UTF_8));
+            BqMigrationManifest manifest = new BqMigrationPlanner().plan(root);
+            assertFalse(manifest.toText(), manifest.isApplicable());
+            assertTrue(manifest.toText(), manifest.toText().contains("INVALID_TASK_PARAMETER"));
+            assertTrue(manifest.toText(), manifest.toText().contains("must fit a signed 32-bit integer"));
+        }
+    }
+
     @Test
     public void compatibilityReportNeverSilentlyDropsUnknownTypes() throws Exception {
         Path root = Files.createTempDirectory("bq-default");

@@ -118,7 +118,7 @@ public final class TerminalVisualScenario {
         final List<QuestCenterVisualModel.QuestSummary> quests=questSummaries();
         final QuestCenterVisualModel.QuestDetail detail=questDetail(quests.get(1));
         result.add(new TerminalVisualScenario("terminal-quests-browse-"+themeId,theme,new DocumentFactory(){public UiDocument create(){return new QuestCenterVisualDocument(
-            new QuestCenterVisualModel(shellModel(),QuestCenterVisualModel.View.BROWSE,QuestCenterVisualModel.LoadState.READY,"intro","","all","",chapters,quests,null),TerminalActionPort.NONE,QuestCenterActionPort.NONE,TerminalWindowProfile.STANDARD);}}));
+            new QuestCenterVisualModel(shellModel(),QuestCenterVisualModel.View.BROWSE,QuestCenterVisualModel.LoadState.READY,"intro","","all","","",chapters,0,4,chapters.size(),quests.subList(0,4),0,4,quests.size(),null),TerminalActionPort.NONE,QuestCenterActionPort.NONE,TerminalWindowProfile.STANDARD);}}));
         result.add(new TerminalVisualScenario("terminal-quests-detail-"+themeId,theme,new DocumentFactory(){public UiDocument create(){return new QuestCenterVisualDocument(
             new QuestCenterVisualModel(shellModel(),QuestCenterVisualModel.View.DETAIL,QuestCenterVisualModel.LoadState.READY,"intro","steel","active","",chapters,quests,detail),TerminalActionPort.NONE,QuestCenterActionPort.NONE,TerminalWindowProfile.STANDARD);}}));
         result.add(new TerminalVisualScenario("terminal-quests-empty-"+themeId,theme,new DocumentFactory(){public UiDocument create(){return new QuestCenterVisualDocument(

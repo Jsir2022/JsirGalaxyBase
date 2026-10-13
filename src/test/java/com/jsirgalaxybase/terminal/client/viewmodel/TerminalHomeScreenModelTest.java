@@ -6,8 +6,11 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import java.util.Arrays;
+import java.util.Collections;
 
 import org.junit.Test;
+
+import com.jsirgalaxybase.terminal.TerminalQuestCenterSectionSnapshot;
 
 public class TerminalHomeScreenModelTest {
 
@@ -50,6 +53,26 @@ public class TerminalHomeScreenModelTest {
         assertEquals("server_tools", model.getSelectedNavItem().getPageId());
         assertNotNull(model.getPageSnapshot("server_tools").getServerToolsSectionModel());
         assertEquals("传送", model.getSelectedNavItem().getLabel());
+    }
+
+    @Test
+    public void normalizedSnapshotsRetainCareerQuestAndPublicServicePages() {
+        TerminalQuestCenterSectionSnapshot quest = new TerminalQuestCenterSectionSnapshot("READY", "",
+            TerminalQuestCenterSectionSnapshot.View.DETAIL, "chapter", "quest", "all", "query",
+            Collections.<TerminalQuestCenterSectionSnapshot.Chapter>emptyList(), 0, 6, 0,
+            Collections.<TerminalQuestCenterSectionSnapshot.Quest>emptyList(), 0, 7, 0, null);
+        TerminalHomeScreenModel.PageSnapshotModel career = new TerminalHomeScreenModel.PageSnapshotModel(
+            "career", "职业", "", Collections.<TerminalHomeScreenModel.SectionModel>emptyList(),
+            null, null, null, null, null, null, null, quest);
+        TerminalHomeScreenModel.PageSnapshotModel publicService = new TerminalHomeScreenModel.PageSnapshotModel(
+            "public_service", "公共", "", Collections.<TerminalHomeScreenModel.SectionModel>emptyList());
+
+        TerminalHomeScreenModel model = new TerminalHomeScreenModel("career", "银河终端", "",
+            null, null, Arrays.asList(career, publicService), null, "session");
+
+        assertEquals(TerminalQuestCenterSectionSnapshot.View.DETAIL,
+            model.getPageSnapshot("career").getQuestCenterModel().getView());
+        assertEquals("public_service", model.getPageSnapshot("public_service").getPageId());
     }
 
     @Test

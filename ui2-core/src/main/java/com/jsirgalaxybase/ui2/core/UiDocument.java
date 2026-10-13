@@ -7,6 +7,8 @@ import com.jsirgalaxybase.ui2.render.DrawList;
 
 /** A platform-neutral screen description consumed by UiRuntime. */
 public interface UiDocument {
+    /** Called before build/layout so size-dependent documents can build a consistent tree. */
+    default void onViewportChanged(UiSize viewport, UiContext context) {}
     UiElement build(UiContext context);
     LayoutSpec layout(UiElement root, UiSize viewport, UiContext context);
     DrawList paint(UiNode root, UiContext context);

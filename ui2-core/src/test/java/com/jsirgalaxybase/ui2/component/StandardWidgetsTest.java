@@ -108,10 +108,11 @@ public class StandardWidgetsTest {
         runtime.frame();
         assertTrue(runtime.dispatch(UiEvent.pointer(UiEvent.Type.POINTER_DOWN, 4, 4, 0)));
         assertTrue(runtime.dispatch(UiEvent.text('中')));
+        assertTrue(runtime.dispatch(UiEvent.key(com.jsirgalaxybase.ui2.input.UiKeyCode.ENTER)));
         assertTrue(runtime.dispatch(UiEvent.key(com.jsirgalaxybase.ui2.input.UiKeyCode.BACKSPACE)));
         assertTrue(!runtime.dispatch(UiEvent.key(com.jsirgalaxybase.ui2.input.UiKeyCode.SPACE)));
         assertTrue(events.toString().contains("TEXT_INPUT:中"));
-        assertTrue(events.toString().contains("KEY_DOWN"));
+        assertEquals(2, events.toString().split("KEY_DOWN", -1).length - 1);
     }
 
     @Test public void fixedThemeButtonTextShrinksAndStaysInsideItsAssignedBounds(){

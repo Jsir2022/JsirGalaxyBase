@@ -48,20 +48,24 @@ final class BqStandardCodec {
     BqStandardCodec(Gson gson) { this.gson = gson; }
 
     BqStandardTaskSpec task(JsonObject value, int fallbackIndex) {
-        int index = (int) BqTypedJson.number(value, "index", fallbackIndex);
+        int index = BqTypedJson.int32(value, "index", fallbackIndex);
         String type = BqTypedJson.string(value, "taskID", "betterquesting:unknown");
         Map<String, String> options = scalarOptions(value, "taskID", "index");
+        canonicalizeIntegerOptions(value, type, options, BqRuntimeCapabilityRegistry.taskIntegerOptionKeys());
         return new BqStandardTaskSpec("task-" + index, type, options, items(value, "requiredItems"),
             fluids(value, "requiredFluids"), blocks(value, "blocks"));
     }
 
     BqStandardRewardSpec reward(JsonObject value, int fallbackIndex) {
-        int index = (int) BqTypedJson.number(value, "index", fallbackIndex);
+        int index = BqTypedJson.int32(value, "index", fallbackIndex);
         String type = BqTypedJson.string(value, "rewardID", "betterquesting:unknown");
         Map<String, String> options = scalarOptions(value, "rewardID", "index");
+        canonicalizeIntegerOptions(value, type, options, BqRuntimeCapabilityRegistry.rewardIntegerOptionKeys());
         if (!options.containsKey("ignoreDisabled") && isStandardRewardType(type)) {
             options.put("ignoreDisabled", Boolean.toString(defaultIgnoreDisabled(type)));
         }
+        // RewardXP.readFromNBT uses getInteger("amount"), whose BQ default is zero.
+        if ("bq_standard:xp".equals(type) && !options.containsKey("amount")) options.put("amount", "0");
         String compactQuestId = BqTypedJson.string(value, "questID", "");
         if (!compactQuestId.isEmpty()) options.put("questUuid", decodeCompactUuid(compactQuestId).toString());
         String itemField = "bq_standard:choice".equals(type) ? "choices" : "rewards";
@@ -188,7 +192,7 @@ final class BqStandardCodec {
         String id = BqTypedJson.string(item, "id", "");
         if (id.isEmpty() || "minecraft:air".equals(id)) return;
         result.put("heldItem.registryName", id);
-        result.put("heldItem.meta", Long.toString(BqTypedJson.number(item, "Damage", 0)));
+        result.put("heldItem.meta", Integer.toString(BqTypedJson.int32(item, "Damage", 0)));
         result.put("heldItem.oreDictionary", BqTypedJson.string(item, "OreDict", ""));
         result.put("heldItem.nbt", gson.toJson(BqTypedJson.object(item, "tag")));
         result.put("heldItem.nbtPortable", BqPortableNbtCodec.encodeCompound(BqTypedJson.object(item, "tag")));
@@ -198,7 +202,7 @@ final class BqStandardCodec {
         String id = BqTypedJson.string(block, "blockID", "");
         if (id.isEmpty() || "minecraft:air".equals(id)) return;
         result.put("block.registryName", id);
-        result.put("block.meta", Long.toString(BqTypedJson.number(block, "meta", 0)));
+        result.put("block.meta", Integer.toString(BqTypedJson.int32(block, "meta", 0)));
         result.put("block.oreDictionary", BqTypedJson.string(block, "oreDict", ""));
         result.put("block.nbt", gson.toJson(BqTypedJson.object(block, "nbt")));
         result.put("block.nbtPortable", BqPortableNbtCodec.encodeCompound(BqTypedJson.object(block, "nbt")));
@@ -281,6 +285,20 @@ final class BqStandardCodec {
         return result;
     }
 
+    private static void canonicalizeIntegerOptions(JsonObject source, String type, Map<String, String> options,
+        Map<String, Set<String>> integerKeysByType) {
+        Set<String> integerKeys = integerKeysByType.get(type);
+        if (integerKeys == null) return;
+        for (String key : integerKeys) if (options.containsKey(key)) {
+            try {
+                options.put(key, Integer.toString(BqTypedJson.int32(source, key, 0)));
+            } catch (IllegalArgumentException invalid) {
+                // Preserve the malformed scalar for a deterministic BLOCKED manifest and field-level
+                // diagnostic instead of aborting plan/dry-run. Publication checks it again independently.
+            }
+        }
+    }
+
     private static String normalizeBooleanOption(String key, String raw) {
         String normalized = raw == null ? "" : raw.trim();
         if ("1".equals(normalized) || "true".equalsIgnoreCase(normalized)) return "true";
@@ -296,7 +314,7 @@ final class BqStandardCodec {
         List<BqItemStackSpec> result = new ArrayList<BqItemStackSpec>();
         for (JsonObject item : BqTypedJson.indexedObjects(value, field)) {
             result.add(new BqItemStackSpec(BqTypedJson.string(item, "id", "minecraft:air"),
-                (int) BqTypedJson.number(item, "Damage", 0), (int) BqTypedJson.number(item, "Count", 0),
+                BqTypedJson.int32(item, "Damage", 0), BqTypedJson.int32(item, "Count", 0),
                 BqTypedJson.string(item, "OreDict", ""), gson.toJson(BqTypedJson.object(item, "tag"))));
         }
         return result;
@@ -306,7 +324,7 @@ final class BqStandardCodec {
         List<BqFluidStackSpec> result = new ArrayList<BqFluidStackSpec>();
         for (JsonObject fluid : BqTypedJson.indexedObjects(value, field)) {
             result.add(new BqFluidStackSpec(BqTypedJson.string(fluid, "FluidName", ""),
-                (int) BqTypedJson.number(fluid, "Amount", 0), gson.toJson(BqTypedJson.object(fluid, "Tag")),
+                BqTypedJson.int32(fluid, "Amount", 0), gson.toJson(BqTypedJson.object(fluid, "Tag")),
                 BqTypedJson.hasCompound(fluid, "Tag")));
         }
         return result;
@@ -316,7 +334,7 @@ final class BqStandardCodec {
         List<BqBlockSpec> result = new ArrayList<BqBlockSpec>();
         for (JsonObject block : BqTypedJson.indexedObjects(value, field)) {
             result.add(new BqBlockSpec(BqTypedJson.string(block, "blockID", "minecraft:air"),
-                (int) BqTypedJson.number(block, "meta", 0), (int) BqTypedJson.number(block, "amount", 0),
+                BqTypedJson.int32(block, "meta", 0), BqTypedJson.int32(block, "amount", 0),
                 BqTypedJson.string(block, "oreDict", ""), gson.toJson(BqTypedJson.object(block, "nbt"))));
         }
         return result;

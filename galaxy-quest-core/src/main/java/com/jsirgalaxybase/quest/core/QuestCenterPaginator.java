@@ -26,9 +26,30 @@ public final class QuestCenterPaginator {
         }
         int chapterPage=clamp(r.getChapterPageIndex(),chapterSummaries.size(),r.getChapterPageSize());
         int questPage=clamp(r.getQuestPageIndex(),matches.size(),r.getQuestPageSize());
+        QuestCenterEntry selectedQuest=find(snapshot.getQuests(),r.getSelectedQuestId());
+        List<QuestCenterEntry> visiblePrerequisites=visiblePrerequisites(selectedQuest,snapshot.getQuests());
         return new QuestCenterPage(snapshot.getParticipantId(),selected,
             slice(chapterSummaries,chapterPage,r.getChapterPageSize()),chapterPage,r.getChapterPageSize(),chapterSummaries.size(),
-            slice(matches,questPage,r.getQuestPageSize()),questPage,r.getQuestPageSize(),matches.size());
+            slice(matches,questPage,r.getQuestPageSize()),questPage,r.getQuestPageSize(),matches.size(),selectedQuest,
+            visiblePrerequisites);
+    }
+
+    private static QuestCenterEntry find(List<QuestCenterEntry> entries,String requestedId){
+        if(requestedId==null||requestedId.isEmpty())return null;
+        UUID id;try{id=UUID.fromString(requestedId);}catch(IllegalArgumentException invalid){return null;}
+        for(QuestCenterEntry entry:entries)if(entry.getDefinition().getId().equals(id))return entry;
+        return null;
+    }
+
+    private static List<QuestCenterEntry> visiblePrerequisites(QuestCenterEntry selected,List<QuestCenterEntry> visible){
+        if(selected==null||selected.getDefinition().getPrerequisites().isEmpty())return java.util.Collections.emptyList();
+        java.util.Map<UUID,QuestCenterEntry> byId=new java.util.HashMap<UUID,QuestCenterEntry>();
+        for(QuestCenterEntry entry:visible)byId.put(entry.getDefinition().getId(),entry);
+        List<QuestCenterEntry> result=new ArrayList<QuestCenterEntry>();
+        for(UUID id:selected.getDefinition().getPrerequisites()){
+            QuestCenterEntry entry=byId.get(id);if(entry!=null)result.add(entry);
+        }
+        return result;
     }
 
     private static boolean matches(QuestCenterEntry entry,String filter){

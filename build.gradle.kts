@@ -4,7 +4,6 @@ import org.gradle.api.tasks.testing.Test
 import org.gradle.jvm.tasks.Jar
 import org.gradle.language.jvm.tasks.ProcessResources
 import java.security.MessageDigest
-import java.net.URI
 import java.util.zip.ZipFile
 
 plugins {
@@ -21,25 +20,26 @@ val ui2TerminalJar = project(":ui2-terminal").tasks.named<Jar>("jar")
 val ui2LabJar = project(":ui2-lab").tasks.named<Jar>("jar")
 val galaxyQuestCoreJar = project(":galaxy-quest-core").tasks.named<Jar>("jar")
 val galaxyQuestPostgresJar = project(":galaxy-quest-postgres").tasks.named<Jar>("jar")
-val ui2GeneratedResources = layout.buildDirectory.dir("generated/ui2-resources")
 val ui2QzLicenseUrl = "https://raw.githubusercontent.com/QuanhuZeYu/Qz-UILib/7937cd042910c8182d899d41aa5692d1c8b4a98a/LICENSE"
 val ui2QzLicenseSha256 = "f7b20465c7ba7e58284504c6eb2acc16287a0540a06c3a1b5d31df10daa29580"
+val ui2QzLicenseFile = rootProject.file("src/main/resources/META-INF/licenses/Qz-UILib-LGPL-3.0-or-later.txt")
 
 fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
     .digest(bytes).joinToString("") { "%02x".format(it) }
 
-val prepareUi2QzLicense = tasks.register("prepareUi2QzLicense") {
-    val license = ui2GeneratedResources.map { it.file("META-INF/licenses/Qz-UILib-LGPL-3.0-or-later.txt") }
+val verifyUi2QzLicense = tasks.register("verifyUi2QzLicense") {
+    inputs.file(ui2QzLicenseFile)
     inputs.property("licenseUrl", ui2QzLicenseUrl)
     inputs.property("licenseSha256", ui2QzLicenseSha256)
-    outputs.file(license)
     doLast {
-        val bytes = URI(ui2QzLicenseUrl).toURL().openStream().use { it.readBytes() }
+        check(ui2QzLicenseFile.isFile) {
+            "Pinned Qz LGPL license file is missing: ${ui2QzLicenseFile.absolutePath}"
+        }
+        val bytes = ui2QzLicenseFile.readBytes()
         val actual = sha256(bytes)
         check(actual == ui2QzLicenseSha256) {
             "Checksum mismatch for $ui2QzLicenseUrl: expected $ui2QzLicenseSha256, got $actual"
         }
-        license.get().asFile.apply { parentFile.mkdirs(); writeBytes(bytes) }
     }
 }
 
@@ -50,6 +50,7 @@ dependencies {
     implementation(project(":galaxy-quest-core"))
     implementation(project(":galaxy-quest-postgres"))
     testImplementation(project(":galaxy-quest-bq-importer"))
+    testImplementation(project(":ui2-demo"))
     shadowImplementation(files(ui2CoreJar))
     shadowImplementation(files(ui2TerminalJar))
     shadowImplementation(files(ui2LabJar))
@@ -67,9 +68,22 @@ tasks.named<Jar>("shadowJar") {
 
 val testSourceSet = the<SourceSetContainer>()["test"]
 
+tasks.register<JavaExec>("verifyBqQuestBookVisualCoverage") {
+    group = "verification"
+    description = "Read-only audit of fixed DefaultQuests through the server snapshot, network codec and UI2 model."
+    dependsOn("testClasses")
+    classpath = testSourceSet.runtimeClasspath
+    mainClass.set("com.jsirgalaxybase.terminal.network.BqQuestBookVisualCoverageMain")
+    doFirst {
+        val source = providers.gradleProperty("bqDefaultQuests").orNull
+            ?: throw GradleException("Pass -PbqDefaultQuests=<read-only DefaultQuests directory>")
+        val output = layout.buildDirectory.dir("reports/bq-quest-book-visual").get().asFile
+        args(source, output.absolutePath)
+    }
+}
+
 tasks.named<ProcessResources>("processResources") {
-    dependsOn(prepareUi2QzLicense)
-    from(ui2GeneratedResources)
+    dependsOn(verifyUi2QzLicense)
     from(rootProject.file("Reference/ServerUtilities/LICENSE.txt")) {
         into("META-INF/licenses")
         rename("LICENSE.txt", "ServerUtilities-LGPL-3.0-or-later.txt")

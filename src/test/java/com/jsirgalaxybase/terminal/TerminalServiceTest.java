@@ -170,6 +170,8 @@ public class TerminalServiceTest {
             assertEquals("steel", capturedRequest[0].getQuery());
             assertEquals(2, capturedRequest[0].getChapterPageIndex());
             assertEquals(9, capturedRequest[0].getQuestPageIndex());
+            assertEquals(4, capturedRequest[0].getChapterPageSize());
+            assertEquals(4, capturedRequest[0].getQuestPageSize());
             assertEquals("EMPTY", result.getServiceState());
         } finally {
             TerminalService.installQuestCenterQuery(null);

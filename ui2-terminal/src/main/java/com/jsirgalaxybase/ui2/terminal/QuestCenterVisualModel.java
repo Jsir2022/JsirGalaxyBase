@@ -156,45 +156,103 @@ public final class QuestCenterVisualModel {
         private final String description, prerequisiteText, repeatText;
         private final List<TaskRow> tasks;
         private final List<RewardRow> rewards;
+        private final int definitionVersion,cycle;
+        private final List<PrerequisiteRow> prerequisites;
         public QuestDetail(QuestSummary summary, String description, String prerequisiteText, String repeatText,
             List<TaskRow> tasks, List<RewardRow> rewards) {
+            this(summary,description,prerequisiteText,repeatText,tasks,rewards,1,0,Collections.<PrerequisiteRow>emptyList());
+        }
+        public QuestDetail(QuestSummary summary, String description, String prerequisiteText, String repeatText,
+            List<TaskRow> tasks, List<RewardRow> rewards,int definitionVersion,int cycle,
+            List<PrerequisiteRow> prerequisites) {
             if (summary == null) throw new IllegalArgumentException("summary is required");
             this.summary=summary;this.description=text(description);this.prerequisiteText=text(prerequisiteText);
             this.repeatText=text(repeatText);this.tasks=immutable(tasks);this.rewards=immutable(rewards);
+            this.definitionVersion=Math.max(1,definitionVersion);this.cycle=Math.max(0,cycle);
+            this.prerequisites=immutable(prerequisites);
         }
         public QuestSummary getSummary(){return summary;} public String getDescription(){return description;}
         public String getPrerequisiteText(){return prerequisiteText;} public String getRepeatText(){return repeatText;}
         public List<TaskRow> getTasks(){return tasks;} public List<RewardRow> getRewards(){return rewards;}
+        public int getDefinitionVersion(){return definitionVersion;} public int getCycle(){return cycle;}
+        public List<PrerequisiteRow> getPrerequisites(){return prerequisites;}
+    }
+
+    public static final class PrerequisiteRow {
+        private final String id,name,state;private final boolean navigable;
+        public PrerequisiteRow(String id,String name,String state,boolean navigable){this.id=text(id);this.name=text(name);
+            this.state=text(state);this.navigable=navigable;}
+        public String getId(){return id;}public String getName(){return name;}public String getState(){return state;}
+        public boolean isNavigable(){return navigable;}
     }
 
     public static final class TaskRow {
-        private final String key, label, detail;
+        private final String key, label, detail,typeId;
         private final long value, target;
         private final boolean confirmable,submittable,detectable;
-        public TaskRow(String key,String label,String detail,long value,long target){this(key,label,detail,value,target,false,false);}
-        public TaskRow(String key,String label,String detail,long value,long target,boolean confirmable){this(key,label,detail,value,target,confirmable,false);}
-        public TaskRow(String key,String label,String detail,long value,long target,boolean confirmable,boolean submittable){this(key,label,detail,value,target,confirmable,submittable,false);}
-        public TaskRow(String key,String label,String detail,long value,long target,boolean confirmable,boolean submittable,boolean detectable){this.key=text(key);this.label=text(label);
-            this.detail=text(detail);this.value=Math.max(0,value);this.target=Math.max(1,target);this.confirmable=confirmable;this.submittable=submittable;this.detectable=detectable;}
+        private final List<ComponentRow> components;
+        public TaskRow(String key,String label,String detail,long value,long target){this(key,label,detail,value,target,false,false,false,"",Collections.<ComponentRow>emptyList());}
+        public TaskRow(String key,String label,String detail,long value,long target,boolean confirmable){this(key,label,detail,value,target,confirmable,false,false,"",Collections.<ComponentRow>emptyList());}
+        public TaskRow(String key,String label,String detail,long value,long target,boolean confirmable,boolean submittable){this(key,label,detail,value,target,confirmable,submittable,false,"",Collections.<ComponentRow>emptyList());}
+        public TaskRow(String key,String label,String detail,long value,long target,boolean confirmable,boolean submittable,boolean detectable){this(key,label,detail,value,target,confirmable,submittable,detectable,"",Collections.<ComponentRow>emptyList());}
+        public TaskRow(String key,String label,String detail,long value,long target,boolean confirmable,boolean submittable,
+            boolean detectable,String typeId,List<ComponentRow> components){this.key=text(key);this.label=text(label);
+            this.detail=text(detail);this.value=Math.max(0,value);this.target=Math.max(1,target);this.confirmable=confirmable;
+            this.submittable=submittable;this.detectable=detectable;this.typeId=text(typeId);this.components=immutable(components);}
         public String getKey(){return key;} public String getLabel(){return label;} public String getDetail(){return detail;}
         public long getValue(){return value;} public long getTarget(){return target;} public boolean isComplete(){return value>=target;} public boolean isConfirmable(){return confirmable;} public boolean isSubmittable(){return submittable;} public boolean isDetectable(){return detectable;}
+        public String getTypeId(){return typeId;}public List<ComponentRow> getComponents(){return components;}
+    }
+
+    /** A typed task/reward vector row; NBT remains serialized data until the Minecraft bridge resolves it. */
+    public static final class ComponentRow {
+        private final int sourceIndex,metadata;private final String kind,key,identity,displayName,oreDictionary,nbt;
+        private final long quantity,progress,target;private final VisualItem item;
+        public ComponentRow(int sourceIndex,String kind,String key,String identity,String displayName,int metadata,
+            long quantity,long progress,long target,String oreDictionary,String nbt,VisualItem item){
+            this.sourceIndex=sourceIndex;this.kind=text(kind);this.key=text(key);this.identity=text(identity);
+            this.displayName=text(displayName);this.metadata=metadata;this.quantity=Math.max(0,quantity);
+            this.progress=Math.max(0,progress);this.target=Math.max(0,target);this.oreDictionary=text(oreDictionary);
+            this.nbt=text(nbt);this.item=item;
+        }
+        public int getSourceIndex(){return sourceIndex;}public String getKind(){return kind;}public String getKey(){return key;}
+        public String getIdentity(){return identity;}public String getDisplayName(){return displayName;}
+        public int getMetadata(){return metadata;}public long getQuantity(){return quantity;}public long getProgress(){return progress;}
+        public long getTarget(){return target;}public String getOreDictionary(){return oreDictionary;}public String getNbt(){return nbt;}
+        public VisualItem getItem(){return item;}
     }
 
     public static final class RewardRow {
         private final String key, label, detail;
         private final VisualItem item;
         private final boolean claimable, claimed;
-        private final List<ChoiceOption> choices;private final int selectedChoiceIndex;
-        public RewardRow(String key,String label,String detail,VisualItem item,boolean claimable,boolean claimed){this(key,label,detail,item,claimable,claimed,Collections.<ChoiceOption>emptyList(),-1);}
-        public RewardRow(String key,String label,String detail,VisualItem item,boolean claimable,boolean claimed,List<ChoiceOption> choices,int selectedChoiceIndex){this.key=text(key);
-            this.label=text(label);this.detail=text(detail);this.item=item;this.claimable=claimable;this.claimed=claimed;this.choices=immutable(choices);this.selectedChoiceIndex=selectedChoiceIndex>=0&&selectedChoiceIndex<this.choices.size()?selectedChoiceIndex:-1;}
+        private final List<ChoiceOption> choices;private final List<ComponentRow> components;private final int selectedChoiceIndex;
+        private final String typeId,itemNbt;
+        public RewardRow(String key,String label,String detail,VisualItem item,boolean claimable,boolean claimed){this(key,label,detail,item,claimable,claimed,Collections.<ChoiceOption>emptyList(),-1,"",Collections.<ComponentRow>emptyList(),"");}
+        public RewardRow(String key,String label,String detail,VisualItem item,boolean claimable,boolean claimed,List<ChoiceOption> choices,int selectedChoiceIndex){this(key,label,detail,item,claimable,claimed,choices,selectedChoiceIndex,"",Collections.<ComponentRow>emptyList(),"");}
+        public RewardRow(String key,String label,String detail,VisualItem item,boolean claimable,boolean claimed,
+            List<ChoiceOption> choices,int selectedChoiceIndex,String typeId,List<ComponentRow> components,String itemNbt){this.key=text(key);
+            this.label=text(label);this.detail=text(detail);this.item=item;this.claimable=claimable;this.claimed=claimed;
+            this.choices=normalizedChoices(choices);this.selectedChoiceIndex=selectedChoiceIndex>=0&&selectedChoiceIndex<32?selectedChoiceIndex:-1;
+            this.typeId=text(typeId);this.components=immutable(components);this.itemNbt=text(itemNbt);}
         public String getKey(){return key;} public String getLabel(){return label;} public String getDetail(){return detail;}
         public VisualItem getItem(){return item;} public boolean isClaimable(){return claimable;} public boolean isClaimed(){return claimed;}
         public List<ChoiceOption> getChoices(){return choices;}public int getSelectedChoiceIndex(){return selectedChoiceIndex;}public boolean requiresChoice(){return !choices.isEmpty();}
+        public String getTypeId(){return typeId;}public List<ComponentRow> getComponents(){return components;}public String getItemNbt(){return itemNbt;}
+        private static List<ChoiceOption> normalizedChoices(List<ChoiceOption> values){
+            if(values==null||values.isEmpty())return Collections.emptyList();
+            List<ChoiceOption> result=new ArrayList<ChoiceOption>();
+            for(int i=0;i<values.size();i++){ChoiceOption value=values.get(i);result.add(value.getSourceIndex()<0
+                ?new ChoiceOption(i,value.getItem(),value.getLabel(),value.getNbt(),value.getQuantity()):value);}
+            return Collections.unmodifiableList(result);
+        }
     }
     public static final class ChoiceOption {
-        private final VisualItem item;private final String label;
-        public ChoiceOption(VisualItem item,String label){if(item==null)throw new IllegalArgumentException("item is required");this.item=item;this.label=text(label);}
-        public VisualItem getItem(){return item;}public String getLabel(){return label.isEmpty()?item.getDisplayName():label;}
+        private final int sourceIndex;private final VisualItem item;private final String label,nbt;private final long quantity;
+        public ChoiceOption(VisualItem item,String label){this(-1,item,label,"",item==null?0:item.getQuantity());}
+        public ChoiceOption(int sourceIndex,VisualItem item,String label,String nbt){this(sourceIndex,item,label,nbt,item==null?0:item.getQuantity());}
+        public ChoiceOption(int sourceIndex,VisualItem item,String label,String nbt,long quantity){if(item==null&&(label==null||label.trim().isEmpty()))throw new IllegalArgumentException("choice item or label is required");this.sourceIndex=sourceIndex;this.item=item;this.label=text(label);this.nbt=text(nbt);this.quantity=Math.max(0,quantity);}
+        public int getSourceIndex(){return sourceIndex;}public VisualItem getItem(){return item;}
+        public String getLabel(){return label.isEmpty()&&item!=null?item.getDisplayName():label;}public String getNbt(){return nbt;}public long getQuantity(){return quantity;}
     }
 }

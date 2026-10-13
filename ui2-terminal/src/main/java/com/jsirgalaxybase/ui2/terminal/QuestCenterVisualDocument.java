@@ -1,5 +1,7 @@
 package com.jsirgalaxybase.ui2.terminal;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import com.jsirgalaxybase.ui2.component.ComponentUiDocument;
@@ -18,9 +20,13 @@ import com.jsirgalaxybase.ui2.input.UiInputNode;
 import com.jsirgalaxybase.ui2.input.UiKeyCode;
 import com.jsirgalaxybase.ui2.layout.LayoutKind;
 import com.jsirgalaxybase.ui2.layout.LayoutSpec;
+import com.jsirgalaxybase.ui2.text.TextFlow;
+import com.jsirgalaxybase.ui2.text.TextStyle;
 
 /** Player-facing quest browse/detail document shared by Java2D and Minecraft hosts. */
 public class QuestCenterVisualDocument extends ComponentUiDocument {
+    private static final int MAX_QUERY_LENGTH=96;
+    private static final int MAX_DESCRIPTION_LINES=512;
     private QuestCenterVisualModel model;
     private final TerminalActionPort shellActions;
     private final QuestCenterActionPort actions;
@@ -29,7 +35,14 @@ public class QuestCenterVisualDocument extends ComponentUiDocument {
     private boolean participantManagementOpen;
     private int selectedParticipant;
     private String createType="PARTY",createName="",targetPlayer="",targetRole="MEMBER";
-    private int focusedField=-1,width,height;
+    private int focusedField=-1,height;
+    private String queryDraft,submittedQuery="",descriptionCacheText="";
+    private boolean queryDirty,queryAwaitingSnapshot;
+    private int detailTab,detailTaskIndex,detailTaskComponentPage,detailRewardIndex,detailRewardComponentPage,
+        detailChoicePage,detailPrerequisitePage,detailDescriptionPage,
+        descriptionCacheWidth=-1,descriptionCacheSize=-1,descriptionCacheLineHeight=-1;
+    private List<String> descriptionLines=Collections.emptyList();
+    private String detailStateQuestId="";
     private PendingParticipantAction pendingParticipantAction;
 
     public QuestCenterVisualDocument(QuestCenterVisualModel model, TerminalActionPort shellActions,
@@ -45,10 +58,19 @@ public class QuestCenterVisualDocument extends ComponentUiDocument {
         this.actions=actions==null?QuestCenterActionPort.NONE:actions;
         this.profile=profile==null?TerminalWindowProfile.STANDARD:profile;
         this.invalidation=invalidation==null?new Runnable(){public void run(){}}:invalidation;
+        this.queryDraft=model.getQuery();
+        this.detailStateQuestId=model.getSelectedQuestId();this.detailTab=defaultDetailTab(model);
     }
 
     public final void updateVisualModel(QuestCenterVisualModel value) {
         if (value == null) throw new IllegalArgumentException("model is required");
+        String nextQuest=value.getSelectedQuestId();
+        if(!nextQuest.equals(detailStateQuestId)){detailStateQuestId=nextQuest;detailTab=defaultDetailTab(value);detailTaskIndex=0;
+            detailTaskComponentPage=0;detailRewardIndex=0;detailRewardComponentPage=0;detailChoicePage=0;detailPrerequisitePage=0;detailDescriptionPage=0;}
+        if(queryAwaitingSnapshot&&value.getQuery().equals(submittedQuery)){
+            queryAwaitingSnapshot=false;
+            if(!queryDirty)queryDraft=value.getQuery();
+        }else if(!queryDirty&&!queryAwaitingSnapshot)queryDraft=value.getQuery();
         model=value;
     }
 
@@ -63,14 +85,36 @@ public class QuestCenterVisualDocument extends ComponentUiDocument {
         return TerminalVisualShell.build(model.getShell(),content,shellActions,"任务中心","career");
     }
 
+    @Override public void onViewportChanged(UiSize viewport,UiContext context){
+        height=viewport.getHeight();
+        if(model.getView()!=QuestCenterVisualModel.View.DETAIL||model.getDetail()==null)return;
+        String text=model.getDetail().getDescription();
+        int width=Math.max(1,TerminalVisualMetrics.compute(viewport,profile).getMainWidth()-8);
+        TextStyle style=captionStyle(context);
+        if(!text.equals(descriptionCacheText)||width!=descriptionCacheWidth||style.getSize()!=descriptionCacheSize
+            ||style.getLineHeight()!=descriptionCacheLineHeight){
+            if(text.isEmpty())descriptionLines=Collections.emptyList();
+            else{
+                TextFlow.Result flow=TextFlow.layout(text,style,context.getTextMeasurer(),width,MAX_DESCRIPTION_LINES);
+                descriptionLines=new ArrayList<String>(flow.getLines());
+            }
+            descriptionCacheText=text;descriptionCacheWidth=width;descriptionCacheSize=style.getSize();
+            descriptionCacheLineHeight=style.getLineHeight();detailDescriptionPage=0;
+        }
+    }
+
     private UiElement browse() {
-        UiElement tools=UiElement.type("Row").key("quest-tools")
-            .child(label("quest-search",model.getQuery().isEmpty()?"搜索任务…":"搜索: "+model.getQuery(),"caption",1,false))
+        UiElement search=UiElement.type("Row").key("quest-search-row")
+            .child(queryField())
+            .child(button("quest-search-submit","搜索",new Runnable(){public void run(){submitQuery(queryDraft);}},true))
+            .child(button("quest-search-clear","清空",new Runnable(){public void run(){queryDraft="";queryDirty=false;submitQuery("");}},!queryDraft.isEmpty())).build();
+        UiElement tools=UiElement.type("Column").key("quest-tools").child(search)
+            .child(UiElement.type("Row").key("quest-filter-row")
             .child(filter("quest-filter-all","全部","all"))
             .child(filter("quest-filter-active","进行中","active"))
             .child(filter("quest-filter-claim","待领取","claimable"))
             .child(button("quest-participant-open","主体管理",new Runnable(){public void run(){participantManagementOpen=true;selectedParticipant=0;invalidation.run();}},true))
-            .child(button("quest-admin-open","任务管理",new Runnable(){public void run(){actions.openManagement();}},true)).build();
+            .child(button("quest-admin-open","任务管理",new Runnable(){public void run(){actions.openManagement();}},true)).build()).build();
         UiElement.Builder participants=UiElement.type("Row").key("quest-participants")
             .child(label("quest-participant-personal","个人进度","caption",1,true));
         for(int i=0;i<model.getParticipants().size();i++){
@@ -121,66 +165,223 @@ public class QuestCenterVisualDocument extends ComponentUiDocument {
 
     private UiElement detail(){
         final QuestCenterVisualModel.QuestDetail detail=model.getDetail();
-        QuestCenterVisualModel.QuestSummary summary=detail.getSummary();
-        UiElement.Builder heading=UiElement.type("Card").key("quest-detail-heading")
-            .child(button("quest-detail-back","‹ 任务列表",new Runnable(){public void run(){actions.backToBrowse();}},true));
-        if(summary.getIcon()!=null)heading.child(UiElement.type("ExternalItem").key("quest-detail-icon")
+        final QuestCenterVisualModel.QuestSummary summary=detail.getSummary();
+        UiElement.Builder heading=UiElement.type("Card").key("quest-detail-heading");
+        UiElement.Builder headingRow=UiElement.type("Row").key("quest-detail-heading-row")
+            .child(button("quest-detail-back","‹ 列表",new Runnable(){public void run(){actions.backToBrowse();}},true));
+        if(summary.getIcon()!=null)headingRow.child(UiElement.type("ExternalItem").key("quest-detail-icon")
             .prop(StandardWidgets.EXTERNAL_ID,"quest:detail:icon").build());
-        heading.child(label("quest-detail-title",summary.getName(),"section",1,true))
+        heading.child(headingRow.child(label("quest-detail-title",summary.getName(),"section",1,true))
             .child(badge("quest-detail-status",status(summary),tone(summary.getState())))
-            .child(button("quest-detail-track",summary.isTracked()?"★ 已追踪":"☆ 追踪",new Runnable(){public void run(){actions.toggleTracking(detail.getSummary().getId());}},true))
-            .child(label("quest-detail-description",detail.getDescription(),"caption",2,false))
-            .child(label("quest-detail-prereq",detail.getPrerequisiteText()+" · "+detail.getRepeatText(),"caption",1,false));
-        UiElement.Builder tasks=UiElement.type("Card").key("quest-detail-tasks")
-            .child(label("quest-task-title","任务目标","caption",1,true));
-        boolean hasConsumableTasks=false;
-        for(QuestCenterVisualModel.TaskRow task:detail.getTasks())
-            hasConsumableTasks|=task.isSubmittable()&&!task.isComplete();
-        if(hasConsumableTasks)tasks.child(button("quest-detect-consumptions","检测全部消耗目标",
+            .child(button("quest-detail-track",summary.isTracked()?"★":"☆",new Runnable(){public void run(){actions.toggleTracking(summary.getId());}},true)).build())
+            .child(label("quest-detail-meta","版本 "+detail.getDefinitionVersion()+" · "+detail.getPrerequisiteText()+" · "+detail.getRepeatText()
+                +(detail.getCycle()>0?" · 周期 "+detail.getCycle():""),"caption",1,false));
+        UiElement tabs=UiElement.type("Row").key("quest-detail-tabs")
+            .child(detailTabButton(0,"任务目标")).child(detailTabButton(1,"奖励")).child(detailTabButton(2,"前置"))
+            .child(detailTabButton(3,"任务说明")).build();
+        UiElement body=detailTab==1?rewardDetail(detail,summary):detailTab==2?prerequisiteDetail(detail)
+            :detailTab==3?descriptionDetail():taskDetail(detail,summary);
+        return UiElement.type("Column").key("quest-detail").child(heading.build()).child(tabs).child(body).build();
+    }
+
+    private UiElement descriptionDetail(){
+        UiElement.Builder pane=UiElement.type("Card").key("quest-description-page")
+            .child(label("quest-description-title","任务说明 · "+descriptionLines.size()+" 行","caption",1,true));
+        if(descriptionLines.isEmpty())return pane.child(state("quest-description-empty","EmptyState","此任务没有额外说明")).build();
+        int pageSize=descriptionPageSize();int pages=pageCount(descriptionLines.size(),pageSize);
+        int page=Math.max(0,Math.min(detailDescriptionPage,pages-1));detailDescriptionPage=page;
+        int from=page*pageSize,to=Math.min(descriptionLines.size(),from+pageSize);
+        pane.child(label("quest-description-text",joinLines(descriptionLines,from,to),"caption",pageSize,false));
+        if(pages>1)pane.child(pageControls("quest-description-pager",page,pages,
+            new Runnable(){public void run(){detailDescriptionPage=Math.max(0,detailDescriptionPage-1);invalidation.run();}},
+            new Runnable(){public void run(){detailDescriptionPage=Math.min(pages-1,detailDescriptionPage+1);invalidation.run();}}));
+        return pane.build();
+    }
+
+    private UiElement queryField(){
+        return UiElement.type("TextField").key("quest-search-input").prop(StandardWidgets.TEXT,queryDraft)
+            .prop(StandardWidgets.PLACEHOLDER,"搜索任务名称或说明（最多 96 字）")
+            .prop(StandardWidgets.ACTION,new UiActionHandler(){public InputResult handle(UiEvent event){
+                if(event.getType()==UiEvent.Type.POINTER_DOWN)return InputResult.CONSUMED;
+                if(event.getType()==UiEvent.Type.TEXT_INPUT){
+                    char value=event.getTypedChar();
+                    if(!Character.isISOControl(value)&&queryDraft.length()<MAX_QUERY_LENGTH){queryDraft+=value;queryDirty=true;queryAwaitingSnapshot=false;invalidation.run();}
+                    return InputResult.CONSUMED;
+                }
+                if(event.getType()==UiEvent.Type.KEY_DOWN
+                    &&(event.getKeyCode()==UiKeyCode.BACKSPACE||event.getKeyCode()==UiKeyCode.DELETE)){
+                    if(!queryDraft.isEmpty()){int end=queryDraft.offsetByCodePoints(queryDraft.length(),-1);queryDraft=queryDraft.substring(0,end);queryDirty=true;queryAwaitingSnapshot=false;invalidation.run();}
+                    return InputResult.CONSUMED;
+                }
+                if(event.getType()==UiEvent.Type.KEY_DOWN&&event.getKeyCode()==UiKeyCode.ENTER){
+                    submitQuery(queryDraft);
+                    return InputResult.CONSUMED;
+                }
+                return InputResult.PASS;
+            }}).build();
+    }
+
+    private void submitQuery(String value){
+        String query=value==null?"":value.trim();
+        if(query.length()>MAX_QUERY_LENGTH)query=query.substring(0,MAX_QUERY_LENGTH);
+        queryDraft=query;queryDirty=false;submittedQuery=query;queryAwaitingSnapshot=true;
+        actions.changeQuery(query);invalidation.run();
+    }
+
+    private UiElement detailTabButton(final int tab,String text){
+        return UiElement.type("Button").key("quest-detail-tab-"+tab).prop(StandardWidgets.TEXT,text)
+            .prop(StandardWidgets.SELECTED,detailTab==tab).prop(StandardWidgets.ACTION,handler(new Runnable(){public void run(){detailTab=tab;invalidation.run();}})).build();
+    }
+
+    private UiElement taskDetail(final QuestCenterVisualModel.QuestDetail detail,final QuestCenterVisualModel.QuestSummary summary){
+        List<QuestCenterVisualModel.TaskRow> rows=detail.getTasks();
+        UiElement.Builder pane=UiElement.type("Card").key("quest-detail-tasks")
+            .child(label("quest-task-title","任务目标 · "+rows.size(),"caption",1,true));
+        if(rows.isEmpty())return pane.child(state("quest-task-empty","EmptyState","该任务没有配置目标")).build();
+        final int index=Math.max(0,Math.min(detailTaskIndex,rows.size()-1));detailTaskIndex=index;
+        final QuestCenterVisualModel.TaskRow task=rows.get(index);
+        pane.child(UiElement.type("Row").key("quest-task-pager")
+            .child(button("quest-task-previous","‹",new Runnable(){public void run(){detailTaskIndex=Math.max(0,index-1);detailTaskComponentPage=0;invalidation.run();}},index>0))
+            .child(label("quest-task-page",(index+1)+" / "+rows.size(),"caption",1,false))
+            .child(button("quest-task-next","›",new Runnable(){public void run(){detailTaskIndex=Math.min(rows.size()-1,index+1);detailTaskComponentPage=0;invalidation.run();}},index+1<rows.size())).build())
+            .child(label("quest-task-name",(task.isComplete()?"✓ ":"○ ")+task.getLabel()+" · "+task.getTypeId(),"caption",1,true))
+            .child(label("quest-task-progress","进度 "+task.getValue()+" / "+task.getTarget(),"caption",1,false));
+        if(task.getComponents().isEmpty())pane.child(label("quest-task-detail",task.getDetail(),"caption",2,false));
+        addComponentPage(pane,task.getComponents(),detailTaskComponentPage,"quest-task-components",
+            "quest:task:"+task.getKey()+":",true);
+        UiElement.Builder operations=UiElement.type("Row").key("quest-task-actions");
+        if(task.isConfirmable()&&!task.isComplete())operations.child(button("quest-task-confirm-"+index,"确认目标",
+            new Runnable(){public void run(){actions.confirmTask(summary.getId(),task.getKey());}},true));
+        boolean hasConsumable=false;for(QuestCenterVisualModel.TaskRow row:rows)hasConsumable|=row.isSubmittable()&&!row.isComplete();
+        if(hasConsumable)operations.child(button("quest-detect-consumptions","检测消耗目标",
             new Runnable(){public void run(){actions.detectConsumptions(summary.getId());}},true));
-        for(int i=0;i<Math.min(6,detail.getTasks().size());i++){
-            final QuestCenterVisualModel.TaskRow task=detail.getTasks().get(i);
-            UiElement.Builder row=UiElement.type("Row").key("quest-task-"+i)
-                .child(label("quest-task-name-"+i,(task.isComplete()?"✓ ":"○ ")+task.getLabel(),"caption",1,task.isComplete()))
-                .child(label("quest-task-detail-"+i,task.getDetail(),"caption",1,false))
-                .child(label("quest-task-progress-"+i,task.getValue()+" / "+task.getTarget(),"caption",1,false));
-            if(task.isConfirmable()&&!task.isComplete())row.child(button("quest-task-confirm-"+i,"确认",
-                new Runnable(){public void run(){actions.confirmTask(detail.getSummary().getId(),task.getKey());}},true));
-            tasks.child(row.build());
-        }
-        UiElement.Builder rewards=UiElement.type("Card").key("quest-detail-rewards")
-            .child(label("quest-reward-title","任务奖励","caption",1,true));
-        List<QuestCenterVisualModel.RewardRow> rewardRows=detail.getRewards();
-        for(int i=0;i<Math.min(4,rewardRows.size());i++){
-            QuestCenterVisualModel.RewardRow reward=rewardRows.get(i);
-            UiElement.Builder row=UiElement.type("Row").key("quest-reward-"+i);
-            if(reward.getItem()!=null)row.child(UiElement.type("ExternalItem").key("quest-reward-item-"+i)
-                .prop(StandardWidgets.EXTERNAL_ID,"quest:reward:"+i).prop(StandardWidgets.QUANTITY,
-                    AssetCenterVisualDocument.compact(reward.getItem().getQuantity())).build());
-            row.child(label("quest-reward-name-"+i,reward.getLabel(),"caption",1,true))
-                .child(label("quest-reward-detail-"+i,reward.getDetail(),"caption",1,false));
-            rewards.child(row.build());
-            for(int optionIndex=0;optionIndex<Math.min(4,reward.getChoices().size());optionIndex++){
-                final int selectedOption=optionIndex;final QuestCenterVisualModel.RewardRow choiceReward=reward;
-                QuestCenterVisualModel.ChoiceOption option=reward.getChoices().get(optionIndex);
-                rewards.child(UiElement.type("Button").key("quest-choice-"+i+"-"+optionIndex)
-                    .prop(StandardWidgets.TEXT,(optionIndex+1)+". "+option.getLabel()+" ×"+option.getItem().getQuantity())
-                    .prop(StandardWidgets.SELECTED,reward.getSelectedChoiceIndex()==optionIndex)
+        UiElement operationElement=operations.build();
+        if(!operationElement.getChildren().isEmpty())pane.child(operationElement);
+        return pane.build();
+    }
+
+    private UiElement rewardDetail(final QuestCenterVisualModel.QuestDetail detail,final QuestCenterVisualModel.QuestSummary summary){
+        List<QuestCenterVisualModel.RewardRow> rows=detail.getRewards();
+        UiElement.Builder pane=UiElement.type("Card").key("quest-detail-rewards")
+            .child(label("quest-reward-title","任务奖励 · "+rows.size(),"caption",1,true));
+        if(rows.isEmpty())return pane.child(state("quest-reward-empty","EmptyState","该任务没有配置奖励")).build();
+        final int index=Math.max(0,Math.min(detailRewardIndex,rows.size()-1));detailRewardIndex=index;
+        final QuestCenterVisualModel.RewardRow reward=rows.get(index);
+        pane.child(UiElement.type("Row").key("quest-reward-pager")
+            .child(button("quest-reward-previous","‹",new Runnable(){public void run(){detailRewardIndex=Math.max(0,index-1);detailRewardComponentPage=0;detailChoicePage=0;invalidation.run();}},index>0))
+            .child(label("quest-reward-page",(index+1)+" / "+rows.size(),"caption",1,false))
+            .child(button("quest-reward-next","›",new Runnable(){public void run(){detailRewardIndex=Math.min(rows.size()-1,index+1);detailRewardComponentPage=0;detailChoicePage=0;invalidation.run();}},index+1<rows.size())).build());
+        UiElement.Builder summaryRow=UiElement.type("Row").key("quest-reward-summary");
+        if(reward.getItem()!=null)summaryRow.child(UiElement.type("ExternalItem").key("quest-reward-item-"+index)
+            .prop(StandardWidgets.EXTERNAL_ID,"quest:reward:"+index)
+            .prop(StandardWidgets.QUANTITY,AssetCenterVisualDocument.compact(reward.getItem().getQuantity())).build());
+        summaryRow.child(label("quest-reward-name",reward.getLabel(),"caption",1,true))
+            .child(label("quest-reward-detail",reward.getDetail(),"caption",1,false));pane.child(summaryRow.build());
+        if(reward.getChoices().isEmpty()&&!reward.getComponents().isEmpty())addComponentPage(pane,reward.getComponents(),detailRewardComponentPage,
+            "quest-reward-components","quest:reward-component:"+index+":",false);
+        if(!reward.getChoices().isEmpty()){
+            pane.child(label("quest-choice-title","可选奖励 · "+reward.getChoices().size(),"caption",1,true));
+            int pageSize=choicePageSize();int pages=pageCount(reward.getChoices().size(),pageSize);
+            int page=Math.max(0,Math.min(detailChoicePage,pages-1));detailChoicePage=page;
+            int from=page*pageSize,to=Math.min(reward.getChoices().size(),from+pageSize);
+            for(int optionIndex=from;optionIndex<to;optionIndex++){
+                final QuestCenterVisualModel.ChoiceOption option=reward.getChoices().get(optionIndex);
+                final int sourceIndex=option.getSourceIndex();
+                UiElement.Builder choice=UiElement.type("Row").key("quest-choice-row-"+index+"-"+sourceIndex);
+                if(option.getItem()!=null)choice.child(UiElement.type("ExternalItem").key("quest-choice-item-"+index+"-"+sourceIndex)
+                    .prop(StandardWidgets.EXTERNAL_ID,"quest:choice:"+index+":"+sourceIndex)
+                    .prop(StandardWidgets.QUANTITY,AssetCenterVisualDocument.compact(option.getItem().getQuantity())).build());
+                choice.child(UiElement.type("Button").key("quest-choice-"+index+"-"+sourceIndex)
+                    .prop(StandardWidgets.TEXT,sourceIndex+". "+option.getLabel()+" ×"+AssetCenterVisualDocument.compact(option.getQuantity()))
+                    .prop(StandardWidgets.SELECTED,reward.getSelectedChoiceIndex()==sourceIndex)
                     .prop(StandardWidgets.ENABLED,reward.isClaimable())
-                    .prop(StandardWidgets.ACTION,handler(new Runnable(){public void run(){actions.selectRewardChoice(
-                        detail.getSummary().getId(),choiceReward.getKey(),selectedOption);}})).build());
+                    .prop(StandardWidgets.ACTION,handler(new Runnable(){public void run(){actions.selectRewardChoice(summary.getId(),reward.getKey(),sourceIndex);}})).build());
+                pane.child(choice.build());
             }
+            if(pages>1)pane.child(pageControls("quest-choice-pager",page,pages,new Runnable(){public void run(){detailChoicePage=Math.max(0,detailChoicePage-1);invalidation.run();}},new Runnable(){public void run(){detailChoicePage=Math.min(pages-1,detailChoicePage+1);invalidation.run();}}));
         }
         boolean canClaim=summary.getState()==QuestCenterVisualModel.QuestState.CLAIMABLE;
-        boolean hasUnselectedChoice=hasUnselectedChoice(rewardRows);
+        boolean hasUnselectedChoice=hasUnselectedChoice(rows);
         String claimLabel=!canClaim?summary.getState()==QuestCenterVisualModel.QuestState.COMPLETED?"奖励已领取":"完成后可领取"
             :hasUnselectedChoice?"请先选择奖励":"领取全部奖励";
-        rewards.child(button("quest-claim",claimLabel,
-            new Runnable(){public void run(){actions.claim(detail.getSummary().getId());}},canClaim&&!hasUnselectedChoice));
-        if(canClaim&&hasUnselectedChoice)rewards.child(button("quest-claim-random-choice","随机选择并领取",
-            new Runnable(){public void run(){actions.forceClaimWithRandomChoices(detail.getSummary().getId());}},true));
-        return UiElement.type("Column").key("quest-detail").child(heading.build())
-            .child(UiElement.type("Row").key("quest-detail-columns").child(tasks.build()).child(rewards.build()).build()).build();
+        pane.child(button("quest-claim",claimLabel,new Runnable(){public void run(){actions.claim(summary.getId());}},canClaim&&!hasUnselectedChoice));
+        if(canClaim&&hasUnselectedChoice)pane.child(button("quest-claim-random-choice","随机选择并领取",
+            new Runnable(){public void run(){actions.forceClaimWithRandomChoices(summary.getId());}},true));
+        return pane.build();
+    }
+
+    private UiElement prerequisiteDetail(final QuestCenterVisualModel.QuestDetail detail){
+        List<QuestCenterVisualModel.PrerequisiteRow> rows=detail.getPrerequisites();
+        UiElement.Builder pane=UiElement.type("Card").key("quest-detail-prerequisites")
+            .child(label("quest-prerequisite-title","前置任务 · "+rows.size(),"caption",1,true));
+        if(rows.isEmpty())return pane.child(state("quest-prerequisite-empty","EmptyState",detail.getPrerequisiteText())).build();
+        int pageSize=prerequisitePageSize();int pages=pageCount(rows.size(),pageSize);
+        int page=Math.max(0,Math.min(detailPrerequisitePage,pages-1));detailPrerequisitePage=page;
+        int from=page*pageSize,to=Math.min(rows.size(),from+pageSize);
+        for(int i=from;i<to;i++){
+            final QuestCenterVisualModel.PrerequisiteRow row=rows.get(i);
+            pane.child(button("quest-prerequisite-"+i,row.getName()+" · "+row.getState(),
+                new Runnable(){public void run(){if(row.isNavigable())actions.selectPrerequisite(row.getId());}},row.isNavigable()));
+        }
+        if(pages>1)pane.child(pageControls("quest-prerequisite-pager",page,pages,
+            new Runnable(){public void run(){detailPrerequisitePage=Math.max(0,detailPrerequisitePage-1);invalidation.run();}},
+            new Runnable(){public void run(){detailPrerequisitePage=Math.min(pages-1,detailPrerequisitePage+1);invalidation.run();}}));
+        return pane.build();
+    }
+
+    private void addComponentPage(UiElement.Builder parent,List<QuestCenterVisualModel.ComponentRow> components,int requestedPage,
+        String key,String externalPrefix,boolean task){
+        if(components==null||components.isEmpty())return;
+        int pageSize=componentPageSize();int pages=pageCount(components.size(),pageSize);
+        int page=Math.max(0,Math.min(requestedPage,pages-1));
+        if(task)detailTaskComponentPage=page;else detailRewardComponentPage=page;
+        int from=page*pageSize,to=Math.min(components.size(),from+pageSize);
+        for(int index=from;index<to;index++){
+            QuestCenterVisualModel.ComponentRow component=components.get(index);
+            UiElement.Builder row=UiElement.type("Row").key(key+"-"+component.getSourceIndex());
+            if(component.getItem()!=null)row.child(UiElement.type("ExternalItem").key(key+"-item-"+component.getSourceIndex())
+                .prop(StandardWidgets.EXTERNAL_ID,externalPrefix+component.getSourceIndex())
+                .prop(StandardWidgets.QUANTITY,AssetCenterVisualDocument.compact(component.getQuantity())).build());
+            String name=component.getDisplayName().isEmpty()?component.getIdentity():component.getDisplayName();
+            if(name.isEmpty())name=component.getKey();
+            String detail=name+" ×"+component.getQuantity();
+            if(task&&component.getTarget()>0)detail+=" · "+component.getProgress()+"/"+component.getTarget();
+            if(!component.getOreDictionary().isEmpty())detail+=" · ore:"+component.getOreDictionary();
+            if(component.getItem()==null&&"item".equals(component.getKind()))detail+=" · 物品未注册";
+            row.child(label(key+"-label-"+component.getSourceIndex(),"#"+component.getSourceIndex()+" "+detail,"caption",1,false));
+            parent.child(row.build());
+        }
+        if(pages>1){
+            final int last=pages-1;
+            parent.child(pageControls(key+"-pager",page,pages,
+                new Runnable(){public void run(){if(task)detailTaskComponentPage=Math.max(0,detailTaskComponentPage-1);else detailRewardComponentPage=Math.max(0,detailRewardComponentPage-1);invalidation.run();}},
+                new Runnable(){public void run(){if(task)detailTaskComponentPage=Math.min(last,detailTaskComponentPage+1);else detailRewardComponentPage=Math.min(last,detailRewardComponentPage+1);invalidation.run();}}));
+        }
+    }
+
+    private UiElement pageControls(String key,int page,int pages,Runnable previous,Runnable next){
+        return UiElement.type("Row").key(key).child(button(key+"-previous","‹",previous,page>0))
+            .child(label(key+"-label",(page+1)+" / "+pages,"caption",1,false))
+            .child(button(key+"-next","›",next,page+1<pages)).build();
+    }
+    private int componentPageSize(){return detailPageSize();}
+    private int choicePageSize(){return detailPageSize();}
+    private int detailPageSize(){return height<=220?1:height<=280?2:4;}
+    private int prerequisitePageSize(){return 3;}
+    private int descriptionPageSize(){return height<=220?7:12;}
+    private static int pageCount(int count,int size){return Math.max(1,(count+size-1)/size);}
+    private static TextStyle captionStyle(UiContext context){
+        int size=context.getTheme().typography("caption");
+        return new TextStyle("caption",size,false,Math.max(size,context.getTheme().typography("lineBody")-2),TextStyle.Align.LEFT);
+    }
+    private static String joinLines(List<String> lines,int from,int to){
+        StringBuilder result=new StringBuilder();
+        for(int i=from;i<to;i++){if(i>from)result.append('\n');result.append(lines.get(i));}
+        return result.toString();
+    }
+    private static int defaultDetailTab(QuestCenterVisualModel model){
+        QuestCenterVisualModel.QuestDetail detail=model==null?null:model.getDetail();
+        return detail!=null&&detail.getTasks().isEmpty()&&!detail.getRewards().isEmpty()?1:0;
     }
 
     private UiElement participantManagement(){
@@ -243,7 +444,7 @@ public class QuestCenterVisualDocument extends ComponentUiDocument {
     }
 
     @Override public LayoutSpec layout(UiElement root,UiSize viewport,UiContext context){
-        width=viewport.getWidth();height=viewport.getHeight();
+        height=viewport.getHeight();
         TerminalVisualMetrics metrics=TerminalVisualMetrics.compute(viewport,profile);boolean compact=metrics.getBounds().getHeight()<=220;
         LayoutSpec body=participantManagementOpen?participantManagementLayout(compact)
             :model.getView()==QuestCenterVisualModel.View.DETAIL&&model.getDetail()!=null?detailLayout(compact):browseLayout(compact);
@@ -253,13 +454,17 @@ public class QuestCenterVisualDocument extends ComponentUiDocument {
     }
 
     private LayoutSpec browseLayout(boolean compact){
-        LayoutSpec tools=LayoutSpec.of("quest-tools",LayoutKind.ROW).preferred(0,compact?16:20).gap(2)
-            .child(LayoutSpec.of("quest-search",LayoutKind.LEAF).flex(1).build())
+        LayoutSpec search=LayoutSpec.of("quest-search-row",LayoutKind.ROW).preferred(0,compact?16:20).gap(2)
+            .child(LayoutSpec.of("quest-search-input",LayoutKind.LEAF).preferred(0,compact?16:20).flex(1).build())
+            .child(LayoutSpec.of("quest-search-submit",LayoutKind.LEAF).preferred(compact?30:38,compact?16:20).build())
+            .child(LayoutSpec.of("quest-search-clear",LayoutKind.LEAF).preferred(compact?24:32,compact?16:20).build()).build();
+        LayoutSpec tools=LayoutSpec.of("quest-tools",LayoutKind.COLUMN).preferred(0,compact?31:38).gap(1).child(search)
+            .child(LayoutSpec.of("quest-filter-row",LayoutKind.ROW).preferred(0,compact?14:17).gap(2)
             .child(LayoutSpec.of("quest-filter-all",LayoutKind.LEAF).preferred(36,0).build())
             .child(LayoutSpec.of("quest-filter-active",LayoutKind.LEAF).preferred(46,0).build())
             .child(LayoutSpec.of("quest-filter-claim",LayoutKind.LEAF).preferred(46,0).build())
             .child(LayoutSpec.of("quest-participant-open",LayoutKind.LEAF).preferred(compact?48:58,0).build())
-            .child(LayoutSpec.of("quest-admin-open",LayoutKind.LEAF).preferred(compact?48:58,0).build()).build();
+            .child(LayoutSpec.of("quest-admin-open",LayoutKind.LEAF).preferred(compact?48:58,0).build()).build()).build();
         LayoutSpec.Builder participants=LayoutSpec.of("quest-participants",LayoutKind.ROW).preferred(0,compact?14:17).gap(2)
             .child(LayoutSpec.of("quest-participant-personal",LayoutKind.LEAF).preferred(compact?42:52,0).build());
         for(int i=0;i<model.getParticipants().size();i++)participants.child(LayoutSpec.of("quest-participant-"+i,LayoutKind.LEAF).flex(1).build());
@@ -323,43 +528,114 @@ public class QuestCenterVisualDocument extends ComponentUiDocument {
 
     private LayoutSpec detailLayout(boolean compact){
         QuestCenterVisualModel.QuestDetail detail=model.getDetail();QuestCenterVisualModel.QuestSummary summary=detail.getSummary();
-        LayoutSpec.Builder heading=LayoutSpec.of("quest-detail-heading",LayoutKind.ROW).preferred(0,compact?48:58).padding(new Insets(4,4,4,4)).gap(3)
-            .child(LayoutSpec.of("quest-detail-back",LayoutKind.LEAF).preferred(compact?42:48,compact?16:20).build());
-        if(summary.getIcon()!=null)heading.child(LayoutSpec.of("quest-detail-icon",LayoutKind.LEAF).preferred(compact?20:24,compact?20:24).build());
-        heading.child(LayoutSpec.of("quest-detail-title",LayoutKind.LEAF).preferred(compact?60:90,18).build())
-            .child(LayoutSpec.of("quest-detail-status",LayoutKind.LEAF).preferred(compact?42:48,18).build())
-            .child(LayoutSpec.of("quest-detail-track",LayoutKind.LEAF).preferred(compact?44:58,18).build())
-            .child(LayoutSpec.of("quest-detail-description",LayoutKind.LEAF).flex(1).build())
-            .child(LayoutSpec.of("quest-detail-prereq",LayoutKind.LEAF).preferred(compact?40:70,18).build());
-        LayoutSpec.Builder tasks=LayoutSpec.of("quest-detail-tasks",LayoutKind.COLUMN).flex(3).padding(new Insets(3,3,3,3)).gap(2)
-            .child(LayoutSpec.of("quest-task-title",LayoutKind.LEAF).preferred(0,12).build());
-        for(int i=0;i<Math.min(6,detail.getTasks().size());i++){
-            QuestCenterVisualModel.TaskRow task=detail.getTasks().get(i);
-            boolean confirmable=task.isConfirmable()&&!task.isComplete();
-            int rowHeight=compact?17:20;
-            LayoutSpec.Builder row=LayoutSpec.of("quest-task-"+i,LayoutKind.ROW).preferred(0,rowHeight).gap(2)
-                .child(LayoutSpec.of("quest-task-name-"+i,LayoutKind.LEAF).flex(2).build())
-                .child(LayoutSpec.of("quest-task-detail-"+i,LayoutKind.LEAF).flex(2).build())
-                .child(LayoutSpec.of("quest-task-progress-"+i,LayoutKind.LEAF).preferred(48,0).build());
-            if(confirmable)row.child(LayoutSpec.of("quest-task-confirm-"+i,LayoutKind.LEAF)
-                .preferred(compact?30:38,0).build());
-            tasks.child(row.build());
+        int small=compact?12:15,normal=compact?14:18;
+        LayoutSpec headingRow=LayoutSpec.of("quest-detail-heading-row",LayoutKind.ROW).preferred(0,normal).gap(2)
+            .child(LayoutSpec.of("quest-detail-back",LayoutKind.LEAF).preferred(compact?28:40,0).build())
+            .child(LayoutSpec.of("quest-detail-icon",LayoutKind.LEAF).preferred(compact?14:18,0).build())
+            .child(LayoutSpec.of("quest-detail-title",LayoutKind.LEAF).flex(1).build())
+            .child(LayoutSpec.of("quest-detail-status",LayoutKind.LEAF).preferred(compact?36:48,0).build())
+            .child(LayoutSpec.of("quest-detail-track",LayoutKind.LEAF).preferred(compact?14:18,0).build()).build();
+        LayoutSpec heading=LayoutSpec.of("quest-detail-heading",LayoutKind.COLUMN).preferred(0,compact?32:38)
+            .padding(new Insets(2,2,2,2)).gap(1).child(headingRow)
+            .child(LayoutSpec.of("quest-detail-meta",LayoutKind.LEAF).preferred(0,small).build()).build();
+        LayoutSpec tabs=LayoutSpec.of("quest-detail-tabs",LayoutKind.ROW).preferred(0,normal).gap(2)
+            .child(LayoutSpec.of("quest-detail-tab-0",LayoutKind.LEAF).flex(1).build())
+            .child(LayoutSpec.of("quest-detail-tab-1",LayoutKind.LEAF).flex(1).build())
+            .child(LayoutSpec.of("quest-detail-tab-2",LayoutKind.LEAF).flex(1).build())
+            .child(LayoutSpec.of("quest-detail-tab-3",LayoutKind.LEAF).flex(1).build()).build();
+        LayoutSpec body;
+        if(detailTab==2){
+            LayoutSpec.Builder prerequisites=LayoutSpec.of("quest-detail-prerequisites",LayoutKind.COLUMN).flex(1)
+                .padding(new Insets(2,2,2,2)).gap(1)
+                .child(LayoutSpec.of("quest-prerequisite-title",LayoutKind.LEAF).preferred(0,small).build());
+            int count=detail.getPrerequisites().size(),pageSize=prerequisitePageSize(),pages=pageCount(count,pageSize);
+            int page=Math.max(0,Math.min(detailPrerequisitePage,pages-1)),from=page*pageSize,to=Math.min(count,from+pageSize);
+            for(int i=from;i<to;i++)prerequisites.child(LayoutSpec.of("quest-prerequisite-"+i,LayoutKind.LEAF).preferred(0,normal).build());
+            if(pages>1)addPageLayout(prerequisites,"quest-prerequisite-pager",compact);
+            if(count==0)prerequisites.child(LayoutSpec.of("quest-prerequisite-empty",LayoutKind.LEAF).flex(1).build());
+            body=prerequisites.build();
+        }else if(detailTab==1){
+            LayoutSpec.Builder rewards=LayoutSpec.of("quest-detail-rewards",LayoutKind.COLUMN).flex(1)
+                .padding(new Insets(2,2,2,2)).gap(1)
+                .child(LayoutSpec.of("quest-reward-title",LayoutKind.LEAF).preferred(0,small).build());
+            int rewardCount=detail.getRewards().size(),rewardPages=pageCount(rewardCount,1);
+            int rewardIndex=Math.max(0,Math.min(detailRewardIndex,rewardCount-1));
+            if(rewardCount>0){
+                rewards.child(LayoutSpec.of("quest-reward-pager",LayoutKind.ROW).preferred(0,normal).gap(2)
+                    .child(LayoutSpec.of("quest-reward-previous",LayoutKind.LEAF).preferred(compact?16:20,0).build())
+                    .child(LayoutSpec.of("quest-reward-page",LayoutKind.LEAF).flex(1).build())
+                    .child(LayoutSpec.of("quest-reward-next",LayoutKind.LEAF).preferred(compact?16:20,0).build()).build());
+                QuestCenterVisualModel.RewardRow reward=detail.getRewards().get(rewardIndex);
+                LayoutSpec.Builder summaryRow=LayoutSpec.of("quest-reward-summary",LayoutKind.ROW).preferred(0,normal).gap(2);
+                if(reward.getItem()!=null)summaryRow.child(LayoutSpec.of("quest-reward-item-"+rewardIndex,LayoutKind.LEAF).preferred(compact?14:18,0).build());
+                summaryRow.child(LayoutSpec.of("quest-reward-name",LayoutKind.LEAF).flex(1).build())
+                    .child(LayoutSpec.of("quest-reward-detail",LayoutKind.LEAF).flex(2).build());rewards.child(summaryRow.build());
+                if(reward.getChoices().isEmpty()&&!reward.getComponents().isEmpty()){
+                    int size=componentPageSize(),pages=pageCount(reward.getComponents().size(),size),page=Math.max(0,Math.min(detailRewardComponentPage,pages-1));
+                    int from=page*size,to=Math.min(reward.getComponents().size(),from+size);
+                    for(int i=from;i<to;i++){int sourceIndex=reward.getComponents().get(i).getSourceIndex();LayoutSpec.Builder row=LayoutSpec.of("quest-reward-components-"+sourceIndex,LayoutKind.ROW).preferred(0,normal).gap(2);if(reward.getComponents().get(i).getItem()!=null)row.child(LayoutSpec.of("quest-reward-components-item-"+sourceIndex,LayoutKind.LEAF).preferred(compact?14:18,0).build());row.child(LayoutSpec.of("quest-reward-components-label-"+sourceIndex,LayoutKind.LEAF).flex(1).build());rewards.child(row.build());}
+                    if(pages>1)addPageLayout(rewards,"quest-reward-components-pager",compact);
+                }
+                if(!reward.getChoices().isEmpty()){
+                    rewards.child(LayoutSpec.of("quest-choice-title",LayoutKind.LEAF).preferred(0,small).build());
+                    int size=choicePageSize(),pages=pageCount(reward.getChoices().size(),size),page=Math.max(0,Math.min(detailChoicePage,pages-1));
+                    int from=page*size,to=Math.min(reward.getChoices().size(),from+size);
+                    for(int i=from;i<to;i++){int sourceIndex=reward.getChoices().get(i).getSourceIndex();LayoutSpec.Builder row=LayoutSpec.of("quest-choice-row-"+rewardIndex+"-"+sourceIndex,LayoutKind.ROW).preferred(0,normal).gap(2);if(reward.getChoices().get(i).getItem()!=null)row.child(LayoutSpec.of("quest-choice-item-"+rewardIndex+"-"+sourceIndex,LayoutKind.LEAF).preferred(compact?14:18,0).build());row.child(LayoutSpec.of("quest-choice-"+rewardIndex+"-"+sourceIndex,LayoutKind.LEAF).flex(1).build());rewards.child(row.build());}
+                    if(pages>1)addPageLayout(rewards,"quest-choice-pager",compact);
+                }
+                rewards.child(LayoutSpec.of("quest-claim",LayoutKind.LEAF).preferred(0,normal).build());
+                if(summary.getState()==QuestCenterVisualModel.QuestState.CLAIMABLE&&hasUnselectedChoice(detail.getRewards()))rewards.child(LayoutSpec.of("quest-claim-random-choice",LayoutKind.LEAF).preferred(0,normal).build());
+            }else rewards.child(LayoutSpec.of("quest-reward-empty",LayoutKind.LEAF).flex(1).build());
+            body=rewards.build();
+        }else if(detailTab==3){
+            int pageSize=descriptionPageSize(),pages=pageCount(descriptionLines.size(),pageSize);
+            LayoutSpec.Builder description=LayoutSpec.of("quest-description-page",LayoutKind.COLUMN).flex(1)
+                .padding(new Insets(2,2,2,2)).gap(1)
+                .child(LayoutSpec.of("quest-description-title",LayoutKind.LEAF).preferred(0,small).build());
+            if(descriptionLines.isEmpty())description.child(LayoutSpec.of("quest-description-empty",LayoutKind.LEAF).flex(1).build());
+            else{
+                description.child(LayoutSpec.of("quest-description-text",LayoutKind.LEAF).flex(1).build());
+                if(pages>1)addPageLayout(description,"quest-description-pager",compact);
+            }
+            body=description.build();
+        }else{
+            LayoutSpec.Builder tasks=LayoutSpec.of("quest-detail-tasks",LayoutKind.COLUMN).flex(1)
+                .padding(new Insets(2,2,2,2)).gap(1)
+                .child(LayoutSpec.of("quest-task-title",LayoutKind.LEAF).preferred(0,small).build());
+            int taskCount=detail.getTasks().size(),taskIndex=Math.max(0,Math.min(detailTaskIndex,taskCount-1));
+            if(taskCount>0){
+                tasks.child(LayoutSpec.of("quest-task-pager",LayoutKind.ROW).preferred(0,normal).gap(2)
+                    .child(LayoutSpec.of("quest-task-previous",LayoutKind.LEAF).preferred(compact?16:20,0).build())
+                    .child(LayoutSpec.of("quest-task-page",LayoutKind.LEAF).flex(1).build())
+                    .child(LayoutSpec.of("quest-task-next",LayoutKind.LEAF).preferred(compact?16:20,0).build()).build());
+                QuestCenterVisualModel.TaskRow task=detail.getTasks().get(taskIndex);
+                tasks.child(LayoutSpec.of("quest-task-name",LayoutKind.LEAF).preferred(0,small).build())
+                    .child(LayoutSpec.of("quest-task-progress",LayoutKind.LEAF).preferred(0,small).build());
+                if(task.getComponents().isEmpty())tasks.child(LayoutSpec.of("quest-task-detail",LayoutKind.LEAF).preferred(0,normal).build());
+                else{
+                    int size=componentPageSize(),pages=pageCount(task.getComponents().size(),size),page=Math.max(0,Math.min(detailTaskComponentPage,pages-1));
+                    int from=page*size,to=Math.min(task.getComponents().size(),from+size);
+                    for(int i=from;i<to;i++){int sourceIndex=task.getComponents().get(i).getSourceIndex();LayoutSpec.Builder row=LayoutSpec.of("quest-task-components-"+sourceIndex,LayoutKind.ROW).preferred(0,normal).gap(2);if(task.getComponents().get(i).getItem()!=null)row.child(LayoutSpec.of("quest-task-components-item-"+sourceIndex,LayoutKind.LEAF).preferred(compact?14:18,0).build());row.child(LayoutSpec.of("quest-task-components-label-"+sourceIndex,LayoutKind.LEAF).flex(1).build());tasks.child(row.build());}
+                    if(pages>1)addPageLayout(tasks,"quest-task-components-pager",compact);
+                }
+                LayoutSpec.Builder actionsRow=LayoutSpec.of("quest-task-actions",LayoutKind.ROW).preferred(0,normal).gap(2);
+                boolean hasActions=false;
+                if(task.isConfirmable()&&!task.isComplete()){actionsRow.child(LayoutSpec.of("quest-task-confirm-"+taskIndex,LayoutKind.LEAF).flex(1).build());hasActions=true;}
+                boolean hasConsumableTasks=false;for(QuestCenterVisualModel.TaskRow value:detail.getTasks())hasConsumableTasks|=value.isSubmittable()&&!value.isComplete();
+                if(hasConsumableTasks){actionsRow.child(LayoutSpec.of("quest-detect-consumptions",LayoutKind.LEAF).flex(1).build());hasActions=true;}
+                if(hasActions)tasks.child(actionsRow.build());
+            }else tasks.child(LayoutSpec.of("quest-task-empty",LayoutKind.LEAF).flex(1).build());
+            body=tasks.build();
         }
-        boolean hasConsumableTasks=false;
-        for(QuestCenterVisualModel.TaskRow task:detail.getTasks())
-            hasConsumableTasks|=task.isSubmittable()&&!task.isComplete();
-        if(hasConsumableTasks)tasks.child(LayoutSpec.of("quest-detect-consumptions",LayoutKind.LEAF)
-            .preferred(0,compact?18:22).build());
-        LayoutSpec.Builder rewards=LayoutSpec.of("quest-detail-rewards",LayoutKind.COLUMN).flex(2).padding(new Insets(3,3,3,3)).gap(2)
-            .child(LayoutSpec.of("quest-reward-title",LayoutKind.LEAF).preferred(0,12).build());
-        for(int i=0;i<Math.min(4,detail.getRewards().size());i++){QuestCenterVisualModel.RewardRow reward=detail.getRewards().get(i);LayoutSpec.Builder row=LayoutSpec.of("quest-reward-"+i,LayoutKind.ROW).preferred(0,compact?18:22).gap(2);if(reward.getItem()!=null)row.child(LayoutSpec.of("quest-reward-item-"+i,LayoutKind.LEAF).preferred(compact?16:20,compact?16:20).build());row.child(LayoutSpec.of("quest-reward-name-"+i,LayoutKind.LEAF).flex(1).build()).child(LayoutSpec.of("quest-reward-detail-"+i,LayoutKind.LEAF).flex(1).build());rewards.child(row.build());for(int optionIndex=0;optionIndex<Math.min(4,reward.getChoices().size());optionIndex++)rewards.child(LayoutSpec.of("quest-choice-"+i+"-"+optionIndex,LayoutKind.LEAF).preferred(0,compact?16:19).build());}
-        rewards.child(LayoutSpec.of("quest-claim",LayoutKind.LEAF).preferred(0,compact?18:22).build());
-        boolean canClaim=summary.getState()==QuestCenterVisualModel.QuestState.CLAIMABLE;
-        boolean hasUnselectedChoice=hasUnselectedChoice(detail.getRewards());
-        if(canClaim&&hasUnselectedChoice)rewards.child(LayoutSpec.of("quest-claim-random-choice",LayoutKind.LEAF)
-            .preferred(0,compact?18:22).build());
-        return LayoutSpec.of("quest-detail",LayoutKind.COLUMN).flex(1).padding(new Insets(3,3,3,3)).gap(3).child(heading.build())
-            .child(LayoutSpec.of("quest-detail-columns",LayoutKind.ROW).flex(1).gap(3).child(tasks.build()).child(rewards.build()).build()).build();
+        return LayoutSpec.of("quest-detail",LayoutKind.COLUMN).flex(1).padding(new Insets(2,2,2,2)).gap(2)
+            .child(heading).child(tabs).child(body).build();
+    }
+
+    private static void addPageLayout(LayoutSpec.Builder parent,String key,boolean compact){
+        parent.child(LayoutSpec.of(key,LayoutKind.ROW).preferred(0,compact?11:14).gap(2)
+            .child(LayoutSpec.of(key+"-previous",LayoutKind.LEAF).preferred(compact?16:20,0).build())
+            .child(LayoutSpec.of(key+"-label",LayoutKind.LEAF).flex(1).build())
+            .child(LayoutSpec.of(key+"-next",LayoutKind.LEAF).preferred(compact?16:20,0).build()).build());
     }
 
     @Override public UiInputNode modalInput(UiNode root,UiContext context){

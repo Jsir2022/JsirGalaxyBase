@@ -61,8 +61,8 @@ public final class TerminalQuestCenterSectionSnapshot {
     public TerminalQuestCenterSectionSnapshot withParticipants(List<Participant> values){return new TerminalQuestCenterSectionSnapshot(this,values,null);}
     public TerminalQuestCenterSectionSnapshot withMessage(String value){return new TerminalQuestCenterSectionSnapshot(this,participants,value);}
     public static TerminalQuestCenterSectionSnapshot unavailable(String message){return new TerminalQuestCenterSectionSnapshot(
-        "UNAVAILABLE",message,View.BROWSE,"","","all","",Collections.<Chapter>emptyList(),0,6,0,
-        Collections.<Quest>emptyList(),0,7,0,null);}
+        "UNAVAILABLE",message,View.BROWSE,"","","all","",Collections.<Chapter>emptyList(),0,4,0,
+        Collections.<Quest>emptyList(),0,4,0,null);}
     private static String text(String value){return value==null?"":value;}
     private static <T> List<T> immutable(List<T> value){return value==null?Collections.<T>emptyList():Collections.unmodifiableList(new ArrayList<T>(value));}
     public String getServiceState(){return serviceState;} public String getMessage(){return message;} public View getView(){return view;}
@@ -96,39 +96,123 @@ public final class TerminalQuestCenterSectionSnapshot {
         public String getId(){return id;}public String getName(){return name;}public int getCompleted(){return completed;}public int getTotal(){return total;}
     }
     public static class Quest {
-        private final String id,chapterId,name,subtitle,state,iconRegistry,iconName;private final int iconMeta,completedTasks,totalTasks;private final boolean tracked;
+        private final String id,chapterId,name,subtitle,state,iconRegistry,iconName,iconNbt;
+        private final int iconMeta,completedTasks,totalTasks;private final boolean tracked;
         public Quest(String id,String chapterId,String name,String subtitle,String state,int completedTasks,int totalTasks,
-            String iconRegistry,int iconMeta,String iconName){this(id,chapterId,name,subtitle,state,completedTasks,totalTasks,iconRegistry,iconMeta,iconName,false);}
+            String iconRegistry,int iconMeta,String iconName){this(id,chapterId,name,subtitle,state,completedTasks,totalTasks,iconRegistry,iconMeta,iconName,false,"");}
         public Quest(String id,String chapterId,String name,String subtitle,String state,int completedTasks,int totalTasks,
-            String iconRegistry,int iconMeta,String iconName,boolean tracked){this.id=text(id);this.chapterId=text(chapterId);this.name=text(name);this.subtitle=text(subtitle);this.state=text(state);this.completedTasks=Math.max(0,completedTasks);this.totalTasks=Math.max(this.completedTasks,totalTasks);this.iconRegistry=text(iconRegistry);this.iconMeta=iconMeta;this.iconName=text(iconName);this.tracked=tracked;}
-        public String getId(){return id;}public String getChapterId(){return chapterId;}public String getName(){return name;}public String getSubtitle(){return subtitle;}public String getState(){return state;}public int getCompletedTasks(){return completedTasks;}public int getTotalTasks(){return totalTasks;}public String getIconRegistry(){return iconRegistry;}public int getIconMeta(){return iconMeta;}public String getIconName(){return iconName;}
+            String iconRegistry,int iconMeta,String iconName,boolean tracked){this(id,chapterId,name,subtitle,state,
+                completedTasks,totalTasks,iconRegistry,iconMeta,iconName,tracked,"");}
+        public Quest(String id,String chapterId,String name,String subtitle,String state,int completedTasks,int totalTasks,
+            String iconRegistry,int iconMeta,String iconName,boolean tracked,String iconNbt){this.id=text(id);
+            this.chapterId=text(chapterId);this.name=text(name);this.subtitle=text(subtitle);this.state=text(state);
+            this.completedTasks=Math.max(0,completedTasks);this.totalTasks=Math.max(this.completedTasks,totalTasks);
+            this.iconRegistry=text(iconRegistry);this.iconMeta=iconMeta;this.iconName=text(iconName);
+            this.tracked=tracked;this.iconNbt=text(iconNbt);}
+        public String getId(){return id;}public String getChapterId(){return chapterId;}public String getName(){return name;}
+        public String getSubtitle(){return subtitle;}public String getState(){return state;}
+        public int getCompletedTasks(){return completedTasks;}public int getTotalTasks(){return totalTasks;}
+        public String getIconRegistry(){return iconRegistry;}public int getIconMeta(){return iconMeta;}
+        public String getIconName(){return iconName;}public String getIconNbt(){return iconNbt;}
         public boolean isTracked(){return tracked;}
     }
     public static final class Detail {
-        private final Quest summary;private final String description,prerequisiteText,repeatText;private final List<Task> tasks;private final List<Reward> rewards;
-        public Detail(Quest summary,String description,String prerequisiteText,String repeatText,List<Task> tasks,List<Reward> rewards){if(summary==null)throw new IllegalArgumentException("summary is required");this.summary=summary;this.description=text(description);this.prerequisiteText=text(prerequisiteText);this.repeatText=text(repeatText);this.tasks=immutable(tasks);this.rewards=immutable(rewards);}
-        public Quest getSummary(){return summary;}public String getDescription(){return description;}public String getPrerequisiteText(){return prerequisiteText;}public String getRepeatText(){return repeatText;}public List<Task> getTasks(){return tasks;}public List<Reward> getRewards(){return rewards;}
+        private final Quest summary;private final String description,prerequisiteText,repeatText;
+        private final List<Task> tasks;private final List<Reward> rewards;private final List<Prerequisite> prerequisites;
+        private final int definitionVersion,cycle;
+        public Detail(Quest summary,String description,String prerequisiteText,String repeatText,List<Task> tasks,List<Reward> rewards){
+            this(summary,description,prerequisiteText,repeatText,tasks,rewards,1,0,Collections.<Prerequisite>emptyList());}
+        public Detail(Quest summary,String description,String prerequisiteText,String repeatText,List<Task> tasks,
+            List<Reward> rewards,int definitionVersion,int cycle,List<Prerequisite> prerequisites){
+            if(summary==null)throw new IllegalArgumentException("summary is required");this.summary=summary;
+            this.description=text(description);this.prerequisiteText=text(prerequisiteText);this.repeatText=text(repeatText);
+            this.tasks=immutable(tasks);this.rewards=immutable(rewards);this.definitionVersion=Math.max(1,definitionVersion);
+            this.cycle=Math.max(0,cycle);this.prerequisites=immutable(prerequisites);}
+        public Quest getSummary(){return summary;}public String getDescription(){return description;}
+        public String getPrerequisiteText(){return prerequisiteText;}public String getRepeatText(){return repeatText;}
+        public List<Task> getTasks(){return tasks;}public List<Reward> getRewards(){return rewards;}
+        public int getDefinitionVersion(){return definitionVersion;}public int getCycle(){return cycle;}
+        public List<Prerequisite> getPrerequisites(){return prerequisites;}
+    }
+    public static final class Prerequisite {
+        private final String id,name,state;private final boolean navigable;
+        public Prerequisite(String id,String name,String state,boolean navigable){this.id=text(id);this.name=text(name);
+            this.state=text(state);this.navigable=navigable;}
+        public String getId(){return id;}public String getName(){return name;}public String getState(){return state;}
+        public boolean isNavigable(){return navigable;}
     }
     public static final class Task {
-        private final String key,label,detail;private final long value,target;private final boolean confirmable,submittable,detectable;
+        private final String key,label,detail,typeId;private final long value,target;
+        private final boolean confirmable,submittable,detectable;private final List<Component> components;
         public Task(String key,String label,String detail,long value,long target){this(key,label,detail,value,target,false,false);}
         public Task(String key,String label,String detail,long value,long target,boolean confirmable){this(key,label,detail,value,target,confirmable,false);}
-        public Task(String key,String label,String detail,long value,long target,boolean confirmable,boolean submittable){this(key,label,detail,value,target,confirmable,submittable,false);}
-        public Task(String key,String label,String detail,long value,long target,boolean confirmable,boolean submittable,boolean detectable){this.key=text(key);this.label=text(label);this.detail=text(detail);this.value=Math.max(0,value);this.target=Math.max(1,target);this.confirmable=confirmable;this.submittable=submittable;this.detectable=detectable;}
-        public String getKey(){return key;}public String getLabel(){return label;}public String getDetail(){return detail;}public long getValue(){return value;}public long getTarget(){return target;}public boolean isConfirmable(){return confirmable;}public boolean isSubmittable(){return submittable;}public boolean isDetectable(){return detectable;}
+        public Task(String key,String label,String detail,long value,long target,boolean confirmable,boolean submittable){
+            this(key,label,detail,value,target,confirmable,submittable,false,"",Collections.<Component>emptyList());}
+        public Task(String key,String label,String detail,long value,long target,boolean confirmable,boolean submittable,
+            boolean detectable){this(key,label,detail,value,target,confirmable,submittable,detectable,"",
+                Collections.<Component>emptyList());}
+        public Task(String key,String label,String detail,long value,long target,boolean confirmable,boolean submittable,
+            boolean detectable,String typeId,List<Component> components){this.key=text(key);this.label=text(label);
+            this.detail=text(detail);this.value=Math.max(0,value);this.target=Math.max(1,target);
+            this.confirmable=confirmable;this.submittable=submittable;this.detectable=detectable;
+            this.typeId=text(typeId);this.components=immutable(components);}
+        public String getKey(){return key;}public String getLabel(){return label;}public String getDetail(){return detail;}
+        public long getValue(){return value;}public long getTarget(){return target;}public boolean isConfirmable(){return confirmable;}
+        public boolean isSubmittable(){return submittable;}public boolean isDetectable(){return detectable;}
+        public String getTypeId(){return typeId;}public List<Component> getComponents(){return components;}
     }
     public static final class Reward {
-        private final String key,label,detail,itemRegistry,itemName;private final int itemMeta;private final long quantity;private final boolean claimable,claimed;
-        private final List<Choice> choices;private final int selectedChoiceIndex;
-        public Reward(String key,String label,String detail,String itemRegistry,int itemMeta,String itemName,long quantity,boolean claimable,boolean claimed){this(key,label,detail,itemRegistry,itemMeta,itemName,quantity,claimable,claimed,Collections.<Choice>emptyList(),-1);}
-        public Reward(String key,String label,String detail,String itemRegistry,int itemMeta,String itemName,long quantity,boolean claimable,boolean claimed,List<Choice> choices,int selectedChoiceIndex){this.key=text(key);this.label=text(label);this.detail=text(detail);this.itemRegistry=text(itemRegistry);this.itemMeta=itemMeta;this.itemName=text(itemName);this.quantity=Math.max(0,quantity);this.claimable=claimable;this.claimed=claimed;this.choices=immutable(choices);this.selectedChoiceIndex=selectedChoiceIndex>=0&&selectedChoiceIndex<this.choices.size()?selectedChoiceIndex:-1;}
-        public String getKey(){return key;}public String getLabel(){return label;}public String getDetail(){return detail;}public String getItemRegistry(){return itemRegistry;}public int getItemMeta(){return itemMeta;}public String getItemName(){return itemName;}public long getQuantity(){return quantity;}public boolean isClaimable(){return claimable;}public boolean isClaimed(){return claimed;}
-        public List<Choice> getChoices(){return choices;}public int getSelectedChoiceIndex(){return selectedChoiceIndex;}public boolean requiresChoice(){return !choices.isEmpty();}
+        private final String key,label,detail,itemRegistry,itemName,typeId,itemNbt;
+        private final int itemMeta;private final long quantity;private final boolean claimable,claimed;
+        private final List<Choice> choices;private final List<Component> components;private final int selectedChoiceIndex;
+        public Reward(String key,String label,String detail,String itemRegistry,int itemMeta,String itemName,long quantity,
+            boolean claimable,boolean claimed){this(key,label,detail,itemRegistry,itemMeta,itemName,quantity,claimable,
+                claimed,Collections.<Choice>emptyList(),-1);}
+        public Reward(String key,String label,String detail,String itemRegistry,int itemMeta,String itemName,long quantity,
+            boolean claimable,boolean claimed,List<Choice> choices,int selectedChoiceIndex){this(key,label,detail,
+                itemRegistry,itemMeta,itemName,quantity,claimable,claimed,choices,selectedChoiceIndex,"",
+                Collections.<Component>emptyList(),"");}
+        public Reward(String key,String label,String detail,String itemRegistry,int itemMeta,String itemName,long quantity,
+            boolean claimable,boolean claimed,List<Choice> choices,int selectedChoiceIndex,String typeId,
+            List<Component> components,String itemNbt){this.key=text(key);this.label=text(label);this.detail=text(detail);
+            this.itemRegistry=text(itemRegistry);this.itemMeta=itemMeta;this.itemName=text(itemName);
+            this.quantity=Math.max(0,quantity);this.claimable=claimable;this.claimed=claimed;
+            this.choices=immutable(choices);this.components=immutable(components);
+            this.selectedChoiceIndex=selectedChoiceIndex<0||selectedChoiceIndex>=32?-1:selectedChoiceIndex;
+            this.typeId=text(typeId);this.itemNbt=text(itemNbt);}
+        public String getKey(){return key;}public String getLabel(){return label;}public String getDetail(){return detail;}
+        public String getItemRegistry(){return itemRegistry;}public int getItemMeta(){return itemMeta;}
+        public String getItemName(){return itemName;}public long getQuantity(){return quantity;}
+        public boolean isClaimable(){return claimable;}public boolean isClaimed(){return claimed;}
+        public List<Choice> getChoices(){return choices;}public int getSelectedChoiceIndex(){return selectedChoiceIndex;}
+        public boolean requiresChoice(){return !choices.isEmpty();}public String getTypeId(){return typeId;}
+        public List<Component> getComponents(){return components;}public String getItemNbt(){return itemNbt;}
     }
     public static final class Choice {
-        private final String itemRegistry,itemName;private final int itemMeta;private final long quantity;
-        public Choice(String itemRegistry,int itemMeta,String itemName,long quantity){this.itemRegistry=text(itemRegistry);this.itemMeta=itemMeta;this.itemName=text(itemName);this.quantity=Math.max(1,quantity);}
-        public String getItemRegistry(){return itemRegistry;}public int getItemMeta(){return itemMeta;}public String getItemName(){return itemName;}public long getQuantity(){return quantity;}
+        private final String itemRegistry,itemName,nbt;private final int itemMeta,sourceIndex;private final long quantity;
+        public Choice(String itemRegistry,int itemMeta,String itemName,long quantity){this(-1,itemRegistry,itemMeta,itemName,quantity,"");}
+        public Choice(int sourceIndex,String itemRegistry,int itemMeta,String itemName,long quantity,String nbt){
+            this.sourceIndex=sourceIndex;this.itemRegistry=text(itemRegistry);this.itemMeta=itemMeta;
+            this.itemName=text(itemName);this.quantity=Math.max(1,quantity);this.nbt=text(nbt);}
+        public int getSourceIndex(){return sourceIndex;}public String getItemRegistry(){return itemRegistry;}
+        public int getItemMeta(){return itemMeta;}public String getItemName(){return itemName;}
+        public long getQuantity(){return quantity;}public String getNbt(){return nbt;}
+    }
+    /** A platform-neutral, source-indexed component of a task/reward vector. */
+    public static final class Component {
+        private final int sourceIndex,metadata;private final String kind,key,identity,displayName,oreDictionary,nbt;
+        private final long quantity,progress,target;
+        public Component(int sourceIndex,String kind,String key,String identity,String displayName,int metadata,
+            long quantity,long progress,long target,String oreDictionary,String nbt){this.sourceIndex=sourceIndex;
+            this.kind=text(kind);this.key=text(key);this.identity=text(identity);this.displayName=text(displayName);
+            this.metadata=metadata;this.quantity=Math.max(0,quantity);this.progress=Math.max(0,progress);
+            this.target=Math.max(0,target);this.oreDictionary=text(oreDictionary);this.nbt=text(nbt);}
+        public int getSourceIndex(){return sourceIndex;}public String getKind(){return kind;}public String getKey(){return key;}
+        public String getIdentity(){return identity;}public String getDisplayName(){return displayName;}
+        public int getMetadata(){return metadata;}public long getQuantity(){return quantity;}
+        public long getProgress(){return progress;}public long getTarget(){return target;}
+        public String getOreDictionary(){return oreDictionary;}public String getNbt(){return nbt;}
+        public boolean isMissing(){return identity.isEmpty();}
     }
     public static final class Management {
         private final List<String> healthRows;

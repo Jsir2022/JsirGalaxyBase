@@ -5,7 +5,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
-import com.jsirgalaxybase.quest.core.QuestBooleanParameter;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
@@ -42,12 +41,39 @@ final class BqTypedJson {
         return value == null || value.isJsonNull() ? fallback : value.getAsLong();
     }
 
+    static int int32(JsonObject parent, String name, int fallback) {
+        JsonElement value = find(parent, name);
+        if (value == null || value.isJsonNull()) return fallback;
+        try {
+            if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber()) {
+                return value.getAsBigDecimal().intValueExact();
+            }
+            if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()) {
+                return Integer.parseInt(value.getAsString().trim());
+            }
+        } catch (RuntimeException invalid) {
+            throw new IllegalArgumentException("BetterQuesting integer property " + name
+                + " must fit a signed 32-bit integer: " + value, invalid);
+        }
+        throw new IllegalArgumentException("BetterQuesting integer property " + name
+            + " must be numeric: " + value);
+    }
+
     static boolean bool(JsonObject parent, String name, boolean fallback) {
         JsonElement value = find(parent, name);
         if (value == null || value.isJsonNull()) return fallback;
-        if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber()) return value.getAsLong() != 0L;
-        String raw = value.getAsString();
-        return QuestBooleanParameter.parse(raw, fallback);
+        if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber()) {
+            try {
+                return value.getAsBigDecimal().toBigIntegerExact().signum() != 0;
+            } catch (ArithmeticException invalid) {
+                throw new IllegalArgumentException("Invalid BetterQuesting boolean property " + name
+                    + "=" + value.getAsString(), invalid);
+            }
+        }
+        String raw = value.getAsString().trim();
+        if ("1".equals(raw) || "true".equalsIgnoreCase(raw)) return true;
+        if ("0".equals(raw) || "false".equalsIgnoreCase(raw)) return false;
+        throw new IllegalArgumentException("Invalid BetterQuesting boolean property " + name + "=" + raw);
     }
 
     static List<JsonObject> indexedObjects(JsonObject parent, String name) {

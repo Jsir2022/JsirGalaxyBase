@@ -1,5 +1,130 @@
 # JsirGalaxyBase Work Log
 
+### 2026-10-13 - N.9.2 固定任务书导入与 Base-only JAR 预检复验
+
+- CodeGraph `status` 为 up-to-date；`impact QuestModule.serverStarting` 覆盖 10 个符号并命中 Quest 启动回归，`impact InstitutionCoreModule.serverStarting` 覆盖 5 个符号并命中 Banking/Market 启动测试，`impact ModuleManager.serverStarting` 覆盖模块分发调用链。确认 `ModBootstrap` 顺序为 Institution Core → Quest；真正的 Quest runtime 需要 Dedicated Server、`bankingPostgresEnabled` 和 `questPostgresReadEnabled` 同时成立，二者共用共享 JDBC。Institution Core 会先创建/校验 Banking、初始化托管账户并尝试市场 runtime；市场初始化失败有 catch/fail-closed，Quest 不因此切换到其它连接。
+- 复验脚本 `scripts/quest-base-only-smoke.sh`，运行目录 `.gradle/codex-quest-base-only-smoke-20261013005734-105810`。Gradle 预热 11 tasks；正式回归/构建 62 个 actionable tasks 全部执行成功，含 Quest Core/Postgres/Importer、UI2 Core/Terminal、根 `test`、`assemble`、`verifyUi2SelfContained`、`verifyUi2QzLicense`。XML 汇总 236 suites、1,159 tests、52 skipped、0 failure、0 error（1,107 执行）；52 个 skip 均为非 Quest 业务模块缺少其独立 PostgreSQL 测试连接（Banking 18、Market 16、ServerTools 7、Land 4、Warehouse 4、ItemPolicy 3）。Quest/BQ 测试无 skip。
+- 全新 internal-only、tmpfs、无宿主端口/数据卷的 PostgreSQL 中，Importer apply 得到 batch `bq-9795d6c7fe71e72e`、来源 SHA-256 `9795d6c7fe71e72e91fed8cdc3dea632ab091ccf040e71707d2dd0d90cd355fc`、3,744 Quest、47 chapters、`applicable=true`、`status=APPLIED`，保留 68 条既有结构警告。Base JAR 只读 preflight 验证 3,791 个实体未变化。该数据库只用于隔离自动 smoke，退出时容器/内网已清理。
+- Runtime JAR `.gradle/codex-quest-base-only-smoke-20261013005734-105810/build/root/libs/jsirgalaxybase-0.0.0-quest-base-only-smoke.jar` SHA-256 `ec370e5eb27982f9694e6e224a8e84fbea382d7eb02edf4e5ab5230db5d762cd`；已审计包含 Quest runtime、provenance/许可声明，不含 BQ importer CLI、BetterQuesting runtime 或 Java2D Demo。报告与 JAR 保留在 ignored run 目录。
+- 运行链审计发现后续 Forge 用库不能只复用纯 Quest schema 测试库：Institution Core 在 Quest 前需要独立新建库内的 Banking 基线 schema以创建托管账户；Quest 再校验 Quest schema 与九项 Quest migrations。市场和 Cluster 是 Banking 打开后会尝试的可选初始化，失败会隔离，不是 Quest 的共享 JDBC 替代品。此结论写回 N.9.2 合同、能力矩阵、开发导航和 README。
+- `.gradle/codex-n92-server` 当前只含独立 `server.properties`，没有 `eula.txt`。未写 `eula=true`、未启动 Forge、未访问玩家文件/生产数据库、未执行生产 DDL、未部署、未改正式开关、未触碰 S1/S2/Lobby。N.9.2-A/C 真实 Forge 测试尚未完成；继续需要用户明确表述已阅读并接受 Minecraft EULA。工作树原有全部改动保留。
+
+### 2026-10-12 - N.9.2 可重复 Quest/Base-only 回归 smoke 收口
+
+- CodeGraph `status` 为 up-to-date；`explore`/`impact QuestModule.serverStarting` 核对 Quest 启动门槛与 10 个影响符号，影响集覆盖 `QuestModuleTest` 及模块启动调用链。当前烟测入口仅执行自动回归和构建，不尝试 Forge 启动。
+- 新增 `scripts/quest-base-only-smoke.sh` 与隔离 Gradle init 脚本：每轮使用唯一 ignored build 输出、临时 Docker internal-only 网络、tmpfs PostgreSQL（无宿主端口/数据卷）、随机临时凭据，以及只读挂载的固定 `DefaultQuests` 与预览字体；退出 trap 只清理本轮精确命名的容器/网络。未调用生产 Compose、服务器或旧的会终止现有进程的本地启动脚本。
+- 为消除离线构建对 Qz 许可证下载的依赖，将 SHA-256 已核验的上游 LGPL 文本随 Base 资源跟踪；`verifyUi2QzLicense` 校验固定提交 URL 对应的哈希，`processResources` 正常打包。烟测不再注入生成文件或跳过许可证准备任务。
+- fresh smoke run `.gradle/codex-quest-base-only-smoke-20261012055500-2328654`：Gradle 预热 11/11 tasks；回归/构建 62/62 actionable tasks 成功。XML 汇总 236 suites、1,159 tests、52 skipped、0 failure、0 error（1,107 未跳过）。52 skip 全属于未提供各自独立数据库连接配置的非 Quest PostgreSQL 集成套件：Banking 18、Market 16、ServerTools 7、Land 4、Warehouse 4、ItemPolicy 3；Quest/BQ 自动测试零 skip。`assemble`、`verifyUi2SelfContained` 和 `verifyUi2QzLicense` 均通过。
+- 运行 JAR `.gradle/codex-quest-base-only-smoke-20261012055500-2328654/build/root/libs/jsirgalaxybase-0.0.0-quest-base-only-smoke.jar`，SHA-256 `ec370e5eb27982f9694e6e224a8e84fbea382d7eb02edf4e5ab5230db5d762cd`。ZIP 内容检查确认没有 BetterQuesting runtime 类、BQ importer 包/Gson CLI 或 Java2D Demo；含许可和第三方声明。`git diff --check` 通过，容器/网络已清理；报告与 JAR 留在 ignored run 目录。
+- 更新 N.9.2 验收合同、能力矩阵、开发导航、README 和本 Worklog。此 smoke 不启动 Minecraft/Forge，不能证明 Mod bootstrap、真实玩家背包/流体、世界奖励存档或停启恢复；这些仍需 EULA 门槛与后续隔离 runtime 才能验证。未部署、未连接生产 DB、未执行生产 DDL、未改 Quest 开关、未触碰 S1/S2/Lobby，所有现存工作树改动均保留。
+
+### 2026-10-12 - N.9.2 隔离运行目录、Quest 自动回归与 EULA 门槛
+
+- 按 N.9.2 合同先核查 CodeGraph 与 Quest 启动调用链。CodeGraph `status` up-to-date；`impact QuestModule.serverStarting` 覆盖 10 个符号和 `QuestModuleTest` 的启停/共享连接分支；`affected` 对 QuestModule、GameplayEventHandler、事实工厂给出 45 个测试文件候选。`QuestModule` 只在 dedicated server、Quest 开关开启且 Institution Core 共享 JDBC 可用时启动；该开关会安装读写运行服务，不是只读模式。
+- 以 ForgeGradle inspection task 实际验证 `runServerWorkingDirectory` 指向全新 ignored `.gradle/codex-n92-server`；JDK 8、`GradleStartServer`、74 个 classpath 条目；筛查到 Base dev JAR 和 Minecraft JAR，未发现 BQ/AE2。随后在 `--network none`、loopback 端口、Quest/Banks 默认关闭、独立目录下尝试 Forge server 启动。Minecraft 显示 EULA 接受提示后退出；本次明确输入 `n`，没有代用户接受。启动未到 Mod bootstrap，没有世界、玩家档案、Quest runtime 或 ModList 验收。严禁自动改 `eula=true`；Forge 启动继续前需用户明确确认接受 EULA。GTNH/AE2 运行兼容性尚无结论。
+- 使用只读挂载的固定 `DefaultQuests` 来源（SHA-256 `9795d6c7fe71e72e91fed8cdc3dea632ab091ccf040e71707d2dd0d90cd355fc`）及本轮新建、内网/tmpfs、无宿主数据卷的隔离 `_it` PostgreSQL，执行 `:galaxy-quest-postgres:test` 61/61、`:galaxy-quest-bq-importer:test` 103/103；固定真实来源 Quest Detect PG 测试 1/1、全量来源迁移 DB 回归 14/14。全工程 `test` 共 236 suites、1,159 tests，52 skipped、0 failures、0 errors，即 1,107 项执行通过；52 个 skip 全是非 Quest 独立业务 PostgreSQL 配置缺失：Banking 18、Market 16、ServerTools 7、Land 4、Warehouse 4、ItemPolicy 3。Quest/BQ 测试无 skip。首次 UI2 Demo 测试因容器缺少预览 CJK 字体失败；把系统 Noto TTC 只读挂载并设置 `UI2_PREVIEW_FONT` 后全量测试通过，字体未进入源码或 JAR。
+- `assemble`、`verifyUi2SelfContained` 通过。运行 JAR `.gradle/codex-n92-build/root/libs/jsirgalaxybase-0.0.0-n92-isolated.jar`，SHA-256 `80bb90b99d781c33eb0ade27611b06d4d2ee2fd3fc5ee6eb1c97f3abb1dcb78f`；含 Base Quest Core、BQ provenance/许可证声明，不含 BQ Importer/CLI、Gson CLI 或 Java2D Demo。出现的 `BqImportedTaskScope` 是 Base 自有类，不是 BQ Mod 类。本次命令用临时 Gradle 参数关闭 CodeStyle/Updater/GitVersion，并排除会联网下载声明文本的任务；既有声明 hash 已核验，不修改正式构建合同。
+- 更新 N.9.2 独立验收合同、唯一能力矩阵、开发导航、阶段路线、README 与本 Worklog，明确 A 部分完成、B 仅自动数据库回归、C/D 和 Base-only Forge runtime 尚未验收。没有部署、生产 DDL、Quest/BQ 开关变更、生产服务/数据库/玩家进度访问、S1/S2/Lobby 操作。测试结束后仅清理本批精确命名的临时 PostgreSQL 容器与内部 Docker 网络；保留既有 N.9.1 容器。没有提交或推送，原工作树改动均保留。
+
+### 2026-10-12 - BQ N.9.2 运行验收目标与环境安全评估
+
+- N.9.1 A–D 自动验收已完成后，按用户“继续完善 BQ 移植和自测”的要求建立 N.9.2 长期目标，范围是 Base-only 隔离 Forge 运行链，不包含生产切换或人工 UI 手感代验。新增 `betterquesting-base-only-runtime-acceptance-2026-10-12.md`，列出启用合同、隔离边界、四个实施阶段与验收矩阵。
+- 只读环境检查发现：`galaxy-gtnh:local` 的 supervisord 配置默认 autostart S1、S2、Lobby、Entrance；不用于测试。`scripts/start-local-test-stack.sh` 会先按项目路径终止现有 Java/Gradle 客户端/服务进程，并启动两客户端及 `run/server`；明确不调用。`galaxy-base:local` 是长期服务边界，也不启动。当前没有 `run/server` 或本地测试客户端目录；只有 N.9.1 临时 PostgreSQL 测试容器仍运行，不复用其数据库。
+- ForgeGradle 项目含 `runServer` 与 `runServerWorkingDirectory` 配置入口；`QuestModule` 需要 Dedicated Server、server cfg 开关及 Institution Core 的共享 Banking JDBC。这个开关会安装查询、动作、事件、消费恢复和奖励投递服务，不是只读运行模式。下一步先证明 Gradle 实际将所有 world/config/log 写入全新 ignored 测试目录，再启动任何 server。
+- 更新 README、开发导航、能力矩阵和 Base-only 阶段路线，当前 N.9.2 状态为“环境安全评估中，Forge 尚未启动”。本轮没有读取 S1/S2/Lobby 配置/玩家数据，没有读生产 `.env`、访问生产数据库、执行任何 DDL，没有启动/停止服务器或更改正式开关；本轮仅文档变更，无新测试，`git diff --check` 待最终复核。
+
+### 2026-10-12 - BQ N.9.1 A–D 自动验收收口
+
+- 按长期目标完成 N.9.1 玩家任务书完整性与隔离初始化自动验收。固定只读 `DefaultQuests` SHA-256 `9795d6c7fe71e72e91fed8cdc3dea632ab091ccf040e71707d2dd0d90cd355fc`，3,744 Quest / 47 章的 definition → server mapper → network codec → platform-neutral VisualModel 全链审计通过；统计 5,620 Task、5,448 Reward、9,529 Task component、9,333 Reward component、3,062 Choice、5,087 prerequisite links。没有读取 `Players` 或旧进度。
+- 真实来源 6 个内容边界 Quest（任务/奖励/Choice/分项/说明/前置最大边界）在 350×193、427×240、620×340 三档共检查 409 帧和 202 次页面转换，DrawList 零布局告警、末项可达。正式 `QuestCenterVisualDocument` 另导出 81 帧 HTML/PNG 画廊，每帧附 `.ui2.txt` 与 `.drawlist.txt`：`.gradle/codex-n91-build/root/reports/bq-quest-book-visual/`。常规终端 252 个视觉场景门禁通过。Java2D 报告不代表 Forge GL、资源包字体或人工交互验收。
+- CodeGraph 在最后一处终端视觉测试改动前发现 1 个 modified file；`sync` 更新 1 file/82 nodes。该测试文件 `affected` 返回自身一项。此前本批 `impact` 已覆盖 `BqBaseOnlyPreflight.verifyInitializedDatabase`（3 symbols）、`BqMigrationMain.main`（2）、`QuestCenterVisualDocument.detail`（2 个定义）；受影响的 importer/Quest/UI2 测试已包含于全量回归。
+- 最终全包 Gradle XML（强制运行时采集）236 suites、1,159 tests、0 skipped、0 failures、0 errors：Core 301、Postgres 61、Importer 103、UI2 Core 42、Lab 2、Terminal 32、Demo 5、root 613。随后 `QuestParticipantManagementVisualTest` 对“未注册物品显示明确占位”改动再次 `--rerun-tasks`，9/9 通过。这个 targeted rerun 覆盖了 `ui2-terminal` 的 XML 输出，所以当前目录的 XML 数会少于先前全量报告；不将其错误报告为测试减少。
+- 强制构建共 58 actionable tasks，均实际执行并成功：Quest Core/Postgres/Importer、UI2 Core/Lab/Terminal/Demo 与 root `test`，另有 `:assemble`、`verifyUi2SelfContained`、`renderGolden`、`verifyTerminalVisuals`、`verifyBqQuestBookVisualCoverage`。全包期间一轮曾漏传固定源变量导致源依赖用例 assumption-skip；另一轮 Java2D 预览容器漏挂外部只读 CJK 字体导致 2 项失败；均已纠正环境并重新强制执行最终矩阵，最终 0 skip/failure/error。Docker 内 Gradle 访问仓库显式传入 JVM proxy 参数；测试字体只读挂载且未进入 JAR。
+- 隔离端到端只在本轮临时 loopback/tmpfs PostgreSQL `jgb_bq_n91_cli_it` 上执行：对只读挂载来源运行 Gradle CLI `apply`，产生 batch `bq-9795d6c7fe71e72e`，创建 3,744 Quest、47 章、3,791 entities；以本轮 Base JAR 执行 read-only preflight 后全部 3,791 entities 为 UNCHANGED，schema/来源批次/章节顺序通过。预检不查询玩家进度、不写 SQL。JAR `.gradle/codex-n91-build/root/libs/jsirgalaxybase-4e39b96-main+4e39b967aa-dirty.jar` SHA-256 `e55f1bb3e772c72a4dc4c1370f2ed92386a2f5275f8bbf5dc93c26b6b6de7988`；`verifyUi2SelfContained` 与 ZIP 内容审计通过，运行包不含 BQ Mod/Importer CLI/Gson/Java2D Demo 类。构建检查点 HEAD `4e39b967aa0f6fbefbd6bb39a0583c22bb058a90`。
+- 已同步 N.9.1 工作包、唯一能力矩阵、开发导航、阶段路线、Base-only 验收、隔离预检文档及 README。最终文档编辑后再次运行 `git diff --check`，通过。工作树保留所有既存 N.8/N.9.1 修改，未 reset/checkout/清理/暂存/提交/推送/部署；没有访问生产数据库、旧玩家进度、执行生产 DDL、启动 Forge/Minecraft 或修改 Quest/BQ 开关。
+- N.9.1 的自动合同到此完成；N.9.2 Base-only Forge/GTNH 新服真实启动、背包/流体、奖励存档、重启恢复及玩家交互尚未开始。不能把本轮自动验收称为 BQ 正式替代或生产切换。
+
+### 2026-10-12 - N.9.1 Choice 分页回归验证与 Luna 交接文档校准
+
+- 本条更新并覆盖同日较早交接记录中“Choice pager 修正尚未复测”的状态。现有代码在 `UiRuntime.frame()` 构建文档树之前调用 `UiDocument.onViewportChanged`，Quest 页面据当前逻辑高度在 build/layout 共用分页尺寸；逐 Task 消耗提交控件已从 UI2 action port/终端桥移除，仍只经 Quest 级 Detect。未改服务器消费消息兼容合同。
+- CodeGraph `status` 为 up-to-date；`impact UiRuntime.frame` 覆盖 53 个符号，含两宿主、Quest UI、布局/输入及 UI 测试；`impact QuestCenterVisualDocument.detailLayout` 覆盖 2 个方法节点；`affected` 对改动 UI/runtime 文件返回 104 个候选测试文件，按直接合同选取下列定向套件。
+- Docker 隔离 Gradle 使用 `.gradle/codex-n91-build/` 输出及 `--rerun-tasks` 强制执行：`UiRuntimeTest` 2、`QuestParticipantManagementVisualTest` 7、`TerminalQuestCenterSnapshotMapperTest` 7、`TerminalQuestCenterCodecTest` 7、`QuestCenterVisualModelAdapterTest` 3，合计 26 项；0 skipped、0 failure/error。包括此前失败的 `unresolvedChoiceOffersExplicitRandomClaimAndRoutesOnlyThatIntent` 现通过。三档长向量测试可导航全部 Task 组件、第五个 Task、Choices 的原始 source index 30 和最后一个前置项。
+- 此证据仅为定向自动回归，不是 N.9.1-A/B 阶段验收。本轮尚未运行完整 Quest 三模块/全工程测试、终端视觉门禁、`assemble`、`verifyUi2SelfContained`、N.9.1-C 固定来源画廊或 N.9.1-D 隔离预检；预计剩余 10～18 个有效开发小时，区间包含真实来源边界或隔离脚本暴露的修复风险。
+- 已同步 N.9.1 工作包、能力矩阵、阶段路线、README 与本 Worklog，并刷新 Luna prompt。文档编辑后 `git diff --check` 通过。工作树保留所有先前 N.8/N.9.1 改动；未连接数据库、未读 Players/生产进度、未执行 DDL、未部署/启动 Minecraft、未改 Quest/BQ 开关、未提交或推送。
+
+### 2026-10-12 - N.9.1 实际进度校准与 Luna 交接
+
+- 按用户要求，将后续执行基准收敛到独立 N.9.1 工作包，并提供可复制给 Luna 的目标 prompt；不继续扩展业务代码。本次更新以隔离 Gradle JUnit XML 和当前源码为证据，不把修复前红灯、未复测代码或 N.8 基线冒充当前验收。
+- 修复后定向报告：`TerminalQuestCenterSnapshotMapperTest` 7 项全通过、`TerminalQuestCenterCodecTest` 7 项全通过、`QuestCenterVisualModelAdapterTest` 3 项全通过。UI2 的 `unresolvedChoiceOffersExplicitRandomClaimAndRoutesOnlyThatIntent` 在固定页大小改动之前失败，原因是 Choice pager 在元素树内但布局 bounds 为 `0×0`；源码随后已修改，但未重跑。故 N.9.1-A/B 均是“实施中、未验收”，C/D 未开始。
+- 当前代码已贯通 Snapshot/Mapper/codec、纯 Java Quest VisualModel/Adapter、typed NBT 物品解析及详情目标/奖励/前置页签分页；主要质量风险是 UI 元素树与布局规格存在重复条件，需先消除并锁定零尺寸/末项不可达回归。另需复核逐 Task 提交控件是否符合用户确认的 Quest 级 Detect 合同。
+- 剩余工作估计 12～18 个有效小时（约 1.5～2.5 个专注工作日）：A 约 2～4h，B 约 4～7h，C 约 3～4h，D 约 2～3h，集成报告约 1～2h；这不是完成百分比。N.1～N.8 为已有自动验收基线；完整玩家任务书整改未通过，N.9.2 Base-only Forge/GTNH 新服运行和人工验收未开始。
+- 文档同步覆盖工作包、能力矩阵、Base-only 阶段路线、开发导航、验收记录和 README；编辑后重新运行 `git diff --check`，通过。未运行新的测试/构建、未连接数据库或访问 Players、未执行 DDL、未部署/启动 Minecraft、未改 Quest/BQ 开关、未提交或推送。
+- 已同步工作包、能力矩阵、Base-only 阶段路线、开发导航、自动验收记录和 README。N.8/N.9.1 未提交工作树原样保留。文档整理未运行新测试/构建、未连接数据库/访问 Players、未执行 DDL、未部署/启动 Minecraft、未改 Quest/BQ 开关、未提交或推送；`git diff --check` 为文档编辑前检查，编辑后需再次执行。
+
+### 2026-10-12 - N.9.1 A 阶段回归复现与未验收代码交接
+
+- 用户决定后续以独立任务文档为执行依据，并将实现交由 Luna；本轮停止继续扩展代码，先把任务状态、边界和可复制 prompt 与当前工作树对齐。
+- 修复前在隔离 Gradle build 输出 `.gradle/codex-n91-build/` 下运行 `:test --tests '*TerminalQuestCenterSnapshotMapperTest'`：7 项，4 项通过、3 项失败。失败分别是多组件目标/奖励丢失、Choice 原始槽位被压缩、typed Quest 图标被丢弃；这是预期红灯复现，不是当前代码的通过证据。首次尝试因受保护旧 build 目录权限无法写入，未改权限/删除旧产物，随后使用忽略目录中的隔离 build init script。
+- 红灯后工作树已有 N.9.1 A 部分改动：扩展 `TerminalQuestCenterSectionSnapshot`（组件向量、NBT、Choice 原始索引、版本/周期/前置值对象）、`TerminalQuestCenterSnapshotMapper`（多组件目标/奖励与 typed icon 映射）及 `OpenTerminalApprovedMessage`（受限详情网络编码）。纯 Java VisualModel、Minecraft NativeItemBridge/UI 页面尚未接线；当前改动没有完成后的编译、codec round-trip 或定向测试结果，故 A 仍为“实施中、未验收”，不得宣称修复通过。
+- CodeGraph 已用于查看 `TerminalQuestCenterSnapshotMapper.detail`、`TerminalQuestCenterSectionSnapshot.Component`、`OpenTerminalApprovedMessage` 和 UI2 Quest Center 消费链；后续这些源文件仍有索引同步需求，下一执行者应先运行 `status/sync`，再按 `impact/affected` 选择 Mapper、codec、UI2 模型与视觉测试。
+- 更新 N.9.1 工作包、唯一能力矩阵、开发导航、阶段路线、验收文档入口和 README。A 部分已有代码但未验证；B 页面可达、C 固定来源画廊/审计、D 隔离初始化预检均未开始。原完整工作量估计 15～21 有效小时，当前剩余暂估 12～18 小时，待 A 的 codec/model 绿灯后复核。
+- 本条不运行新的测试/构建，不访问数据库，不执行 DDL，不部署、不启动 Minecraft/Forge，不改 Quest/BQ 开关，不提交或推送。现存 N.8 和 N.9.1 工作树变更均保留；Luna prompt 要求继续当前 dirty tree，不重置、不覆盖、不重复造实现。
+
+### 2026-10-12 - BQ 玩家端完整性复评与 N.9.1 两天任务文档
+
+- 用户确认接下来两天先完成玩家任务书内容完整性整改与隔离初始化准备，并要求交给 Luna 按文档实施。新增 `betterquesting-player-book-completeness-work-package-2026-10-12.md`，A 展示合同、B 内容/输入可达性、C 固定来源审计/视觉、D 隔离预检均标为未开始，预计 15～21 有效开发小时。文末包含可复制目标 prompt；本条仅记录任务文档完成，未实施代码。
+- 只读复核当前源码与固定 DefaultQuests：18 个 Quest 超过 6 Task 上限、22 个 Quest 超过 4 Reward 上限、70 组 Choice 超过 4 项上限；最大 12/22/16。1,486 个多物品 Item Reward、1,579 个多物品 Task 没有完整分项显示；3,744 typed JSON icon 被现有 Mapper 过滤。1,968 个说明超过 200 字符，最长 5,523；搜索为 Label，前置只给数量。上述为内容/可达性缺口，不是后端定义被删除或奖励处理器只发首件的证据。
+- CodeGraph status up-to-date；query 定位 QuestModule/Quest 页面/事件入口，`impact TerminalQuestCenterSnapshotMapper.detail` 4 个符号、`QuestCenterVisualDocument.detail` 方法 2 个。核对现有 XML 为 1,143 项、52 skip、0 failure/error；本次没有重新运行测试。N.8 原有语义矩阵证据保留，N.4 的自动验收明确限于原入口/健康页/有限视觉，不再被解释为完整任务书产品已通过。
+- 更新开发导航、README、能力矩阵、活动路线和验收记录：下一入口统一为 N.9.1；N.9.2 真实 Forge/玩家验收仍未开始。不读取 Players/生产库，不执行生产 DDL，不部署，不启动客户端或 Forge server，不改变 Quest/BQ 开关，不提交或推送。文档链接与 `git diff --check` 在本次收口检查；既有工作树改动保留。
+
+### 2026-10-12 - BQ N.8 固定来源语义矩阵自动验收收口
+
+- 完成当前 N.8 长期目标。固定 S2 `DefaultQuests` 只读挂载并校验 SHA-256 `9795d6c7fe71e72e91fed8cdc3dea632ab091ccf040e71707d2dd0d90cd355fc`；不读取 Players/旧进度。10 项数据驱动矩阵覆盖所有实际 Task/Reward 类型、布尔 profile、数值选项和 Retrieval 系列全部 distinct Item Count；保持 PLAYER、PostgreSQL 权威和 Base 自包含合同。
+- 新增来源画像的隔离 PG Quest Detect 测试：实际导入并发布两种 consuming Retrieval 和唯一 consuming Fluid profile，经服务端 Quest Detect/ConsumptionRequestAuthorizer 生成请求、确认提交并持久化 PLAYER 进度；ConsumptionPort 在该 PG 测试中是明确的测试替身。另新增根回归，把固定来源 Retrieval 的授权请求交给实际 Minecraft `ItemStack` matcher/扣除规划器，并在测试后清理注册表污染。
+- 固定来源 Item/Choice/XP 奖励各自到达真实 Base Minecraft delivery handler，验证实体数量/经验、持久标记和重复交付不重复；固定来源 Quest Completion 奖励通过实际 PG handler 完成目标 Quest，重放不重复创建权益。此前数据驱动边界发现并修复的 int32 小数截断/越界回绕仍由 importer 回归锁定。
+- CodeGraph 起始 `status` 有 3 个待同步文件；`sync` 更新 3 文件/371 nodes，后续 root matcher 测试再同步 1 文件/61 nodes，最终 up-to-date。`impact`：`BqStandardCodec.rewardParameters` 8 符号、`ConsumptionRequestAuthorizer.planQuestDetect` 12、`MinecraftItemRewardDeliveryHandler.deliver` 21、`MinecraftPlayerConsumptionPort.planItems` 8；`affected` 收敛为 5 个相关测试文件。
+- Docker 隔离验收全量 XML 共 1,143 项，1,091 项执行通过、52 项非 Quest 数据库配置 assumption-skip、0 failure/error。Quest 模块 Core 299、Postgres 61、Importer 99，共 459 项全执行通过。`:ui2-demo:verifyTerminalVisuals` 检查 252 场景；`assemble`、`verifyUi2SelfContained`、Golden 导出成功；`git diff --check` 通过。初次全量之前曾因缺少外部只读 CJK 预览字体失败 2 个 Java2D 测试，挂载宿主字体后全量通过；字体没有进入仓库或 JAR。
+- 本地 JAR `.gradle/codex-n8-detect-build-20261012/root/libs/jsirgalaxybase-4e39b96-main+4e39b967aa-dirty.jar` SHA-256 `c13f112703b3cb85d7f39d2715509d2a82724df6256f915aea321c942b4463c5`，仅为测试制品，未部署。自包含检查通过；包内只保留来源/许可证元数据及 Base 自身 Quest 代码，没有 BetterQuesting Mod 类、Importer CLI/Gson 或 Java2D Demo 运行类。
+- 临时 PostgreSQL `jgb-bq-n8-pg-20261012` 使用 512 MiB tmpfs、无宿主数据卷，测试后已删除。未连接生产数据库、访问 Players、执行生产 DDL、部署、启用 Quest 或停用 BetterQuesting。N.8 自动验收已完成；下一阶段 N.9 是无 BQ 的 Base-only 新服真实运行验收，需单独准备隔离环境和玩家交互签收，不能由本轮自动测试代签。
+
+### 2026-10-12 - BQ N.8 第一轮真实参数画像矩阵与全工程回归
+
+- 按当前长期目标继续固定来源参数语义符合性验证。新增 `BqRuntimeBehaviorProfileMatrixTest`，在不嵌入 Quest/玩家 ID 的前提下，用固定来源 SHA 和匿名频次锁定真实画像；10 项矩阵覆盖 Retrieval/Optional Retrieval/Crafting/Hunt/Location/Meeting/Fluid/Block Break/Checkbox 及四类 Reward。对全部观察到的 Hunt required、Location dimension、Fluid component amount 运行 importer→Core evaluator 边界测试；验证 consuming Retrieval/Fluid 只接受已提交消费事实、非消耗走库存快照、NBT/subtype、groupDetect 和 Block meta 通配。逐项边界仍有明确缺口，见 N.8 文档。
+- CodeGraph 已同步且 up-to-date。`impact BqStandardCodec.canonicalizeIntegerOptions` 14 个符号、`impact BqMigrationPlanner.validateIntegerOptions` 4 个、`impact BqBehaviorInventory.requireRuntimeReady` 20 个；`affected` 对实际改动文件给出 26 个候选测试类，直接验证项与完整 Quest 模块均纳入。本轮三个 Quest 模块全量强制重跑。
+- 隔离 PostgreSQL 使用临时容器 `jgb-bq-n8-pg-20261012`，loopback `127.0.0.1:55436`，tmpfs、无宿主数据卷；仅测试用户/库。固定 DefaultQuests 挂载为只读；没有读取 Players 或任何进度。Core 299、Postgres 61、Importer 98，共 458 项全执行通过，0 skipped/failure/error；其中 Importer 的固定来源 profile 测试使用了真实目录与 hash。
+- 根 `test assemble verifyUi2SelfContained` 首次因开发容器没有挂载外部 CJK 预览字体而在 `ui2-demo` 两项 PNG 测试失败；按既定测试合同只读挂载宿主 `/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf` 并设置 `UI2_PREVIEW_FONT` 后重跑成功。最终 XML 汇总 1,138 项、1,086 非跳过、52 个非 Quest 测试 assumption-skip、0 failure/error；跳过来自缺少独立测试数据库配置的 Bank/Market/Land/ServerTools/Warehouse/ItemPolicy。Forge 编译、`assemble` 与 `verifyUi2SelfContained` 均通过。
+- 本地运行 JAR `.gradle/codex-n8-build/root/libs/jsirgalaxybase-4e39b96-main+4e39b967aa-dirty.jar` SHA-256 `cff326d104032fcc0ee72f216ce02136fe53b11daa2aabd8b0cc004d74f22b4a`。该 JAR 仅为本地检查点，未部署；生成时源码内容与当前已测代码一致，后续只改了文档。
+- 随后扩展同一固定来源测试：对 Retrieval 5,539、Optional Retrieval 3,274、Crafting 179 个需求的全部 distinct Count 值逐值构造 importer 任务并运行对应 evaluator，验证阈值边界；`BqRuntimeBehaviorProfileMatrixTest` 仍为 10 项，类内逐值循环新增了覆盖。
+- 最终再跑固定来源矩阵类 10 项及 Importer 全套 98 项均通过；`test assemble verifyUi2SelfContained` 重跑成功（55 actionable tasks，2 executed、53 up-to-date）。全工程报告仍为 1,138 项、1,086 非跳过、52 assumption-skip、0 failure/error；Forge/Mod 构建和自包含门禁通过。本地 JAR SHA 未因测试代码变化而改变。
+- 最终 CodeGraph `sync` 更新该矩阵测试 1 个文件/80 nodes，`status` up-to-date；`affected` 为 26 个候选测试文件。`git diff --check` 通过。已确认隔离 PG 容器仅使用 512 MiB tmpfs、无数据卷，测试结束后删除并确认不存在。
+- N.8 尚未完成：固定来源画像与 Quest 级 Detect、奖励交付、服务端授权仍未组合成一条端到端数据驱动链；随后才是 Base-only 新服运行验收。下一步继续补这些自动边界，完成前不推进生产/新服验收，不部署、不执行生产 DDL、不启用 Quest，也不改变 PLAYER、奖励、旧 Party 或职业合同。
+
+### 2026-10-12 - BQ N.8 扩展 int32 字段合同与固定来源复验
+
+- 在首轮嵌套 Item/Fluid/Block 字段修复之外，继续依据 GTNH 安装包的 BQ 3.7.15-GTNH 类字段签名，将 Task/Reward 索引、Quest `repeatTime`、QuestLine 坐标/尺寸、Hunt `required`、Location 整数坐标/维度/范围、Meeting `amount/range` 和 XP Reward `amount` 改为 exact signed-int 解析；能力 Registry 机器化列出受支持的整数选项键，避免未来加字段时再次隐式窄化。
+- CodeGraph 同步当前 importer/测试改动；`impact BqRuntimeCapabilityRegistry.taskIntegerOptionKeys` 命中 9 个符号，`affected` 给出 25 个候选测试文件。Docker 无网络/无数据库环境下强制运行五个 Importer 定向类：定义 10、章节 4、标准 Codec 6、行为清单 12、Registry 3，共 35 项，0 skipped/failure/error；`git diff --check` 通过。
+- 固定 S2 `DefaultQuests` 仅以 `:ro` 挂载，重跑 `behaviorInventory` 成功，保留来源 SHA `9795d6c7fe71e72e91fed8cdc3dea632ab091ccf040e71707d2dd0d90cd355fc` 与 3,744 Quest/5,620 Task/5,448 Reward/47 章。匿名 profile 数量确认 Retrieval 6 组、Optional Retrieval 4 组、Crafting/Hunt/Fluid 各 3 组；完整频次见 N.8 阶段文档。未读取 Players 或连接数据库。
+- 为核对 BQ 源字段/执行入口，对本机安装的 `BetterQuesting-3.7.15-GTNH.jar` 做只读 `jar/javap` 检查，SHA-256 `9f72317dda06cd883109e9852f2536625412e874c39aa0cb8b70663b716bdbb5`；未提取/复制代码或改动服务进程、Mod 文件。下一步仍是 profile→evaluator/Detect/reward 的逐项差异测试与隔离 PostgreSQL 证据，N.8 未完成。
+
+### 2026-10-12 - BQ N.8 参数语义符合性启动：整数值域截断修复
+
+- N.7 自动门禁完成后建立 N.8 长期目标，方向是把固定 `DefaultQuests` 的每类真实配置画像映射到 BQ 源码规则、Base importer/evaluator/reward 与服务端链路，最终以数据驱动回归收口；本条记录的是启动，不代表 N.8 完成。
+- CodeGraph 起始 status up-to-date；`explore` 检查 `BqStandardCodec`、`BqTypedJson`、`InventorySnapshotTaskEvaluator`、`QuestEvaluationPlanner`、`RewardDeliveryRouter`。同步 3 个 Java 文件后，`impact BqTypedJson.int32` 为 9 个符号、`impact BqStandardCodec.items` 为 9 个符号；`affected` 给出 24 个候选测试文件，定向选择 Importer `BqStandardCodecTest`。
+- 发现 Item Count/Damage、Fluid Amount、Block meta/amount 与交互物品/方块过滤字段通过 `long` 直接窄化到 int；越界会静默回绕，小数被 Gson `getAsLong()` 转为 Long 时可能截断。新增 `BqTypedJson.int32` 精确解析，并在上述 BQ 32-bit 字段使用，分数/超范围输入 fail-closed；未改变固定来源中的合法值，也未触碰玩家进度或业务合同。
+- Docker 隔离构建只挂载项目、开发 Gradle cache 和专用 project cache；不加载 Compose `.env`、没有数据库环境变量。桥接网络无法访问本机代理，改用既有安全路径的 host 网络连接本机 7892 代理；未改代理服务。仓库 `galaxy-quest-postgres/build/resources/main/com` 有权限保护，未 chmod；通过忽略目录中的 Gradle init script 将 build 输出隔离到 `.gradle/codex-n8-build`。
+- `:galaxy-quest-bq-importer:test --tests '*BqStandardCodecTest' --rerun-tasks` 通过，8 actionable tasks 全执行；JUnit XML 为 6 tests、0 skipped/failure/error。另将 S2 `DefaultQuests` 精确目录只读挂载，完整 `behaviorInventory` 成功：来源 hash 不变、3,744 Quest/47 章、5,620 Task/5,448 Reward、applicable=true，仅 64 个未放置与 4 个 seeded XOR 警告。未读取 Players、连接 PostgreSQL或写入来源数据。
+- 复扫暴露旧进度记录计数错误：`globalShare=true` 实为 2,494 个 Quest，不是 2,442；已更正阶段计划、验收文档与 N.7 摘要。N.8 后续仍需把匿名 boolean/numeric/NBT profiles 映射到真实 runtime 链并通过隔离 PostgreSQL，不得将当前解析成功宣称为行为等价。
+
+### 2026-10-12 - BQ N.7 参数审计门禁与自动验收收口
+
+- 固定只读来源 `DefaultQuests` SHA-256 `9795d6c7fe71e72e91fed8cdc3dea632ab091ccf040e71707d2dd0d90cd355fc`：3,744 Quest、47 章、5,620 Task occurrence、5,448 Reward occurrence。只读取定义目录，没有读取 `Players`、旧玩家进度、领取记录或 Party 数据。9 类 Task/4 类 Reward 的实际参数键和值画像写入 Base-only 验收文档。
+- CodeGraph 起始 status 为 up-to-date；对 `BqQuestDefinitionImporter`、`BqMigrationPlanner`、`BqBehaviorInventory` 核查 impact；同步 6 个 Java 文件后对 importer 变更执行 affected，24 个相关测试候选用于选择回归范围。
+- 生产代码变化限于离线导入/发布门禁：按类型登记允许键，未知键或 invalid boolean flag 阻断 apply；非规范布尔、分数布尔拒绝；未知 visibility 拒绝静默默认；XP 缺省 amount 保持 BQ 整数读取的 0 默认，负值/非法/越界阻断；QuestCompletion 缺失目标和自引用阻断。未改变 Quest 个人进度、Party、奖励策略或数据库 schema。
+- 回归新增覆盖上述边界、运行能力注册与固定类型集合一致。Importer 全量在 loopback 临时 PostgreSQL 16 上运行 81 项，0 skipped/failure/error；全工程报告 1,121 项、1,069 执行、52 环境 assumption-skip、0 failure/error。52 skip 为 Bank 18、Market 15、Land 5、ServerTools 7、Warehouse 4、ItemPolicy 3 的独立数据库配置缺失；Quest 模块均未跳过。`assemble`、`verifyUi2SelfContained`、`:ui2-demo:renderGolden`、`:ui2-demo:verifyTerminalVisuals` 通过，252 个正式终端快照通过；`git diff --check` 在收口前通过。
+- 最终运行 JAR `.gradle/codex-r2-confirmed-build/root/libs/jsirgalaxybase-4e39b96-main+4e39b967aa-dirty.jar`，SHA-256 `c13f112703b3cb85d7f39d2715509d2a82724df6256f915aea321c942b4463c5`。ZIP 排除扫描未发现 BetterQuesting/Importer/Gson/Demo 运行类；仅许可证文本保留。
+- 自动门禁只证明类型、参数键和值格式和被测结构约束，不代表所有实际参数组合已与 BQ 运行语义逐项等价。PLAYER 是当前明确合同；固定 `DefaultQuests` 中 2,494 个旧定义 `globalShare=true` 不被迁移为共享。N.8 正在建立数据驱动语义符合性矩阵；之后才是新服 Forge/玩家人工验收。
+- 使用临时 `jgb-bq-n7-it` PostgreSQL 容器和仅测试 schema；未连接生产库、未读取玩家进度、未执行生产 DDL、未部署或更改 Quest/BQ 开关。验收后停止临时容器。N.7 代码/文档尚未提交、未推送。
+
 ### 2026-10-12 - BQ N.6 Base 运行组合接线自动验收完成
 
 - `QuestModule` 现在通过独立 `createRewardDeliveryHandlers` 生成列表，controller 和测试共用同一生产工厂。`QuestModuleTest` 验证真实启动类型注册包含九类导入 Task、Quest runtime 启用时注册 gameplay 处理器，并对实际组装的六个 Reward handler 建立唯一 `RewardDeliveryRouter`，覆盖 GTNH 的 item/choice/questcompletion/xp 四种。
@@ -5694,3 +5819,9 @@
 - 继续检查 DefaultQuests 实际使用的 QuestCompletion 奖励：BQ `RewardQuestCompletion.claimReward0` 对缺目标、无 QuestCache 或无目标 UUID 是 no-op；目标已经对当前玩家完成时不重复完成；否则以该玩家身份设置目标完成并标记客户端 QuestCache dirty。Base 生产链为 entitlement handler → `JdbcQuestCompletionRewardPort`，在事务中解析目标已发布版本、解析目标 scope/参与成员、实施“曾完成”闩锁、创建目标 Task 完成态并插入目标奖励权益。CodeGraph `impact JdbcQuestCompletionRewardPort.complete` 命中接口、handler 和 4 个 PostgreSQL 用例（目标原子完成、仅接收玩家、重复周期不重做、目标 scope/成员冻结）；`affected` 返回 49 个宽测试候选。现有测试覆盖合成 definitions 的数据库语义，尚非真实 BQ `QuestCache`/Forge 或 DefaultQuests 全量影子验证；未发现可据此安全改写的当前行为差异。
 - 本轮环境验证：Gradle `:galaxy-quest-core:test --rerun-tasks` 在测试启动前因构建要求 JDK 25、Foojay toolchain 下载不可用而终止；这不是测试失败。随后用 JDK 17 对 Core 主/测试源码执行 `javac --release 8`，使用缓存的 JUnit 4.13.2/hamcrest 运行 62 个测试类、290 项，结果 `OK (290 tests)`，0 failure/error。该直接 JUnit 路径不是根 Forge/Gradle、PostgreSQL、assemble 或自包含验收。
 - 本轮只作源码/CodeGraph 审计及文档更正，不修改生产 Java、数据库合同或配置；继续不读取玩家进度/生产数据库，不执行 DDL、部署、启用 Quest、停用 BQ 或操作 S1/S2。R.2.19 事实重试归属与活动 Detect 遇新定义发布的恢复策略仍待用户选择，M.2 继续 BLOCKED。
+### 2026-10-12 - N.9.1 工作包与 Luna 交接状态校准
+
+- 按用户要求以独立 N.9.1 工作包作为后续执行合同，并准备可直接交给 Luna 的长期目标 prompt。复核当前能力矩阵、开发导航、Base-only 验收记录与工作包，统一说明 N.8 是自动验收基线、N.9.1 功能尚未实现、N.9.2 真实 Forge/GTNH 运行仍未开始。
+- 工作树中 `TerminalQuestCenterSnapshotMapperTest.java` 有 3 条新回归草稿（多组件任务/奖励、Choice 原始槽位、typed Quest 图标）；本轮没有执行这些测试，也没有相关功能代码修复。因此它们不作为已复现缺陷或完成证据，后续执行者必须先验证失败原因。其余既有 N.8 未提交改动均保留，不据此推断 N.9.1 进度。
+- 更新独立工作包、唯一能力矩阵、开发导航、阶段路线、验收文档索引与 Worklog，明确当前状态、脏工作树保护和交接起点。此轮为文档/交接整理，不运行测试、不访问数据库、不执行 DDL、不部署、不启动游戏、不改 Quest/BQ 开关，也不提交或推送。
+- Luna 目标 prompt：按 `docs/betterquesting-player-book-completeness-work-package-2026-10-12.md` 实施 N.9.1 A～D；先保留脏工作树并确认三条回归草稿的预期失败，再依次完成内容合同、UI 可达性、真实来源视觉审计和隔离初始化预检。保持 PLAYER/PostgreSQL/现有奖励与检测合同及全部操作边界，按证据更新文档并执行工作包列出的自动验收；未验证项不得标完成。

@@ -1209,8 +1209,9 @@ public final class TerminalService {
             ||actionType==TerminalActionType.QUEST_ADMIN_PUBLISH||actionType==TerminalActionType.QUEST_ADMIN_RETIRE
             ||actionType==TerminalActionType.QUEST_ADMIN_BATCH_RETIRE)return buildQuestManagementSnapshot(authenticatedPlayerId,
                 authenticatedPlayerName,safeIntent,actionType);
-        QuestCenterPageRequest request=new QuestCenterPageRequest(safeIntent.getChapterId(),safeIntent.getFilter(),
-            safeIntent.getQuery(),safeIntent.getChapterPage(),6,safeIntent.getQuestPage(),7);
+        String detailQuestId=actionType==TerminalActionType.QUEST_BACK?"":safeIntent.getQuestId();
+        QuestCenterPageRequest request=new QuestCenterPageRequest(safeIntent.getChapterId(),detailQuestId,
+            safeIntent.getFilter(),safeIntent.getQuery(),safeIntent.getChapterPage(),4,safeIntent.getQuestPage(),4);
         ParticipantId participant=ParticipantId.player(authenticatedPlayerId);
         String message=participantSummary(authenticatedPlayerId);
         if(actionType==TerminalActionType.QUEST_CLAIM){
